@@ -1,0 +1,139 @@
+{-# language DataKinds #-}
+{-# language GADTs #-}
+{-# language OverloadedStrings #-}
+{-# language StandaloneDeriving #-}
+{-# language KindSignatures #-}
+{-# language LambdaCase #-}
+{-# language PatternSynonyms #-}
+{-# language FlexibleInstances #-}
+
+-- Name ideas:
+-- Interplanetary
+--   * Evaluation Format
+--   * Computation
+
+module Tower.Genesis where
+
+import Data.Map (Map)
+import qualified Data.Map as Map
+import Data.String
+import Data.Text (Text)
+import Data.Vector (Vector, (!?))
+
+data LocationType = Nominal | Positional | Atomic
+
+data Location :: LocationType -> * where
+  Name :: Text -> Location 'Nominal
+  Index :: Int -> Location 'Positional
+  Atom :: Location 'Atomic
+
+deriving instance Eq (Location a)
+deriving instance Show (Location a)
+
+instance IsString (Location 'Nominal) where
+  fromString = Name . fromString
+
+instance Num (Location 'Positional) where
+  fromInteger = Index . fromInteger
+
+data Domain :: LocationType -> * where
+  NominalDomain :: Map Text GenesisTerm -> Domain 'Nominal
+
+  PositionalDomain :: Vector GenesisTerm -> Domain 'Positional
+
+  AtomicDomain :: GenesisTerm -> Domain 'Atomic
+
+deriving instance Show (Domain pos)
+
+domainLookup :: Domain pos1 -> Location pos2 -> Maybe GenesisTerm
+domainLookup (NominalDomain dom) (Name name) = Map.lookup name dom
+domainLookup (PositionalDomain vec) (Index ix) = vec !? ix
+domainLookup (AtomicDomain it) Atom = Just it
+domainLookup _ _ = Nothing
+
+mapDomain :: (GenesisTerm -> GenesisTerm) -> Domain pos -> Domain pos
+mapDomain f = \case
+  NominalDomain dom -> NominalDomain $ f <$> dom
+  PositionalDomain vec -> PositionalDomain $ f <$> vec
+  AtomicDomain it -> AtomicDomain (f it)
+
+nominalDomain' :: [(Text, GenesisTerm)] -> Domain 'Nominal
+nominalDomain' = NominalDomain . Map.fromList
+
+-- TODO better name
+data SumProd = Additive | Multiplicative
+
+type MultiHash = ()
+
+data GenesisTerm :: * where
+
+  Computation :: GenesisValue l sumprod
+              -> GenesisCovalue l sumprod
+              -> GenesisTerm
+
+  Value       :: GenesisValue pos sumprod
+              -> GenesisTerm
+
+  Covalue     :: GenesisCovalue pos sumprod
+              -> GenesisTerm
+
+  Bound       :: Int          -- ^ level
+              -> Location pos -- ^ position with that level
+              -> GenesisTerm
+
+  Quote       :: GenesisTerm -> GenesisTerm
+
+  Splice      :: GenesisTerm -> GenesisTerm
+
+  -- TODO: we might also want a dynamic here. so we can actually access this
+  -- external value.
+  External    :: MultiHash -> GenesisTerm
+
+  -- Let
+  --
+  -- What language-level support do patches require? In a surprising twist,
+  -- maybe none!
+
+-- deriving instance Eq GenesisTerm
+deriving instance Show GenesisTerm
+
+-- A value is a sum or a product
+--
+-- A @GenesisValue pos sumprod@:
+-- * Is itself indexed by @pos@
+-- * Is a sum or product as decided by @sumprod@
+data GenesisValue :: LocationType -> SumProd -> * where
+  Sum     :: Location pos
+          -> GenesisTerm
+          -> GenesisValue pos 'Additive
+
+  Product :: Domain pos
+          -> GenesisValue pos 'Multiplicative
+
+deriving instance Show (GenesisValue pos sumprod)
+
+pattern Sum' :: Location pos -> GenesisTerm -> GenesisTerm
+pattern Sum' loc tm = Value (Sum loc tm)
+
+pattern Product' :: Domain pos -> GenesisTerm
+pattern Product' dom = Value (Product dom)
+
+-- A covalue is a case or pattern match
+--
+-- A @GenesisCovalue sumprod@
+-- * Is itself indexed by @pos@
+-- * Is a sum or product as decided by @sumprod@
+data GenesisCovalue :: LocationType -> SumProd -> * where
+  Case  :: Domain pos
+        -> GenesisCovalue pos 'Additive
+
+  Match :: GenesisTerm
+        -> GenesisCovalue pos 'Multiplicative
+
+deriving instance Show (GenesisCovalue pos sumprod)
+
+pattern Case' :: Domain pos -> GenesisTerm
+pattern Case' dom = Covalue (Case dom)
+
+pattern Match' :: GenesisTerm -> GenesisTerm
+pattern Match' tm = Covalue (Match tm)
