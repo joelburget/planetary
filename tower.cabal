@@ -19,7 +19,7 @@ executable tower
   main-is:             Main.hs
   other-modules: Tower.Genesis, Tower.Eval, Tower.Meta, Tower.StrNat
   -- other-extensions:
-  build-depends:       base >=4.9 && <4.10, vector, containers, text
+  build-depends:       base >=4.9 && <4.10, vector, unordered-containers, text, lens, wreq, bytestring, aeson >= 1.1, scientific
   hs-source-dirs:      src
   default-language:    Haskell2010
   ghc-options:         -Wall

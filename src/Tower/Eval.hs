@@ -2,8 +2,6 @@
 
 module Tower.Eval where
 
-import qualified Data.Map as Map
-
 import Tower.Genesis
 import Tower.Meta
 
