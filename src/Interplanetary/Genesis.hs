@@ -289,10 +289,12 @@ parseMatch (Covalue_Match tm) = Match <$> fj tm
 parseMatch invalid = typeMismatch "GenesisCovalue a 'Multiplicative" invalid
 
 parseCovalueJSON :: Value -> Parser GenesisTerm
-parseCovalueJSON val = Covalue <$> parseAtomicCase val
-                   <|> Covalue <$> parseNominalCase val
-                   <|> Covalue <$> parsePositionalCase val
-                   <|> Covalue <$> parseMatch val
+parseCovalueJSON val = asum
+  [ Covalue <$> parseAtomicCase val
+  , Covalue <$> parseNominalCase val
+  , Covalue <$> parsePositionalCase val
+  , Covalue <$> parseMatch val
+  ]
 
 --
 
