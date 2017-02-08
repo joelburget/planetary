@@ -8,7 +8,7 @@
 {-# language FlexibleInstances #-}
 {-# language ViewPatterns #-}
 
-module Tower.Genesis where
+module Interplanetary.Genesis where
 
 import Control.Applicative ((<|>))
 import Data.Aeson
@@ -21,7 +21,7 @@ import Data.String
 import Data.Text (Text)
 import Data.Vector (Vector, (!?))
 
-import Tower.Patterns
+import Interplanetary.Patterns
 
 newtype MultiHash = MultiHash Text deriving Show
 

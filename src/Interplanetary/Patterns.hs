@@ -1,10 +1,11 @@
 {-# language OverloadedStrings #-}
 {-# language PatternSynonyms #-}
 {-# language ViewPatterns #-}
-module Tower.Patterns where
+module Interplanetary.Patterns where
 
 import Data.Aeson
-import Data.Scientific
+import Data.Aeson.Types (Parser)
+import Data.Scientific (toBoundedInteger)
 import Data.Text (Text)
 import qualified Data.Vector as V
 import Data.Vector (Vector)

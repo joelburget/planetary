@@ -1,4 +1,4 @@
-# Revision history for tower
+# Revision history for interplanetary-computation
 
 ## 0.1.0.0  -- YYYY-mm-dd
 

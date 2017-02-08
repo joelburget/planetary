@@ -11,8 +11,8 @@ import Data.String (IsString)
 import Network.Wreq
 import qualified Data.ByteString.Lazy.Char8 as BS
 
-import Tower.Genesis
-import Tower.Eval
+import Interplanetary.Genesis
+import Interplanetary.Eval
 
 -- | An IPFS CID
 newtype IpfsAddr = IpfsAddr String deriving (IsString)
@@ -55,4 +55,5 @@ main = do
 
   -- put it in, get it out
   putIpfs comp
-  getIpfs "zdpuB22KVjXvFZpDxxP4XYQRX1Jnyq9oERNz46z4mEc5yAxoG"
+  comp' <- getIpfs "zdpuB22KVjXvFZpDxxP4XYQRX1Jnyq9oERNz46z4mEc5yAxoG"
+  print comp'

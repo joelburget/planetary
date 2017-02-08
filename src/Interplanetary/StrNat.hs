@@ -1,9 +1,9 @@
 {-# language OverloadedStrings #-}
 {-# language OverloadedLists #-}
 
-module Tower.StrNat where
+module Interplanetary.StrNat where
 
-import Tower.Genesis
+import Interplanetary.Genesis
 
 -- A simple language of strings and naturals.
 --

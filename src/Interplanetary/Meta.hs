@@ -5,10 +5,10 @@
 {-# language ViewPatterns #-}
 {-# language Rank2Types #-}
 
-module Tower.Meta where
+module Interplanetary.Meta where
 
-import Tower.Genesis
-import Tower.Patterns
+import Interplanetary.Genesis
+import Interplanetary.Patterns
 
 todo :: forall a. a
 todo = error "TODO"

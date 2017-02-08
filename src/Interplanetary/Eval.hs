@@ -1,9 +1,9 @@
 {-# language GADTs #-}
 
-module Tower.Eval where
+module Interplanetary.Eval where
 
-import Tower.Genesis
-import Tower.Meta
+import Interplanetary.Genesis
+import Interplanetary.Meta
 
 step :: GenesisTerm -> GenesisTerm
 step v@(Value _) = v
