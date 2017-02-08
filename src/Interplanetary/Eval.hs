@@ -20,7 +20,7 @@ step (Computation (Product subs) (Match body)) = close body subs
 
 step (Splice tm) = splice tm
 step (Quote tm) = quote tm
-step e@(External _) = e
+step e@(Oracle _) = e
 
 -- question: this is not a very informative way to signal stuck-ness. can we do
 -- so without introducing more complexity to the language?

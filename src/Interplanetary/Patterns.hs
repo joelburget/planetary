@@ -71,8 +71,8 @@ pattern Term_Quote tm                  = Arr ["quote",       tm          ]
 pattern Term_Splice :: Value -> Value
 pattern Term_Splice tm                 = Arr ["splice",      tm          ]
 
-pattern Term_External :: Text -> Value
-pattern Term_External addr = Arr ["external", String addr]
+pattern Term_Oracle :: Text -> Value
+pattern Term_Oracle addr = Arr ["external", String addr]
 
 pattern Value_Sum :: Value -> Value -> Value
 pattern Value_Sum loc tm = Arr ["sum", loc, tm]

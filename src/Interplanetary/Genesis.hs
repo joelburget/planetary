@@ -120,13 +120,14 @@ data GenesisTerm :: * where
               -> Location pos -- ^ position with that level
               -> GenesisTerm
 
+  -- TODO: subsumed by Oracle?
   Quote       :: GenesisTerm -> GenesisTerm
 
   Splice      :: GenesisTerm -> GenesisTerm
 
   -- TODO: we might also want a dynamic here. so we can actually access this
   -- external value.
-  External    :: MultiHash -> GenesisTerm
+  Oracle      :: MultiHash -> GenesisTerm
 
   -- Let
   --
@@ -145,7 +146,7 @@ instance ToJSON GenesisTerm where
     Bound level loc           -> Term_Bound (tj level) (tj loc)
     Quote tm                  -> Term_Quote (tj tm)
     Splice tm                 -> Term_Splice (tj tm)
-    External (MultiHash addr) -> Term_External addr
+    Oracle (MultiHash addr)   -> Term_Oracle addr
 
 instance FromJSON GenesisTerm where
   parseJSON = \case
@@ -168,7 +169,7 @@ instance FromJSON GenesisTerm where
 
     (Term_Quote tm) -> Quote <$> fj tm
     (Term_Splice tm) -> Splice <$> fj tm
-    (Term_External hash) -> pure $ External $ MultiHash hash
+    (Term_Oracle hash) -> pure $ Oracle $ MultiHash hash
     invalid -> typeMismatch "GenesisTerm" invalid
 
 -- A value is a sum or a product

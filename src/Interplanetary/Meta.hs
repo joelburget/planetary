@@ -32,8 +32,8 @@ pattern QuoteRep a = Sum' (Name "Quote") a
 pattern SpliceRep :: GenesisTerm -> GenesisTerm
 pattern SpliceRep a = Sum' (Name "Splice") a
 
-pattern ExternalRep :: GenesisTerm -> GenesisTerm
-pattern ExternalRep a = Sum' (Name "External") a
+pattern OracleRep :: GenesisTerm -> GenesisTerm
+pattern OracleRep a = Sum' (Name "Oracle") a
 
 pattern ProductRep :: GenesisTerm -> GenesisTerm
 pattern ProductRep a = Sum' (Name "Product") a
@@ -44,6 +44,7 @@ pattern CaseRep a = Sum' (Name "Case") a
 pattern MatchRep :: GenesisTerm -> GenesisTerm
 pattern MatchRep a = Sum' (Name "Match") a
 
+{-
 -- | Define the term syntax in the term syntax.
 --
 -- Where do we use this?
@@ -57,7 +58,7 @@ termSyntax = Product' $ nominalDomain'
 
   , ("Quote", todo)
   , ("Splice", todo)
-  , ("External", todo)
+  , ("Oracle", todo)
   ]
 
 valueSyntax :: GenesisTerm
@@ -71,6 +72,7 @@ covalueSyntax = Product' $ nominalDomain'
   [ ("Case", todo)
   , ("Match", todo)
   ]
+-}
 
 -- TODO: should this be an external?
 unit :: GenesisTerm
@@ -88,11 +90,11 @@ quote tm = case tm of
   Computation val coval -> ComputationRep (quoteVal val) (quoteCoval coval)
   Value val -> quoteVal val
   Covalue coval -> quoteCoval coval
-  Bound level pos -> BoundRep (External (todo level)) (quoteLoc pos)
+  Bound level pos -> BoundRep (Oracle (todo level)) (quoteLoc pos)
 
   Quote q -> QuoteRep (quote q)
   Splice s -> SpliceRep (quote s)
-  External hash -> ExternalRep (quoteMultiash hash)
+  Oracle hash -> OracleRep (quoteMultiHash hash)
 
 quoteVal :: GenesisValue a b -> GenesisTerm
 quoteVal (Sum loc tm) = SumRep (quoteLoc loc) (quote tm)
@@ -108,8 +110,8 @@ quoteLoc = todo
 quoteDom :: Domain pos -> GenesisTerm
 quoteDom = todo
 
-quoteMultiash :: MultiHash -> GenesisTerm
-quoteMultiash = todo
+quoteMultiHash :: MultiHash -> GenesisTerm
+quoteMultiHash = todo
 
 -- | Transfer the representation of a term to a term
 splice :: GenesisTerm -> GenesisTerm
@@ -119,7 +121,7 @@ splice (CaseRep dom) = Case' (spliceDom dom)
 splice (MatchRep tm) = Match' (splice tm) -- XXX open level
 splice (QuoteRep tm) = todo
 splice (SpliceRep tm) = todo
-splice (ExternalRep tm) = todo
+splice (OracleRep tm) = todo
 splice problematic = error "problematic"
 
 spliceTag :: GenesisTerm -> Location pos
