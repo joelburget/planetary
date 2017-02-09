@@ -172,11 +172,25 @@ instance FromJSON GenesisTerm where
     (Term_Oracle hash) -> pure $ Oracle $ MultiHash hash
     invalid -> typeMismatch "GenesisTerm" invalid
 
--- A value is a sum or a product
+-- A value is a sum or a product.
 --
 -- A @GenesisValue pos sumprod@:
--- * Is itself indexed by @pos@
+-- * Is itself indexed by @pos@ (@Atomic@, @Nominal@, or @Positional@)
 -- * Is a sum or product as decided by @sumprod@
+--
+-- Both sums and products come in three variations:
+-- * @Atomic@ - A single value
+-- * @Nominal@ - Indexed by name
+-- * @Positional@ - Indexed by position
+--
+-- * @Sum Atomic@, @Product Atomic@ - Both hold a single value (in the
+--   applicand position of a function application).
+--   - @Sum Atomic@ ~ "One of these 1 things"
+--   - @Product Atomic@ ~ "All of these 1 things"
+-- * @Sum Nominal@ - One of a named collection
+-- * @Sum Positional@ - One of an anonymous, sized collection
+-- * @Product Nominal@ - A collection of values indexed by name
+-- * @Product Positional@ - An array of values indexed by position
 data GenesisValue :: LocationType -> SumProd -> * where
   Sum     :: Location pos
           -> GenesisTerm
@@ -244,17 +258,39 @@ pattern Sum' loc tm = Value (Sum loc tm)
 pattern Product' :: Domain pos -> GenesisTerm
 pattern Product' dom = Value (Product dom)
 
--- A covalue is a case or pattern match
+-- A covalue is a case or pattern match.
 --
 -- A @GenesisCovalue sumprod@
 -- * Is itself indexed by @pos@
 -- * Is a sum or product as decided by @sumprod@
+--
+-- Both sums and products come in three variations:
+-- * @Atomic@ - A lambda
+-- * @Nominal@ - Indexed by name
+-- * @Positional@ - Indexed by position
+--
+-- @Case Atomic@, @Match Atomic@ - Both are representations of lambdas
+--   - @Case Atomic@ ~ "Consume one of these one things"
+--   - @Match Atomic@ ~ "Consume all of these one things"
+-- @Case Nominal@ - Match named, unordered cases
+-- @Case Positional@ - Match an ordered collection of anonymous cases
+-- @Match Nominal@ - Destructure a named object
+-- @Match Positional@ - Destructure an array
+--
+-- TODO: Both values and covalues look the same in the Atomic case -- should we
+-- change representation?
 data GenesisCovalue :: LocationType -> SumProd -> * where
   Case  :: Domain pos
         -> GenesisCovalue pos 'Additive
 
   Match :: GenesisTerm
         -> GenesisCovalue pos 'Multiplicative
+
+pattern Case' :: Domain pos -> GenesisTerm
+pattern Case' dom = Covalue (Case dom)
+
+pattern Match' :: GenesisTerm -> GenesisTerm
+pattern Match' tm = Covalue (Match tm)
 
 deriving instance Show (GenesisCovalue pos sumprod)
 -- deriving instance Generic (GenesisValue pos sumprod)
@@ -295,11 +331,3 @@ parseCovalueJSON val = asum
   , Covalue <$> parsePositionalCase val
   , Covalue <$> parseMatch val
   ]
-
---
-
-pattern Case' :: Domain pos -> GenesisTerm
-pattern Case' dom = Covalue (Case dom)
-
-pattern Match' :: GenesisTerm -> GenesisTerm
-pattern Match' tm = Covalue (Match tm)
