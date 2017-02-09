@@ -10,13 +10,11 @@
 
 module Interplanetary.Genesis where
 
-import Control.Applicative ((<|>))
 import Data.Aeson
 import Data.Aeson.Types (Parser, typeMismatch)
 import Data.Foldable (asum)
 import Data.HashMap.Lazy (HashMap)
 import qualified Data.HashMap.Lazy as HashMap
-import Data.Scientific
 import Data.String
 import Data.Text (Text)
 import Data.Vector (Vector, (!?))
