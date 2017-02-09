@@ -16,6 +16,7 @@ executable ipc
   main-is:             Main.hs
   other-modules:
     Interplanetary.Genesis
+    Interplanetary.JSON
     Interplanetary.Eval
     Interplanetary.Meta
     Interplanetary.StrNat

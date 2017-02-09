@@ -13,6 +13,7 @@ import qualified Data.ByteString.Lazy.Char8 as BS
 
 import Interplanetary.Genesis
 import Interplanetary.Eval
+import Interplanetary.JSON
 
 -- | An IPFS CID
 newtype IpfsAddr = IpfsAddr String deriving (IsString)
