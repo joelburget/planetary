@@ -7,11 +7,20 @@
 
 module Interplanetary.Meta where
 
+import qualified Data.Vector as V
+import Data.Vector (Vector)
+
 import Interplanetary.Genesis
-import Interplanetary.Patterns
 
 todo :: forall a. a
 todo = error "TODO"
+pattern V2 :: a -> a -> Vector a
+pattern V2 a b <- (V.toList -> [a, b]) where
+  V2 a b = V.fromList [a, b]
+
+pattern Vx :: [a] -> Vector a
+pattern Vx lst <- (V.toList -> lst) where
+  Vx lst = V.fromList lst
 
 pattern SumRep :: GenesisTerm -> GenesisTerm -> GenesisTerm
 pattern SumRep a b = Sum' (Name "Sum") (Product' (PositionalDomain (V2 a b)))
