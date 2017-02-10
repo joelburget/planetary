@@ -83,6 +83,9 @@ data GenesisTerm :: * where
 
   -- TODO: we might also want a dynamic here. so we can actually access this
   -- external value.
+  --
+  -- Oracle explanation / limitations:
+  -- * Appears in an @Atomic@ positive or negative position. This might be weakened to all
   Oracle      :: MultiHash -> GenesisTerm
 
   -- Let
@@ -107,7 +110,7 @@ deriving instance Show GenesisTerm
 -- * @Sum Atomic@, @Product Atomic@ - Both hold a single value (in the
 --   applicand position of a function application).
 --   - @Sum Atomic@ ~ "One of these 1 things"
---   - @Product Atomic@ ~ "All of these 1 things"
+--   - @Product AtomicDomain@ ~ "All of these 1 things"
 -- * @Sum Nominal@ - One of a named collection
 -- * @Sum Positional@ - One of an anonymous, sized collection
 -- * @Product Nominal@ - A collection of values indexed by name
