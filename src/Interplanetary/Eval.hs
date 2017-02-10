@@ -18,8 +18,6 @@ step (Computation (Sum pos body) (Case branches)) =
 -- Substitute all terms from the domain (destructured) in the body
 step (Computation (Product subs) (Match body)) = close body subs
 
-step (Splice tm) = splice tm
-step (Quote tm) = quote tm
 step e@(Oracle _) = e
 
 -- question: this is not a very informative way to signal stuck-ness. can we do

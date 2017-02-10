@@ -79,11 +79,6 @@ data GenesisTerm :: * where
               -> Location pos -- ^ position with that level
               -> GenesisTerm
 
-  -- TODO: subsumed by Oracle?
-  Quote       :: GenesisTerm -> GenesisTerm
-
-  Splice      :: GenesisTerm -> GenesisTerm
-
   -- TODO: we might also want a dynamic here. so we can actually access this
   -- external value.
   Oracle      :: MultiHash -> GenesisTerm

@@ -35,12 +35,6 @@ pattern BoundRep a b = Sum'
   (Name "Bound")
   (Product' (PositionalDomain (V2 a b)))
 
-pattern QuoteRep :: GenesisTerm -> GenesisTerm
-pattern QuoteRep a = Sum' (Name "Quote") a
-
-pattern SpliceRep :: GenesisTerm -> GenesisTerm
-pattern SpliceRep a = Sum' (Name "Splice") a
-
 pattern OracleRep :: GenesisTerm -> GenesisTerm
 pattern OracleRep a = Sum' (Name "Oracle") a
 
@@ -65,8 +59,6 @@ termSyntax = Product' $ nominalDomain'
   , ("Covalue", covalueSyntax)
   , ("Bound", todo)
 
-  , ("Quote", todo)
-  , ("Splice", todo)
   , ("Oracle", todo)
   ]
 
@@ -101,8 +93,6 @@ quote tm = case tm of
   Covalue coval -> quoteCoval coval
   Bound level pos -> BoundRep (Oracle (todo level)) (quoteLoc pos)
 
-  Quote q -> QuoteRep (quote q)
-  Splice s -> SpliceRep (quote s)
   Oracle hash -> OracleRep (quoteMultiHash hash)
 
 quoteVal :: GenesisValue a b -> GenesisTerm
@@ -128,8 +118,6 @@ splice (SumRep tagRep tm) = Sum' (spliceTag tagRep) (splice tm)
 splice (ProductRep dom) = Product' (spliceDom dom)
 splice (CaseRep dom) = Case' (spliceDom dom)
 splice (MatchRep tm) = Match' (splice tm) -- XXX open level
-splice (QuoteRep tm) = todo
-splice (SpliceRep tm) = todo
 splice (OracleRep tm) = todo
 splice problematic = error "problematic"
 

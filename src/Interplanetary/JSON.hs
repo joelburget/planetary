@@ -122,8 +122,6 @@ instance ToJSON GenesisTerm where
     Value val                 -> Term_Value (tj val)
     Covalue coval             -> Term_Covalue (tj coval)
     Bound level loc           -> Term_Bound (tj level) (tj loc)
-    Quote tm                  -> Term_Quote (tj tm)
-    Splice tm                 -> Term_Splice (tj tm)
     Oracle (MultiHash addr)   -> Term_Oracle addr
 
 instance FromJSON GenesisTerm where
@@ -145,8 +143,6 @@ instance FromJSON GenesisTerm where
     (Term_Bound level (Location'Positional ix))
       -> Bound <$> fj level <*> pure (Index ix)
 
-    (Term_Quote tm) -> Quote <$> fj tm
-    (Term_Splice tm) -> Splice <$> fj tm
     (Term_Oracle hash) -> pure $ Oracle $ MultiHash hash
     invalid -> typeMismatch "GenesisTerm" invalid
 
