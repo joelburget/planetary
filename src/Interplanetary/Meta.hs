@@ -12,8 +12,6 @@ import Data.Vector (Vector)
 
 import Interplanetary.Genesis
 
-todo :: forall a. a
-todo = error "TODO"
 pattern V2 :: a -> a -> Vector a
 pattern V2 a b <- (V.toList -> [a, b]) where
   V2 a b = V.fromList [a, b]

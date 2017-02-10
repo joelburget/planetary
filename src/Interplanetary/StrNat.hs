@@ -9,9 +9,6 @@ import Interplanetary.Genesis
 --
 -- This is the language E from PFPL
 
-todo :: forall a. a
-todo = error "TODO"
-
 unit :: GenesisTerm
 unit = Product' (nominalDomain' [])
 

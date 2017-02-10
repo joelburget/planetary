@@ -17,6 +17,8 @@ import Data.Text (Text)
 import Data.Vector (Vector, (!?))
 
 import Interplanetary.Patterns
+todo :: forall a. a
+todo = error "TODO"
 
 newtype MultiHash = MultiHash Text deriving Show
 
