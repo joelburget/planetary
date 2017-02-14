@@ -1,34 +1,65 @@
+{-# language DataKinds #-}
 {-# language GADTs #-}
 
 module Interplanetary.Eval where
 
+import Control.Lens.Getter (view)
+import Control.Lens.At (at)
+import Control.Monad.Reader
+import Control.Monad.Trans.Either (EitherT(runEitherT), left)
+import Data.Dynamic
+import Data.HashMap.Lazy (HashMap)
+import Data.Word (Word32)
+
 import Interplanetary.Genesis
-import Interplanetary.Meta
 
-step :: GenesisTerm -> GenesisTerm
-step v@(Value _) = v
-step c@(Covalue _) = c
+type OracleStore = HashMap MultiHash Dynamic
 
-step (Computation (Sum pos body) (Case branches)) =
-  case domainLookup branches pos of
-    -- Substitute in the untagged term in the case rhs
-    Just result -> close result (AtomicDomain body)
-    Nothing -> error $ "failed lookup: " ++ show pos
+data Halt :: * where
+  Stuck :: GenesisTerm -> Halt
+  BadDynamic :: MultiHash -> Halt
+  MissingOracle :: MultiHash -> Halt
+  BadDomainLookup :: Domain -> Location -> Halt
+  BadVecLookup :: Word32 -> Halt
+
+deriving instance Show Halt
+
+type Context = EitherT Halt (Reader OracleStore)
+
+domainLookup' :: Domain -> Location -> Context GenesisTerm
+domainLookup' dom loc = case domainLookup dom loc of
+  Just tm -> pure tm
+  Nothing -> left (BadDomainLookup dom loc)
+
+readOracle :: Typeable a => MultiHash -> Context a
+readOracle addr = do
+  mapContents <- view (at addr)
+  case mapContents of
+    Nothing -> left (MissingOracle addr)
+    Just dyn ->
+      case fromDynamic dyn of
+        Nothing -> left (BadDynamic addr)
+        Just a -> pure a
+
+runContext :: OracleStore -> Context GenesisTerm -> Either Halt GenesisTerm
+runContext store ctxTm = runReader (runEitherT ctxTm) store
+
+step :: GenesisTerm -> Context GenesisTerm
+step v@(Value _) = pure v
+step c@(Covalue _) = pure c
+
+step (Computation (Sum ix body) (Case branches))
+  = domainLookup' (PositionalDomain branches) (Index ix)
 
 -- Substitute all terms from the domain (destructured) in the body
-step (Computation (Product subs) (Match body)) = close body subs
+step (Computation (Product subs) (Match body))
+  = pure $ close body (PositionalDomain subs)
 
-step e@(Oracle _) = e
-
--- question: this is not a very informative way to signal stuck-ness. can we do
--- so without introducing more complexity to the language?
-step var@(Bound _level _pos) = var -- we're stuck
-
+step e@(Oracle _) = left (Stuck e)
+step var@(Bound _level _pos) = left (Stuck var) -- we're stuck
 
 -- | Close the outermost level of variables
-close :: GenesisTerm
-      -> Domain pos
-      -> GenesisTerm
+close :: GenesisTerm -> Domain -> GenesisTerm
 close top sub = close' 0 top
   where close' ix body = case body of
           Computation pos neg -> Computation (closeVal pos ix)
@@ -41,13 +72,14 @@ close top sub = close' 0 top
                    Just body' -> body'
                    Nothing -> error "failed variable lookup"
             else body
+          o@(Oracle _) -> o
 
-        closeVal :: GenesisValue a b -> Int -> GenesisValue a b
+        closeVal :: GenesisValue -> Word32 -> GenesisValue
         closeVal v ix = case v of
           Sum loc subTm -> Sum loc (close' ix subTm)
-          Product dom -> Product $ mapDomain (\subTm -> close' ix subTm) dom
+          Product vec -> Product $ (\subTm -> close' ix subTm) <$> vec
 
-        closeCoval :: GenesisCovalue a b -> Int -> GenesisCovalue a b
+        closeCoval :: GenesisCovalue -> Word32 -> GenesisCovalue
         closeCoval cv ix = case cv of
-          Case dom -> Case $ mapDomain (\subTm -> close' ix subTm) dom
+          Case vec -> Case $ (\subTm -> close' ix subTm) <$> vec
           Match subTm -> Match $ close' (ix + 1) subTm

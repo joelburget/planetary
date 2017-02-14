@@ -1,170 +1,70 @@
-{-# language DataKinds #-}
-{-# language GADTs #-}
-{-# language OverloadedStrings #-}
-{-# language StandaloneDeriving #-}
-{-# language KindSignatures #-}
-{-# language LambdaCase #-}
-{-# language PatternSynonyms #-}
-{-# language FlexibleInstances #-}
-{-# language ViewPatterns #-}
-
+{-# language Rank2Types #-}
 module Interplanetary.Genesis where
 
-import Data.HashMap.Lazy (HashMap)
-import qualified Data.HashMap.Lazy as HashMap
-import Data.String
+-- import Data.Hashable (Hashable)
 import Data.Text (Text)
-import Data.Vector (Vector, (!?))
+import Data.Vector (Vector)
+import Data.Word (Word32)
 
-import Interplanetary.Patterns
-todo :: forall a. a
-todo = error "TODO"
+todo :: String -> forall a. a
+todo = error
 
-newtype MultiHash = MultiHash Text deriving Show
+newtype CID = CID Text deriving (Eq, Show)
 
-data LocationType = Nominal | Positional | Atomic
+type Index = Word32
+type Unique = Word32
+type Arity = Word32
 
-data Location :: LocationType -> * where
-  Name :: Text -> Location 'Nominal
-  Index :: Int -> Location 'Positional
-  Atom :: Location 'Atomic
+data Toplevel = Term ::: Type
+  deriving (Show, Eq)
 
-deriving instance Eq (Location a)
-deriving instance Show (Location a)
+data Type
+  = TypeLiteralText
+  | TypeLiteralWord32
+  | TypeTagged Index Type
+  | TypeMultiVal (Vector Type)
+  | TypeArrow (Vector Type) (Vector Type)
 
-instance IsString (Location 'Nominal) where
-  fromString = Name . fromString
+  -- This is different from arrow because it takes one of these types instead
+  -- of all simultaneously
+  | TypeCaseArrow (Vector Type) (Vector Type)
 
-instance Num (Location 'Positional) where
-  fromInteger = Index . fromInteger
+  | TypeMetavar Unique
+  deriving (Show, Eq)
 
-data Domain :: LocationType -> * where
-  NominalDomain :: HashMap Text GenesisTerm -> Domain 'Nominal
+-- TODO could make linear with explicit duplicate / ignore
 
-  PositionalDomain :: Vector GenesisTerm -> Domain 'Positional
+data Term
+  = CutLambda Lambda (Vector Atom)
+  | CutCase Case Atom
+  | Return (Vector Atom)
+  | Let Arity Term Term
+  | Alloc (Vector HeapVal) Term
+  deriving (Show, Eq)
 
-  AtomicDomain :: GenesisTerm -> Domain 'Atomic
+data HeapVal
+  = HeapLambda Lambda
+  | HeapCase Case
+  | HeapTagged Index HeapVal
+  | HeapMultiVal (Vector HeapVal)
+  | HeapAtom Atom
+  deriving (Show, Eq)
 
-deriving instance Show (Domain pos)
+data Lambda
+  = Lambda Term
+  | Oracle Type CID
+  deriving (Show, Eq)
 
-domainLookup :: Domain pos1 -> Location pos2 -> Maybe GenesisTerm
-domainLookup (NominalDomain dom) (Name name) = HashMap.lookup name dom
-domainLookup (PositionalDomain vec) (Index ix) = vec !? ix
-domainLookup (AtomicDomain it) Atom = Just it
-domainLookup _ _ = Nothing
+newtype Case = Case (Vector Term) deriving (Show, Eq)
 
-mapDomain :: (GenesisTerm -> GenesisTerm) -> Domain pos -> Domain pos
-mapDomain f = \case
-  NominalDomain dom -> NominalDomain $ f <$> dom
-  PositionalDomain vec -> PositionalDomain $ f <$> vec
-  AtomicDomain it -> AtomicDomain (f it)
+data Atom
+  = Variable Index Index
+  | Literal Literal
+  | Term Term
+  | HeapVal HeapVal
+  deriving (Show, Eq)
 
-nominalDomain' :: [(Text, GenesisTerm)] -> Domain 'Nominal
-nominalDomain' = NominalDomain . HashMap.fromList
-
--- TODO better name
-data SumProd = Additive | Multiplicative
-
-data GenesisTerm :: * where
-
-  Computation :: GenesisValue l sumprod
-              -> GenesisCovalue l sumprod
-              -> GenesisTerm
-
-  Value       :: GenesisValue pos sumprod
-              -> GenesisTerm
-
-  Covalue     :: GenesisCovalue pos sumprod
-              -> GenesisTerm
-
-  Bound       :: Int          -- ^ level
-              -> Location pos -- ^ position with that level
-              -> GenesisTerm
-
-  -- TODO: we might also want a dynamic here. so we can actually access this
-  -- external value.
-  --
-  -- Oracle explanation / limitations:
-  -- * Appears in an @Atomic@ positive or negative position. This might be weakened to all
-  Oracle      :: MultiHash -> GenesisTerm
-
-  -- Let
-  --
-  -- What language-level support do patches require? In a surprising twist,
-  -- maybe none!
-
--- deriving instance Eq GenesisTerm
-deriving instance Show GenesisTerm
-
--- A value is a sum or a product.
---
--- A @GenesisValue pos sumprod@:
--- * Is itself indexed by @pos@ (@Atomic@, @Nominal@, or @Positional@)
--- * Is a sum or product as decided by @sumprod@
---
--- Both sums and products come in three variations:
--- * @Atomic@ - A single value
--- * @Nominal@ - Indexed by name
--- * @Positional@ - Indexed by position
---
--- * @Sum Atomic@, @Product Atomic@ - Both hold a single value (in the
---   applicand position of a function application).
---   - @Sum Atomic@ ~ "One of these 1 things"
---   - @Product AtomicDomain@ ~ "All of these 1 things"
--- * @Sum Nominal@ - One of a named collection
--- * @Sum Positional@ - One of an anonymous, sized collection
--- * @Product Nominal@ - A collection of values indexed by name
--- * @Product Positional@ - An array of values indexed by position
-data GenesisValue :: LocationType -> SumProd -> * where
-  Sum     :: Location pos
-          -> GenesisTerm
-          -> GenesisValue pos 'Additive
-
-  Product :: Domain pos
-          -> GenesisValue pos 'Multiplicative
-
-deriving instance Show (GenesisValue pos sumprod)
--- deriving instance Generic (GenesisValue pos sumprod)
-
-pattern Sum' :: Location pos -> GenesisTerm -> GenesisTerm
-pattern Sum' loc tm = Value (Sum loc tm)
-
-pattern Product' :: Domain pos -> GenesisTerm
-pattern Product' dom = Value (Product dom)
-
--- A covalue is a case or pattern match.
---
--- A @GenesisCovalue sumprod@
--- * Is itself indexed by @pos@
--- * Is a sum or product as decided by @sumprod@
---
--- Both sums and products come in three variations:
--- * @Atomic@ - A lambda
--- * @Nominal@ - Indexed by name
--- * @Positional@ - Indexed by position
---
--- @Case Atomic@, @Match Atomic@ - Both are representations of lambdas
---   - @Case Atomic@ ~ "Consume one of these one things"
---   - @Match Atomic@ ~ "Consume all of these one things"
--- @Case Nominal@ - Match named, unordered cases
--- @Case Positional@ - Match an ordered collection of anonymous cases
--- @Match Nominal@ - Destructure a named object
--- @Match Positional@ - Destructure an array
---
--- TODO: Both values and covalues look the same in the Atomic case -- should we
--- change representation?
-data GenesisCovalue :: LocationType -> SumProd -> * where
-  Case  :: Domain pos
-        -> GenesisCovalue pos 'Additive
-
-  Match :: GenesisTerm
-        -> GenesisCovalue pos 'Multiplicative
-
-pattern Case' :: Domain pos -> GenesisTerm
-pattern Case' dom = Covalue (Case dom)
-
-pattern Match' :: GenesisTerm -> GenesisTerm
-pattern Match' tm = Covalue (Match tm)
-
-deriving instance Show (GenesisCovalue pos sumprod)
--- deriving instance Generic (GenesisValue pos sumprod)
+data Literal
+  = LiteralText Text
+  | LiteralWord32 Word32
+  deriving (Show, Eq)
