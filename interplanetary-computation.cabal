@@ -12,16 +12,16 @@ build-type:          Simple
 extra-source-files:  ChangeLog.md
 cabal-version:       >=1.10
 
-executable ipc
-  main-is:             Main.hs
-  other-modules:
+library
+  exposed-modules:
+    Interplanetary.Examples
     Interplanetary.Genesis
     Interplanetary.Typecheck
-    Interplanetary.JSON
-    Interplanetary.Oracles
-    Interplanetary.Eval
-    Interplanetary.Meta
-    Interplanetary.StrNat
+    -- Interplanetary.JSON
+    -- Interplanetary.Oracles
+    -- Interplanetary.Eval
+    -- Interplanetary.Meta
+    -- Interplanetary.StrNat
   -- other-extensions:
   build-depends:
     base >=4.9 && <4.10,
@@ -42,8 +42,32 @@ executable ipc
   ghc-options:
     -Wall
     -fwarn-tabs
+
+executable ipc
+  main-is          : Main.hs
+  hs-source-dirs   : app
+  build-depends    :
+    base,
+    interplanetary-computation,
+    lens,
+    aeson,
+    unordered-containers,
+    wreq,
+    bytestring
+  default-language : Haskell2010
+  ghc-options:
+    -Wall
+    -fwarn-tabs
     -threaded
     -rtsopts
     -fexternal-interpreter
-    -prof
-    -fprof-auto
+
+    -- -prof
+    -- -fprof-auto
+
+test-suite test
+  type             : exitcode-stdio-1.0
+  hs-source-dirs   : tests
+  main-is          : test.hs
+  build-depends    : base, interplanetary-computation, tasty, tasty-hunit
+  default-language : Haskell2010

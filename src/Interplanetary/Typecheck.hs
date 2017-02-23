@@ -10,6 +10,7 @@ import Control.Monad.Error (throwError)
 import Control.Monad.Gen
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Functor (($>))
 import Data.HashMap.Lazy (HashMap)
 import qualified Data.HashMap.Lazy as HashMap
 import Data.Monoid ((<>))
@@ -90,7 +91,7 @@ underBinder size action = do
 generateVars :: TypingContext (Vector Type)
 generateVars = do
   binderIds <- getScopeUniques
-  -- Set to a the metavar if not already solved
+  -- Set to a metavar if not already solved
   forM binderIds $ \unique -> setDefault unique (TypeMetavar unique)
 
 -- TODO should this be a Maybe at the top level?
@@ -127,29 +128,28 @@ solveFor (Level level) index ty = do
         Just currentSolution' -> when (currentSolution' == ty) $
           throwError (UnspecifiedFailure 2)
 
-unify :: Type -> Type -> TypingContext ()
-unify TypeLiteralText TypeLiteralText = success
-unify TypeLiteralWord32 TypeLiteralWord32 = success
-unify (TypeMetavar v) ty = at v ?= ty
+unify :: Type -> Type -> TypingContext Type
+unify TypeLiteralText TypeLiteralText = pure TypeLiteralText
+unify TypeLiteralWord32 TypeLiteralWord32 = pure TypeLiteralWord32
+-- TODO we can probably simplify ty if we've just solved for a metavar
+unify (TypeMetavar v) ty = (at v ?= ty) $> ty
 unify ty v@(TypeMetavar _) = unify v ty
 unify (TypeTagged i1 ty1) (TypeTagged i2 ty2) = do
   when (i1 /= i2) (throwError (TagMismatch i1 i2))
   unify ty1 ty2
-unify (TypeMultiVal tys1) (TypeMultiVal tys2) = unifyVec tys1 tys2
+unify (TypeMultiVal tys1) (TypeMultiVal tys2)
+  = TypeMultiVal <$> unifyVec tys1 tys2
 unify (TypeArrow dom1 codom1) (TypeArrow dom2 codom2)
-  = (<>) <$> unifyVec dom1 dom2 <*> unifyVec codom1 codom2
+  = TypeArrow <$> unifyVec dom1 dom2 <*> unifyVec codom1 codom2
 unify ty1 ty2 = throwError (UnificationFailure ty1 ty2)
 
-unifyVec :: Vector Type -> Vector Type -> TypingContext ()
+unifyVec :: Vector Type -> Vector Type -> TypingContext (Vector Type)
 unifyVec tys1 tys2 = lengthChecking unify tys1 tys2
-
-(?:) :: Term -> Vector Type -> TypingContext ()
-(?:) = check
 
 check :: Term -> Vector Type -> TypingContext ()
 check (CutLambda lambda args) tys = spliceLambda lambda args tys
 check (CutCase branches scrutinee) tys = spliceCase branches scrutinee tys
-check (Return atoms) tys = lengthChecking checkAtom atoms tys
+check (Return atoms) tys = void $ lengthChecking checkAtom atoms tys
 
 -- to infer a let we look for the solution of its metavariable after checking
 -- the rhs
@@ -176,8 +176,8 @@ checkHeapVal (HeapCase _) _ = throwError (UnspecifiedFailure 5)
 checkHeapVal (HeapTagged tag val) (TypeTagged tagBound ty) = do
   when (tag > tagBound) (throwError (UnspecifiedFailure 6))
   checkHeapVal val ty
-checkHeapVal (HeapTagged tag val) ty = traceShow ty $ throwError (UnspecifiedFailure 7)
-checkHeapVal (HeapMultiVal vals) (TypeMultiVal tys) =
+checkHeapVal (HeapTagged tag val) ty = traceShow ty $ assert False $ throwError (UnspecifiedFailure 7)
+checkHeapVal (HeapMultiVal vals) (TypeMultiVal tys) = void $
   lengthChecking checkHeapVal vals tys
 checkHeapVal (HeapMultiVal _) _ = throwError (UnspecifiedFailure 8)
 checkHeapVal (HeapAtom atom) ty = checkAtom atom ty
@@ -188,7 +188,7 @@ spliceLambda lam args resultTys = underBinder (len args) $ case lam of
   -- In this case we just need to check the term saturates to the right type
   Lambda tm -> check tm resultTys
   -- And for oracles it's even easier -- we already have its type
-  Oracle ty _hash -> unify ty (TypeMultiVal resultTys)
+  Oracle ty _hash -> void $ unify ty (TypeMultiVal resultTys)
 
 -- track the metavariables in this level, error if not all solved when we exit
 entangling :: Word32 -> TypingContext () -> TypingContext ()
@@ -197,35 +197,29 @@ entangling size action = underBinder size $ do
   uniques <- getScopeUniques
   mapM_ checkIsSolved uniques
 
--- Check that this
+-- Check that this variable resolves to a complete type, with all varaibles
+-- solved
 checkIsSolved :: Unique -> TypingContext ()
 checkIsSolved u = do
   resolution <- gets (^? ix u)
   case resolution of
     Just (TypeMetavar u') -> checkIsSolved u'
-    Just _ -> success
+    Just _ -> pure ()
     Nothing -> throwError (UnspecifiedFailure 9)
 
 spliceCase :: Case -> Atom -> Vector Type -> TypingContext ()
 spliceCase (Case branches) scrutinee expected = do
-  let numCases = len branches
+  -- bind one branch at a time
+  forM_ branches $ \branch -> do
+    unique <- underBinder 1 $ do
+      uniques <- getScopeUniques -- :: TypingContext (Vector Unique)
+      let unique = assert (V.length uniques == 1) (V.head uniques)
 
-  entangling numCases $ do
-    vars <- generateVars
+      check branch expected
+      pure unique
 
-    uniqueScrutinee <- case V.toList vars of
-      [x] -> pure x
-      _ -> throwError (UnspecifiedFailure 10)
-
-    -- constrain the scrutinee
-    checkAtom scrutinee (TypeTagged numCases uniqueScrutinee)
-
-    -- check that each branch matches
-    -- question: if we know the branch is not exercised do we require it to
-    -- solve for all variables? (must solution be unique?)
-    forM_ branches $ \branch -> do
-      vars <- generateVars
-      branch ?: vars
+    -- now entangle the scrutinee and rhs
+    checkAtom scrutinee (TypeMetavar unique)
 
 checkAtom :: Atom -> Type -> TypingContext ()
 checkAtom (Variable level ix) ty = do
@@ -237,24 +231,17 @@ checkAtom (Term tm) ty = check tm [ty]
 checkAtom (HeapVal val) ty = checkHeapVal val ty
 
 lengthChecking
-  :: (a -> b -> TypingContext ())
+  :: (a -> b -> TypingContext c)
   -> Vector a
   -> Vector b
-  -> TypingContext ()
+  -> TypingContext (Vector c)
 lengthChecking fun vals tys = do
   when (len vals /= len tys) (throwError (UnspecifiedFailure 11))
-  forM_ (V.zip vals tys) (uncurry fun)
+  forM (V.zip vals tys) (uncurry fun)
 
 expect :: Bool -> TypingContext ()
-expect True = success
+expect True = pure ()
 expect False = throwError (UnspecifiedFailure 12)
-
-success :: TypingContext ()
-success = pure ()
 
 len :: Vector a -> Index
 len = fromIntegral . V.length
-
--- TODO consider removal
-strictZip :: Vector a -> Vector b -> Maybe (Vector (a, b))
-strictZip va vb = if len va == len vb then Just (V.zip va vb) else Nothing

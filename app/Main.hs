@@ -1,7 +1,5 @@
-{-# language DataKinds #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language OverloadedStrings #-}
-{-# language OverloadedLists #-}
 
 module Main where
 
@@ -13,6 +11,7 @@ import Data.String (IsString)
 import Network.Wreq
 import qualified Data.ByteString.Lazy.Char8 as BS
 
+import Interplanetary.Examples
 import Interplanetary.Genesis
 import Interplanetary.Typecheck
 -- import Interplanetary.Eval
@@ -43,29 +42,11 @@ getIpfs (IpfsAddr cid) = do
 -}
 
 -- Examples:
-
-unit :: HeapVal
-unit = HeapMultiVal []
-
-nothing :: HeapVal
-nothing = HeapTagged 0 unit
-
-elimNothing :: Case
-elimNothing = Case [Return [HeapVal unit]]
-
-comp :: Term
-comp = CutCase elimNothing (HeapVal (HeapTagged 0 nothing))
-
-comp' :: Toplevel
-comp' = comp ::: TypeMultiVal []
-
 -- check :: Term -> Vector Type -> TypingContext ()
 -- runTypingContext :: TypingContext a -> Either CheckFailure a
 
 main :: IO ()
 main = do
-  print comp'
-  print (topCheck comp')
   -- TODO
   -- print $ runContext (HashMap.fromList []) (step comp')
 
@@ -73,3 +54,5 @@ main = do
   -- putIpfs comp'
   -- comp'' <- getIpfs "zdpuB22KVjXvFZpDxxP4XYQRX1Jnyq9oERNz46z4mEc5yAxoG"
   -- print comp''
+
+  print $ topCheck compT
