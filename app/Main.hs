@@ -15,7 +15,7 @@ import Interplanetary.Examples
 import Interplanetary.Genesis
 import Interplanetary.Typecheck
 -- import Interplanetary.Eval
--- import Interplanetary.JSON ()
+import Interplanetary.JSON ()
 -- import Interplanetary.Oracles
 -- import Interplanetary.StrNat
 

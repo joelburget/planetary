@@ -57,29 +57,3 @@ step (Computation (Product subs) (Match body))
 
 step e@(Oracle _) = left (Stuck e)
 step var@(Bound _level _pos) = left (Stuck var) -- we're stuck
-
--- | Close the outermost level of variables
-close :: GenesisTerm -> Domain -> GenesisTerm
-close top sub = close' 0 top
-  where close' ix body = case body of
-          Computation pos neg -> Computation (closeVal pos ix)
-                                             (closeCoval neg ix)
-          Value v -> Value (closeVal v ix)
-          Covalue cv -> Covalue (closeCoval cv ix)
-          Bound i loc ->
-            if i == ix
-            then case domainLookup sub loc of
-                   Just body' -> body'
-                   Nothing -> error "failed variable lookup"
-            else body
-          o@(Oracle _) -> o
-
-        closeVal :: GenesisValue -> Word32 -> GenesisValue
-        closeVal v ix = case v of
-          Sum loc subTm -> Sum loc (close' ix subTm)
-          Product vec -> Product $ (\subTm -> close' ix subTm) <$> vec
-
-        closeCoval :: GenesisCovalue -> Word32 -> GenesisCovalue
-        closeCoval cv ix = case cv of
-          Case vec -> Case $ (\subTm -> close' ix subTm) <$> vec
-          Match subTm -> Match $ close' (ix + 1) subTm

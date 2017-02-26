@@ -22,6 +22,10 @@ unitTests = testGroup "ipc unit tests"
 
 unifyTests :: TestTree
 unifyTests = testGroup "ipc unification tests"
-  [ testCase "1" $ assertBool "" $ isRight $ runTypingContext $
-      unify (TypeMetavar 1) TypeLiteralText
+  [ testCase "1" $ assertBool "" $ isRight $ runTypingContext $ do
+      v1 <- freeVar
+      v2 <- freeVar
+      let tm1 = TypeMultiVal' [v1, TypeLit TypeLiteralText]
+          tm2 = TypeMultiVal' [TypeLit TypeLiteralWord32, v2]
+      tm1 =:= tm2
   ]
