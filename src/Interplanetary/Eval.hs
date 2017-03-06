@@ -13,23 +13,15 @@ import Data.Word (Word32)
 
 import Interplanetary.Genesis
 
-type OracleStore = HashMap MultiHash Dynamic
-
 data Halt :: * where
   Stuck :: GenesisTerm -> Halt
   BadDynamic :: MultiHash -> Halt
   MissingOracle :: MultiHash -> Halt
-  BadDomainLookup :: Domain -> Location -> Halt
   BadVecLookup :: Word32 -> Halt
 
 deriving instance Show Halt
 
 type Context = EitherT Halt (Reader OracleStore)
-
-domainLookup' :: Domain -> Location -> Context GenesisTerm
-domainLookup' dom loc = case domainLookup dom loc of
-  Just tm -> pure tm
-  Nothing -> left (BadDomainLookup dom loc)
 
 readOracle :: Typeable a => MultiHash -> Context a
 readOracle addr = do
