@@ -8,12 +8,12 @@ import Interplanetary.Syntax
 -- de bruijn:  2 1 0     1           1     2 0      2 0
 -- on : forall e X Y. <i>X -> <i>{<i>X -> [e]Y} -> [e]Y
 -- on : forall e X Y.    X ->    {   X -> [e]Y} -> [e]Y
-onTy :: CompTy
+onTy :: ValTy
 onTy =
   let x = VariableTy 1
       y = VariableTy 0
       eY = Peg emptyAbility y
-  in CompTy [x, SuspendedTy (CompTy [x] eY)] eY
+  in SuspendedTy (CompTy [x, SuspendedTy (CompTy [x] eY)] eY)
 
 on :: Construction'
 on =
@@ -27,11 +27,12 @@ on =
 -- receive
 -- abort
 
-zeroId :: Uid
-zeroId = 0
-
-unitUid :: Uid
+zeroUid, unitUid :: Uid
+zeroUid = 0
 unitUid = 1
+
+zeroTy :: ValTy
+zeroTy = DataTy zeroUid []
 
 unitTy :: ValTy
 unitTy = DataTy unitUid []
@@ -42,7 +43,7 @@ unitVal = Construct unitUid 0 []
 dataTypeTable :: DataTypeTable
 dataTypeTable = IntMap.fromList
   -- data Zero =
-  [ (zeroId, [])
+  [ (zeroUid, [])
 
   -- data Unit = unit
   , (unitUid, [[]])
@@ -54,16 +55,21 @@ receiveId = 1
 abortId = 2
 
 interfaceTypeTable :: InterfaceTable
-interfaceTypeTable = IntMap.fromList
-  -- Send X = send : X -> Unit
-  [ (sendId, EffectInterface 1 [CommandDeclaration [VariableTy 0] unitTy])
+interfaceTypeTable =
+  let x = 0
+  in IntMap.fromList
+    -- Send X = send : X -> Unit
+    [ (sendId, EffectInterface [ValTy] [CommandDeclaration [VariableTy x] unitTy])
 
-  -- Receive X = receive : X
-  , (receiveId, EffectInterface 1 [CommandDeclaration [] (VariableTy 0)])
+    -- Receive X = receive : X
+    , (receiveId, EffectInterface [ValTy] [CommandDeclaration [] (VariableTy x)])
 
-  -- Abort = aborting : Zero
-  , (abortId, EffectInterface 1 [CommandDeclaration [] (DataTy zeroId [])])
-  ]
+    -- Abort = aborting : Zero
+    , (abortId, EffectInterface [ValTy] [CommandDeclaration [] (DataTy zeroUid [])])
+    ]
+
+runCheckMBasic :: CheckM a -> Either CheckFailure a
+runCheckMBasic action = runCheckM action (dataTypeTable, interfaceTypeTable)
 
 -- core frank representation of the pipe multihandler
 pipe :: Construction' -> Construction'
@@ -76,7 +82,8 @@ pipe body =
         let valTy = SuspendedTy (CompTy [] (todo "pipeTy"))
         -- written backwards because we're working at the head
         --                 Y        X        eps
-        in Polytype [TyVar 0, TyVar 1, EffVar 2] valTy
+        -- in Polytype [TyVar 0, TyVar 1, EffVar 2] valTy
+        in Polytype [ValTy, ValTy, EffTy] valTy
       pipeDefn =
         let sendAdj = Adjustment (IntMap.fromList [(sendId, [TyArgVal xTy])])
             receiveAdj = Adjustment (IntMap.fromList [(receiveId, [TyArgVal yTy])])
@@ -93,4 +100,4 @@ pipe body =
                   handleUnit = todo "handle" -- Handle y
               in todo "case" -- Case x [handleUnit]
         in Lambda 2 (Handle sendAdj scrutinee handlers fallback)
-  in Letrec pipeTy [pipeDefn] body
+  in Letrec [(pipeDefn, pipeTy)] body

@@ -6,6 +6,7 @@
 {-# language TupleSections #-}
 {-# language PatternSynonyms #-}
 {-# language Rank2Types #-}
+{-# language StandaloneDeriving #-}
 module Interplanetary.Syntax where
 
 import Control.Error.Util
@@ -46,142 +47,72 @@ data ValTy
   = DataTy Uid (Vector TyArg)
   | SuspendedTy CompTy
   | VariableTy TyVar
-  deriving Eq
+  deriving (Eq, Show)
 
 data CompTy = CompTy
   { compDomain :: Vector ValTy
   , compCodomain :: Peg
-  } deriving Eq
+  } deriving (Eq, Show)
 
 data Peg = Peg
   { pegAbility :: Ability
   , pegVal :: ValTy
-  } deriving Eq
-
--- Note: though this is in the CheckM monad, we don't access any state, though
--- we do use the monad to signal failure TODO: is this a lie?. This is called from
--- instantiateTypeVariables, which pulls out the state table for us.
-substituteTy :: Vector TyArg -> ValTy -> CheckM ValTy
-substituteTy subs =
-  let sub = substituteTy subs
-      subA = substituteAbility subs
-      subArg = todo "subArg"
-  in \case
-    DataTy uid children -> do
-      children' <- forM children subArg
-      pure (DataTy uid children')
-    SuspendedTy (CompTy domain (Peg ability pVal)) -> do
-      ability' <- subA ability
-      domain' <- forM domain sub
-      pVal' <- sub pVal
-      pure (SuspendedTy (CompTy domain' (Peg ability' pVal')))
-    VariableTy var -> do
-      tyArg <- (subs ^? ix var) ?? FailedVarLookup
-      case tyArg of
-        TyArgVal val -> pure val
-        _ -> throwError FailedVarLookup
-
-substituteArg :: Vector TyArg -> TyArg -> CheckM TyArg
-substituteArg subs = \case
-  TyArgVal valTy -> TyArgVal <$> substituteTy subs valTy
-  TyArgAbility ability -> TyArgAbility <$> substituteAbility subs ability
-
-substituteAbility :: Vector TyArg -> Ability -> CheckM Ability
-substituteAbility subs (Ability initiate rows)
-  = Ability initiate <$> forM rows mapRow
-  where mapRow :: Vector TyArg -> CheckM (Vector TyArg)
-        mapRow vals = forM vals (substituteArg subs)
+  } deriving (Eq, Show)
 
 -- We explicitly distinguish between type and effect vars
--- TODO: Use a Value / Effect kind
 data TyEffVar = TyVar TyVar | EffVar EffectVar
+  deriving Show
 
 data TyArg = TyArgVal ValTy | TyArgAbility Ability
-  deriving Eq
+  deriving (Eq, Show)
+
+data Kind = ValTy | EffTy deriving Show
 
 data Polytype = Polytype
   -- Universally quantify over a bunch of variables
-  { polyBinders :: Vector TyEffVar
+  { polyBinders :: Vector Kind
   -- resulting in a value type
   , polyVal :: ValTy
-  }
+  } deriving Show
 
--- -- A collection of data constructor signatures (which can refer to bound type /
--- -- effect variables).
--- data DataTypeInterface = DataTypeInterface
---   -- we universally quantify over some number of type variables
---   { dataTypeUid :: Uid
---   , dataBinderCount :: Int
---   -- a collection of constructors taking some arguments
---   , constructors :: Vector (Vector ValTy)
---   }
---
--- -- TODO: where should this be used?
--- dataTypeSignature
---   :: DataTypeInterface
---   -> Maybe Ability
---   -> Vector ValTy -- ^ saturate
---   -> Int -- ^ constructor number
---   -> CheckM ValTy
--- dataTypeSignature (DataTypeInterface uid numBinders ctrs) ability args ctrIx = do
---   ctr <- (ctrs ^? ix ctrIx) ?? FailedIndex
---   assert InvalidArgumentCount (length args == numBinders)
---   saturatedArgTys <- mapM (substituteArg args) ctr
---   let dataTy = DataTy uid ability args
---   -- TODO: is this the right ability?
---   pure (SuspendedTy (CompTy saturatedArgTys (Peg emptyAbility dataTy)))
+data DataConstructor = DataConstructor (Vector ValTy)
+
+-- A collection of data constructor signatures (which can refer to bound type /
+-- effect variables).
+data DataTypeInterface = DataTypeInterface
+  -- we universally quantify over some number of type variables
+  { dataTypeUid :: Uid
+  , dataBinders :: Vector Kind
+  -- a collection of constructors taking some arguments
+  , constructors :: Vector DataConstructor
+  }
 
 -- commands take arguments (possibly including variables) and return a value
 data CommandDeclaration = CommandDeclaration (Vector ValTy) ValTy
 
 data EffectInterface = EffectInterface
   -- we universally quantify some number of type variables
-  { binderCount :: Int
+  { interfaceBinders :: Vector Kind
   -- a collection of commands
   , commands :: Vector CommandDeclaration
   }
 
--- -- TODO: where should this be used?
--- effectSignature
---   :: EffectInterface
---   -> Vector ValTy -- ^ saturate
---   -> Int -- ^ command number
---   -> CheckM ValTy
--- effectSignature (EffectInterface numBinders cmds) args cmdIx = do
---   CommandDeclaration cmdArgs cmdRet <- (cmds ^? ix cmdIx) ?? FailedIndex
---   assert InvalidArgumentCount (length args == numBinders)
---   saturatedArgs <- mapM (substituteTy args) cmdArgs
---   saturatedRet <- substituteTy args cmdRet
---   pure (SuspendedTy (CompTy saturatedArgs (Peg emptyAbility saturatedRet)))
-
 data InitiateAbility = OpenAbility EffectVar | ClosedAbility
-  deriving Eq
+  deriving (Eq, Show)
 
 data Ability = Ability InitiateAbility (IntMap (Vector TyArg))
-  deriving Eq
-
--- TODO: This `OpenAbility 0` makes me uncomfortable
-emptyAbility :: Ability
-emptyAbility = Ability (OpenAbility 0) IntMap.empty
-
-adjustAbility :: Ability -> Adjustment -> Ability
-adjustAbility (Ability initiate rows) (Adjustment adjustment) =
-  -- union is left-biased and we want to prefer the new interface
-  Ability initiate (IntMap.union adjustment rows)
-
-mergeAbility :: Ability -> Ability -> Ability
-mergeAbility = todo "mergeAbility"
+  deriving (Eq, Show)
 
 -- An adjustment is a mapping from effect inferface id to the types it's
 -- applied to. IE a set of saturated interfaces.
 newtype Adjustment = Adjustment (IntMap {- Uid -> -} (Vector TyArg))
-  deriving Monoid
+  deriving (Monoid, Show)
 
 -- Adjustment handlers are a mapping from effect interface id to the handlers
 -- for each of that interface's constructors.
-data AdjustmentHandlers = AdjustmentHandlers (
-  IntMap {- Uid -> -} (Vector Construction')
-  )
+newtype AdjustmentHandlers = AdjustmentHandlers
+  (IntMap {- Uid -> -} (Vector Construction'))
+  deriving Show
 
 -- TODO: move all the tables into here
 data TypingEnv = TypingEnv (Stack (Either ValTy Polytype))
@@ -193,6 +124,11 @@ type InterfaceTable = IntMap EffectInterface
 type CheckM = ExceptT CheckFailure
   (Reader (DataTypeTable, VarTyTable, InterfaceTable, Ability))
 
+runCheckM :: CheckM a -> (DataTypeTable, InterfaceTable) -> Either CheckFailure a
+runCheckM action (dataTypeTable, interfaceTable) = runReader
+  (runExceptT action)
+  (dataTypeTable, [], interfaceTable, emptyAbility)
+
 -- Terms
 
 data Sort = Use | Construction
@@ -202,8 +138,8 @@ type Construction' = Tm 'Construction
 
 data Tm :: Sort -> * where
   -- inferred
-  Variable            :: TyVar                         -> Use'
-  InstantiatePolyVar  :: TyVar         -> Vector TyArg -> Use'
+  Variable            :: Var                           -> Use'
+  InstantiatePolyVar  :: Var           -> Vector TyArg -> Use'
   Command             :: Uid           -> Row          -> Use'
   OperatorApplication :: Use'          -> Spine        -> Use'
   Annotation          :: Construction' -> ValTy        -> Use'
@@ -220,19 +156,37 @@ data Tm :: Sort -> * where
     -> Construction'
     -> Construction'
   Let    :: Polytype -> Construction'        -> Construction' -> Construction'
-  Letrec :: Polytype -> Vector Construction' -> Construction' -> Construction'
+  Letrec :: Vector (Construction', Polytype) -> Construction' -> Construction'
+
+deriving instance Show (Tm a)
 
 -- type? newtype?
 type Spine = Vector Construction'
 
+-- simple abilities
+
+closedAbility :: Ability
+closedAbility = Ability ClosedAbility IntMap.empty
+
+-- TODO: This `OpenAbility 0` makes me uncomfortable
+emptyAbility :: Ability
+emptyAbility = Ability (OpenAbility 0) IntMap.empty
+
+adjustAbility :: Ability -> Adjustment -> Ability
+adjustAbility (Ability initiate rows) (Adjustment adjustment) =
+  -- union is left-biased and we want to prefer the new interface
+  Ability initiate (IntMap.union adjustment rows)
+
 -- checking
 
 data CheckFailure
-  = UnexpectedOperatorTy
+  = UnexpectedOperatorTy Use' ValTy
   | MismatchingSpineTy
   | TypeMismatch
   | InvalidScrutinee
   | AdjustmentMisalignment
+  | WrongDataType
+  | WrongType Construction' ValTy
   | UnknownDataConstructor
   | MismatchingConstructorTys
   | MismatchingCaseBranches
@@ -251,6 +205,7 @@ data CheckFailure
   | InsufficientScope
   | MismatchingScope
   | PolyvarSaturationMismatch
+  deriving Show
 
 check :: Construction' -> ValTy -> CheckM ()
 check tm ty = case tm of
@@ -258,6 +213,9 @@ check tm ty = case tm of
     inferredTy <- infer use
     when (inferredTy /= ty) (throwError TypeMismatch)
   Construct uid row ctns -> do
+    case ty of
+      DataTy tyUid args -> assert WrongDataType (uid == tyUid)
+      _ -> throwError (WrongType tm ty)
     dataCtrs <- lookupDataType uid
     valTys <- (dataCtrs ^? ix row) ?? UnknownDataConstructor
     zipped <- strictZip ctns valTys ?? MismatchingConstructorTys
@@ -283,11 +241,11 @@ check tm ty = case tm of
   Let polyty rhs body -> do
     withTypes [Right polyty] $ check body ty
     check rhs (polyVal polyty)
-  Letrec polyty handlers body -> do
-    let rhsBodyTy = polyVal polyty -- "A"
-    -- let polyvarTy =
-    withTypes [Right polyty] $ forM_ handlers (`check` rhsBodyTy)
-    check body ty
+  Letrec handlers body -> todo "check Letrec"
+    -- let rhsBodyTy = polyVal polyty -- "A"
+    -- -- let polyvarTy =
+    -- withTypes [Right polyty] $ forM_ handlers (`check` rhsBodyTy)
+    -- check body ty
 
 checkHandlers :: ValTy -> ValTy -> AdjustmentHandlers -> CheckM ()
 checkHandlers scrutineeTy expectedTy (AdjustmentHandlers handlers) = do
@@ -353,19 +311,18 @@ withValTypes valTys = withTypes (Left <$> valTys)
 -- Instantiate type variables (non-recursive). Instantiate effect variables
 -- with the ambient ability. This is Theta from the paper.
 instantiateTypeVariables :: Polytype -> Vector TyArg -> CheckM ValTy
-instantiateTypeVariables (Polytype vars retVal) args = do
-  zipped <- strictZip vars args ?? PolyvarSaturationMismatch
+instantiateTypeVariables (Polytype binders retVal) args = do
+  zipped <- strictZip binders args ?? PolyvarSaturationMismatch
   forM_ zipped $ \pairing -> case pairing of
-    (TyVar _, TyArgVal _) -> pure ()
-    (EffVar _, TyArgAbility _) -> pure ()
+    (ValTy, TyArgVal _) -> pure ()
+    (EffTy, TyArgAbility _) -> pure ()
     _ -> throwError PolyvarSaturationMismatch
 
   substituteTy args retVal
 
 infer :: Use' -> CheckM ValTy
-infer = \case
+infer use = case use of
   Variable ident -> lookupValTy ident
-  -- InstantiatePolyVar  :: TyVar         -> Vector TyArg -> Use'
   InstantiatePolyVar ident args -> do
     polyty <- lookupPolyTy ident
     instantiateTypeVariables polyty args
@@ -383,7 +340,7 @@ infer = \case
         zipped <- strictZip spine domain ?? MismatchingOperatorApplication
         forM_ zipped (uncurry check)
         pure codomain
-      _ -> throwError UnexpectedOperatorTy
+      _ -> throwError (UnexpectedOperatorTy use useTy)
   Annotation tm valTy -> do
     check tm valTy
     pure valTy
@@ -444,3 +401,68 @@ withState' update action = do
   result <- action
   put s
   pure result
+
+-- Note: though this is in the CheckM monad, we don't access any state, though
+-- we do use the monad to signal failure TODO: is this a lie?. This is called from
+-- instantiateTypeVariables, which pulls out the state table for us.
+substituteTy :: Vector TyArg -> ValTy -> CheckM ValTy
+substituteTy subs =
+  let sub = substituteTy subs
+      subA = substituteAbility subs
+      subArg = substituteArg subs
+  in \case
+    DataTy uid children -> do
+      children' <- forM children subArg
+      pure (DataTy uid children')
+    SuspendedTy (CompTy domain (Peg ability pVal)) -> do
+      ability' <- subA ability
+      domain' <- forM domain sub
+      pVal' <- sub pVal
+      pure (SuspendedTy (CompTy domain' (Peg ability' pVal')))
+    VariableTy var -> do
+      tyArg <- (subs ^? ix var) ?? FailedVarLookup
+      case tyArg of
+        TyArgVal val -> pure val
+        _ -> throwError FailedVarLookup
+
+substituteArg :: Vector TyArg -> TyArg -> CheckM TyArg
+substituteArg subs = \case
+  TyArgVal valTy -> TyArgVal <$> substituteTy subs valTy
+  TyArgAbility ability -> TyArgAbility <$> substituteAbility subs ability
+
+substituteAbility :: Vector TyArg -> Ability -> CheckM Ability
+substituteAbility subs (Ability initiate rows)
+  = Ability initiate <$> forM rows mapRow
+  where mapRow :: Vector TyArg -> CheckM (Vector TyArg)
+        mapRow vals = forM vals (substituteArg subs)
+
+merkle :: Tm sort -> Use'
+merkle = todo "merkle"
+
+-- -- TODO: where should this be used?
+-- dataTypeSignature
+--   :: DataTypeInterface
+--   -> Maybe Ability
+--   -> Vector ValTy -- ^ saturate
+--   -> Int -- ^ constructor number
+--   -> CheckM ValTy
+-- dataTypeSignature (DataTypeInterface uid numBinders ctrs) ability args ctrIx = do
+--   ctr <- (ctrs ^? ix ctrIx) ?? FailedIndex
+--   assert InvalidArgumentCount (length args == numBinders)
+--   saturatedArgTys <- mapM (substituteArg args) ctr
+--   let dataTy = DataTy uid ability args
+--   -- TODO: is this the right ability?
+--   pure (SuspendedTy (CompTy saturatedArgTys (Peg emptyAbility dataTy)))
+
+-- -- TODO: where should this be used?
+-- effectSignature
+--   :: EffectInterface
+--   -> Vector ValTy -- ^ saturate
+--   -> Int -- ^ command number
+--   -> CheckM ValTy
+-- effectSignature (EffectInterface numBinders cmds) args cmdIx = do
+--   CommandDeclaration cmdArgs cmdRet <- (cmds ^? ix cmdIx) ?? FailedIndex
+--   assert InvalidArgumentCount (length args == numBinders)
+--   saturatedArgs <- mapM (substituteTy args) cmdArgs
+--   saturatedRet <- substituteTy args cmdRet
+--   pure (SuspendedTy (CompTy saturatedArgs (Peg emptyAbility saturatedRet)))
