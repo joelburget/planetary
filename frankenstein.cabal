@@ -59,7 +59,7 @@ library
     -Wall
     -fwarn-tabs
 
-executable ipc
+executable frankenstein
   main-is          : Main.hs
   hs-source-dirs   : app
   build-depends    :

@@ -26,6 +26,14 @@ useUid = 9
 constructionUid = 10
 spineUid = 11
 
-dataTypeTable :: DataTypeTable
+-- other
+uidUid :: Uid
+uidUid = 12
+
+dataTypeTable :: DataTypeTable String
 dataTypeTable = IntMap.fromList
-  [ ]
+  -- A, B = D [R] | { C } | X
+  [ (valueTyUid, [
+      -- [uidUid
+    ])
+  ]

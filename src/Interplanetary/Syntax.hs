@@ -7,16 +7,21 @@
 {-# language PatternSynonyms #-}
 {-# language Rank2Types #-}
 {-# language StandaloneDeriving #-}
+{-# language TemplateHaskell #-}
+{-# language DeriveFunctor #-}
+{-# language DeriveFoldable #-}
+{-# language DeriveTraversable #-}
 module Interplanetary.Syntax where
 
-import Control.Error.Util
-import Control.Lens hiding ((??), children, use, op)
-import Control.Monad.Reader
-import Control.Monad.State.Strict
-import Control.Monad.Except
+import Bound
+import Control.Monad (ap)
+import Data.Functor.Classes
 import Data.IntMap.Lazy (IntMap)
 import qualified Data.IntMap as IntMap
-import Data.Monoid
+import Data.List (elemIndex)
+import Data.Monoid ((<>))
+
+import Interplanetary.Util
 
 -- TODO:
 -- * Right now we use simple equality to check types but should implement
@@ -31,438 +36,318 @@ import Data.Monoid
 --   - our errors are essentially meaningless
 -- * Should type and effect variables share a namespace?
 
-type Var = Int
-type TyVar = Int
-type EffectVar = Int
 type Uid = Int
 type Row = Int
 
--- TODO change to Vector
-type Vector a = [a]
-type Stack a = [a]
-
 -- Types
 
-data ValTy
-  = DataTy Uid (Vector TyArg)
-  | SuspendedTy CompTy
-  | VariableTy TyVar
-  deriving (Eq, Show)
+data ValTy a
+  = DataTy Uid (Vector (TyArg a))
+  | SuspendedTy (CompTy a)
+  | VariableTy a
+  deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
 
-data CompTy = CompTy
-  { compDomain :: Vector ValTy
-  , compCodomain :: Peg
-  } deriving (Eq, Show)
+data CompTy a = CompTy
+  { compDomain :: Vector (ValTy a)
+  , compCodomain :: Peg a
+  } deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
 
-data Peg = Peg
-  { pegAbility :: Ability
-  , pegVal :: ValTy
-  } deriving (Eq, Show)
+data Peg a = Peg
+  { pegAbility :: Ability a
+  , pegVal :: ValTy a
+  } deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
 
--- We explicitly distinguish between type and effect vars
-data TyEffVar = TyVar TyVar | EffVar EffectVar
-  deriving Show
+data TyArg a
+  = TyArgVal (ValTy a)
+  | TyArgAbility (Ability a)
+  deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
 
-data TyArg = TyArgVal ValTy | TyArgAbility Ability
-  deriving (Eq, Show)
+data Kind = ValTy | EffTy
+  deriving (Show, Eq, Ord)
 
-data Kind = ValTy | EffTy deriving Show
-
-data Polytype = Polytype
+data Polytype a = Polytype
   -- Universally quantify over a bunch of variables
-  { polyBinders :: Vector Kind
+  { polyBinders :: Vector (a, Kind)
   -- resulting in a value type
-  , polyVal :: ValTy
-  } deriving Show
+  , polyVal :: ValTy a
+  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
-data DataConstructor = DataConstructor (Vector ValTy)
+data DataConstructor a = DataConstructor (Vector (ValTy a))
+  deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 -- A collection of data constructor signatures (which can refer to bound type /
 -- effect variables).
-data DataTypeInterface = DataTypeInterface
+data DataTypeInterface a = DataTypeInterface
+  -- { dataTypeUid :: Uid
   -- we universally quantify over some number of type variables
-  { dataTypeUid :: Uid
-  , dataBinders :: Vector Kind
+  { dataBinders :: Vector (a, Kind)
   -- a collection of constructors taking some arguments
-  , constructors :: Vector DataConstructor
-  }
+  , constructors :: Vector (DataConstructor a)
+  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 -- commands take arguments (possibly including variables) and return a value
-data CommandDeclaration = CommandDeclaration (Vector ValTy) ValTy
+data CommandDeclaration a = CommandDeclaration (Vector (ValTy a)) (ValTy a)
+  deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
-data EffectInterface = EffectInterface
+data EffectInterface a = EffectInterface
   -- we universally quantify some number of type variables
-  { interfaceBinders :: Vector Kind
+  { interfaceBinders :: Vector (a, Kind)
   -- a collection of commands
-  , commands :: Vector CommandDeclaration
-  }
+  , commands :: Vector (CommandDeclaration a)
+  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
-data InitiateAbility = OpenAbility EffectVar | ClosedAbility
-  deriving (Eq, Show)
+data InitiateAbility a = OpenAbility a | ClosedAbility
+  deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
 
-data Ability = Ability InitiateAbility (IntMap (Vector TyArg))
-  deriving (Eq, Show)
+data Ability a = Ability (InitiateAbility a) (IntMap (Vector (TyArg a)))
+  deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
 
 -- An adjustment is a mapping from effect inferface id to the types it's
 -- applied to. IE a set of saturated interfaces.
-newtype Adjustment = Adjustment (IntMap {- Uid -> -} (Vector TyArg))
-  deriving (Monoid, Show)
-
--- Adjustment handlers are a mapping from effect interface id to the handlers
--- for each of that interface's constructors.
-newtype AdjustmentHandlers = AdjustmentHandlers
-  (IntMap {- Uid -> -} (Vector Construction'))
-  deriving Show
+newtype Adjustment a = Adjustment (IntMap {- Uid -> -} (Vector (TyArg a)))
+  deriving (Monoid, Show, Eq, Ord, Functor, Foldable, Traversable)
 
 -- TODO: move all the tables into here
-data TypingEnv = TypingEnv (Stack (Either ValTy Polytype))
+data TypingEnv a = TypingEnv (Stack (Either (ValTy a) (Polytype a)))
 
-type DataTypeTable = IntMap (Vector (Vector ValTy))
-type VarTyTable = Stack (Either ValTy Polytype) -- IntMap ValTy
-type InterfaceTable = IntMap EffectInterface
-
-type CheckM = ExceptT CheckFailure
-  (Reader (DataTypeTable, VarTyTable, InterfaceTable, Ability))
-
-runCheckM :: CheckM a -> (DataTypeTable, InterfaceTable) -> Either CheckFailure a
-runCheckM action (dataTypeTable, interfaceTable) = runReader
-  (runExceptT action)
-  (dataTypeTable, [], interfaceTable, emptyAbility)
+type DataTypeTable a = IntMap (Vector (Vector (ValTy a)))
+type VarTyTable a = Stack (Either (ValTy a) (Polytype a)) -- IntMap ValTy
+type InterfaceTable a = IntMap (EffectInterface a)
 
 -- Terms
 
-data Sort = Use | Construction
-
-type Use' = Tm 'Use
-type Construction' = Tm 'Construction
-
-data Tm :: Sort -> * where
+data Tm :: * -> * -> * where
   -- inferred
-  Variable            :: Var                           -> Use'
-  InstantiatePolyVar  :: Var           -> Vector TyArg -> Use'
-  Command             :: Uid           -> Row          -> Use'
-  OperatorApplication :: Use'          -> Spine        -> Use'
-  Annotation          :: Construction' -> ValTy        -> Use'
+  Variable            :: b                        -> Tm a b
+  InstantiatePolyVar  :: b    -> Vector (TyArg a) -> Tm a b
+  Command             :: Uid  -> Row              -> Tm a b
+  OperatorApplication :: Tm a b -> Spine a b      -> Tm a b
+  Annotation          :: Tm a b -> ValTy a        -> Tm a b
 
   -- checked
-  ConstructUse :: Use'                                -> Construction'
-  Construct    :: Uid  -> Row -> Vector Construction' -> Construction'
-  Lambda       :: Int  -> Construction'               -> Construction'
-  Case         :: Use' -> Vector Construction'        -> Construction'
+  ConstructUse :: Tm a b                                   -> Tm a b
+  Construct    :: Uid  -> Row -> Vector (Tm a b)           -> Tm a b
+  Lambda       :: Scope Int (Tm a) b                       -> Tm a b
+  Case         :: Tm a b -> Vector (Scope Int (Tm a) b) -> Tm a b
   Handle
-    :: Adjustment
-    -> Use'
-    -> AdjustmentHandlers
-    -> Construction'
-    -> Construction'
-  Let    :: Polytype -> Construction'        -> Construction' -> Construction'
-  Letrec :: Vector (Construction', Polytype) -> Construction' -> Construction'
-
-deriving instance Show (Tm a)
+    :: Adjustment a
+    -> Tm a b
+    -> AdjustmentHandlers a b
+    -> Scope () (Tm a) b
+    -> Tm a b
+  Let
+    :: Polytype a
+    -> Tm a b
+    -> Scope () (Tm a) b
+    -> Tm a b
+  Letrec
+    :: Vector (Tm a b, Polytype a)
+    -> Scope Int (Tm a) b
+    -> Tm a b
 
 -- type? newtype?
-type Spine = Vector Construction'
+type Spine a b = Vector (Tm a b)
+
+-- Adjustment handlers are a mapping from effect interface id to the handlers
+-- for each of that interface's constructors.
+newtype AdjustmentHandlers a b = AdjustmentHandlers
+  (IntMap {- Uid -> -} (Vector (Scope Int (Tm a) b)))
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+-- patterns
+
+lam :: Eq b => Vector b -> Tm a b -> Tm a b
+lam vars body = Lambda (abstract (`elemIndex` vars) body)
+
+let_ :: Eq b => b -> Polytype a -> Tm a b -> Tm a b -> Tm a b
+let_ name ty rhs body = Let ty rhs (abstract1 name body)
+
+letrec :: Eq b => Vector b -> Vector (Tm a b, Polytype a) -> Tm a b -> Tm a b
+letrec names binderVals body =
+  Letrec binderVals (abstract (`elemIndex` names) body)
+
+pattern V :: b -> Tm a b
+pattern V name = Variable name
+
+pattern VTy :: a -> ValTy a
+pattern VTy name = VariableTy name
 
 -- simple abilities
 
-closedAbility :: Ability
+closedAbility :: Ability a
 closedAbility = Ability ClosedAbility IntMap.empty
 
--- TODO: This `OpenAbility 0` makes me uncomfortable
-emptyAbility :: Ability
-emptyAbility = Ability (OpenAbility 0) IntMap.empty
-
-adjustAbility :: Ability -> Adjustment -> Ability
-adjustAbility (Ability initiate rows) (Adjustment adjustment) =
-  -- union is left-biased and we want to prefer the new interface
-  Ability initiate (IntMap.union adjustment rows)
-
--- checking
-
-data CheckFailure
-  = UnexpectedOperatorTy Use' ValTy
-  | MismatchingSpineTy
-  | TypeMismatch
-  | InvalidScrutinee
-  | AdjustmentMisalignment
-  | WrongDataType
-  | WrongType Construction' ValTy
-  | UnknownDataConstructor
-  | MismatchingConstructorTys
-  | MismatchingCaseBranches
-  | FailedDataTypeLookup
-  | FailedVarLookup
-  | FailedPolytypeLookup
-  | FailedValTyLookup
-  | MismatchingOperatorApplication
-  | InvalidAbility
-  | InvalidArgumentCount
-  | FailedIndex
-  | FailedEffectInterfaceLookup
-  | InvalidLambdaType
-  | FailedSubstitution
-  | LambdaTypeMismatch
-  | InsufficientScope
-  | MismatchingScope
-  | PolyvarSaturationMismatch
-  deriving Show
-
-check :: Construction' -> ValTy -> CheckM ()
-check tm ty = case tm of
-  ConstructUse use -> do
-    inferredTy <- infer use
-    when (inferredTy /= ty) (throwError TypeMismatch)
-  Construct uid row ctns -> do
-    case ty of
-      DataTy tyUid args -> assert WrongDataType (uid == tyUid)
-      _ -> throwError (WrongType tm ty)
-    dataCtrs <- lookupDataType uid
-    valTys <- (dataCtrs ^? ix row) ?? UnknownDataConstructor
-    zipped <- strictZip ctns valTys ?? MismatchingConstructorTys
-    forM_ zipped (uncurry check)
-  Lambda numBinders body -> case ty of
-    SuspendedTy (CompTy dom codom) -> do
-      assert LambdaTypeMismatch (length dom == numBinders)
-      withValTypes dom (checkWithAmbient body codom)
-    _ -> throwError InvalidLambdaType
-  Case scrutinee branches -> do
-    scrutTy <- infer scrutinee
-    case scrutTy of
-      DataTy uid _args -> do
-        dataRows <- lookupDataType uid
-        zipped <- strictZip dataRows branches ?? MismatchingCaseBranches
-        forM_ zipped $ \(dataConTys, rhs) ->
-          withValTypes dataConTys (check rhs ty)
-      _ -> throwError InvalidScrutinee
-  Handle adjustment scrutinee handlers fallback -> do
-    scrutineeTy <- withAdjustment adjustment $ infer scrutinee
-    checkHandlers scrutineeTy ty handlers
-    check fallback ty
-  Let polyty rhs body -> do
-    withTypes [Right polyty] $ check body ty
-    check rhs (polyVal polyty)
-  Letrec handlers body -> todo "check Letrec"
-    -- let rhsBodyTy = polyVal polyty -- "A"
-    -- -- let polyvarTy =
-    -- withTypes [Right polyty] $ forM_ handlers (`check` rhsBodyTy)
-    -- check body ty
-
-checkHandlers :: ValTy -> ValTy -> AdjustmentHandlers -> CheckM ()
-checkHandlers scrutineeTy expectedTy (AdjustmentHandlers handlers) = do
-  iforM_ handlers $ \uid handlerRows ->
-    iforM_ handlerRows $ \row handler -> do
-      -- TODO: what's the ability supposed to be?
-      CompTy dom (Peg ability codom) <- lookupCommandTy uid row
-      -- B -> [Sigma]A'
-      let contTy = SuspendedTy (CompTy [codom] (Peg ability scrutineeTy))
-      withValTypes (dom <> [contTy]) (check handler expectedTy)
-
--- | Get the types each data constructor holds for this data type.
---
--- Question: should this be parametrized by type parameters / abilities? IE do
--- we allow GADTs?
-lookupDataType :: Uid -> CheckM (Vector (Vector ValTy))
-lookupDataType uid = asks (^? _1 . ix uid) >>= (?? FailedDataTypeLookup)
-
-lookupEffectInterface :: Uid -> CheckM EffectInterface
-lookupEffectInterface uid
-  = asks (^? _3 . ix uid) >>= (?? FailedEffectInterfaceLookup)
-
--- TODO: do we need to instantiate polymorphic variables when looking up?
-lookupPolyTy :: TyVar -> CheckM Polytype
-lookupPolyTy vId = asks (^? _2 . ix vId . _Right) >>= (?? FailedPolytypeLookup)
-
-lookupValTy :: TyVar -> CheckM ValTy
-lookupValTy vId = asks (^? _2 . ix vId . _Left) >>= (?? FailedValTyLookup)
-
-getAmbient :: CheckM Ability
-getAmbient = asks (^. _4)
-
-lookupCommandTy :: Uid -> Row -> CheckM CompTy
-lookupCommandTy uid row = do
-  -- TODO use numBinders? Bind here?
-  EffectInterface _numBinders cmds <- lookupEffectInterface uid
-  CommandDeclaration domain codomain <- (cmds ^? ix row) ?? FailedIndex
-  ability <- getAmbient
-  pure (CompTy domain (Peg ability codomain))
-
-checkWithAmbient :: Construction' -> Peg -> CheckM ()
-checkWithAmbient tm (Peg ability ty) = withAmbient ability $ check tm ty
-
-withAdjustment :: Adjustment -> CheckM a -> CheckM a
-withAdjustment adjustment action = do
-  ambient <- getAmbient
-  withAmbient (adjustAbility ambient adjustment) action
-
-withAmbient :: Ability -> CheckM a -> CheckM a
-withAmbient ability = local (& _4 .~ ability)
-
--- Push at the front (the top of the stack)
-withTypes :: Vector (Either ValTy Polytype) -> CheckM a -> CheckM a
-withTypes stack = local (& _2 %~ (stack <>))
-
-withValTypes :: Vector ValTy -> CheckM a -> CheckM a
-withValTypes valTys = withTypes (Left <$> valTys)
-
--- data Polytype = Polytype (Vector TyEffVar) ValTy
--- data TyArg = TyArgVal ValTy | TyArgAbility Ability
--- data TyEffVar = TyVar TyVar | EffVar EffectVar
-
--- Instantiate type variables (non-recursive). Instantiate effect variables
--- with the ambient ability. This is Theta from the paper.
-instantiateTypeVariables :: Polytype -> Vector TyArg -> CheckM ValTy
-instantiateTypeVariables (Polytype binders retVal) args = do
-  zipped <- strictZip binders args ?? PolyvarSaturationMismatch
-  forM_ zipped $ \pairing -> case pairing of
-    (ValTy, TyArgVal _) -> pure ()
-    (EffTy, TyArgAbility _) -> pure ()
-    _ -> throwError PolyvarSaturationMismatch
-
-  substituteTy args retVal
-
-infer :: Use' -> CheckM ValTy
-infer use = case use of
-  Variable ident -> lookupValTy ident
-  InstantiatePolyVar ident args -> do
-    polyty <- lookupPolyTy ident
-    instantiateTypeVariables polyty args
-  Command uid row -> do
-    c@(CompTy _domain _codomain) <- lookupCommandTy uid row
-    -- TODO make sure sigma is set in the peg
-    pure (SuspendedTy c)
-  OperatorApplication use spine -> do
-    ambient <- getAmbient
-    useTy <- infer use
-    case useTy of
-      SuspendedTy (CompTy domain (Peg ability codomain)) -> do
-        when (length domain /= length spine) (throwError MismatchingSpineTy)
-        when (ability /= ambient) (throwError InvalidAbility)
-        zipped <- strictZip spine domain ?? MismatchingOperatorApplication
-        forM_ zipped (uncurry check)
-        pure codomain
-      _ -> throwError (UnexpectedOperatorTy use useTy)
-  Annotation tm valTy -> do
-    check tm valTy
-    pure valTy
+-- TODO: This `OpenAbility e` makes me uncomfortable
+emptyAbility :: Ability String
+emptyAbility = Ability (OpenAbility "e") IntMap.empty
 
 
--- evaluation
+-- Instance Hell:
 
-data Halt
-  = UnscopedVariableError
-  | UnexpectedToplevelAnnotation
-  | UnexpectedApplicand
-  | SpineWrongLength
+deriving instance (Eq a, Eq b) => Eq (Tm a b)
+deriving instance (Ord a, Ord b) => Ord (Tm a b)
+deriving instance (Show a, Show b) => Show (Tm a b)
+deriving instance Functor (Tm a)
+deriving instance Foldable (Tm a)
+deriving instance Traversable (Tm a)
+instance Applicative (Tm a) where pure = Variable; (<*>) = ap
 
-type EvalM = ExceptT Halt (Reader (IntMap Use'))
+instance Eq1 ValTy where
+  liftEq eq (DataTy uid1 args1) (DataTy uid2 args2)
+    = uid1 == uid2 && liftEq (liftEq eq) args1 args2
+  liftEq eq (SuspendedTy cty1) (SuspendedTy cty2) = liftEq eq cty1 cty2
+  liftEq eq (VariableTy v1) (VariableTy v2) = eq v1 v2
+  liftEq _ _ _ = False
 
-lookupOp :: Uid -> Row -> EvalM Use'
-lookupOp = todo "lookupOp"
+instance Eq1 CompTy where
+  liftEq eq (CompTy dom1 codom1) (CompTy dom2 codom2)
+    = liftEq (liftEq eq) dom1 dom2 && liftEq eq codom1 codom2
 
-step :: Tm a -> EvalM (Tm a)
-step (Variable i) = (?? UnscopedVariableError) =<< (asks (^? ix i))
-step (InstantiatePolyVar var args) = todo "step InstantiatePolyVar " var args
-step (Command interface row) = do
-  op <- lookupOp interface row
-  step op
--- TODO: check spine is correct length?
-step (OperatorApplication use spine) = case use of
-  Annotation (Lambda binders body) _type -> todo "fix" $ substitute spine body
-  _ -> throwError UnexpectedApplicand
+instance Eq1 Peg where
+  liftEq eq (Peg ab1 val1) (Peg ab2 val2)
+    = liftEq eq ab1 ab2 && liftEq eq val1 val2
 
--- TODO justify this rule
-step (Annotation _ctr _type) = throwError UnexpectedToplevelAnnotation
+instance Eq1 TyArg where
+  liftEq eq (TyArgVal val1) (TyArgVal val2) = liftEq eq val1 val2
+  liftEq eq (TyArgAbility ab1) (TyArgAbility ab2) = liftEq eq ab1 ab2
+  liftEq _ _ _ = False
 
-step (ConstructUse _) = todo "do this"
+instance Eq1 Polytype where
+  liftEq eq (Polytype binders1 val1) (Polytype binders2 val2) =
+    let f (a, kind1) (b, kind2) = eq a b && kind1 == kind2
+    in liftEq f binders1 binders2 && liftEq eq val1 val2
 
+instance Eq1 Ability
+instance Eq1 InitiateAbility
+instance Eq a => Eq1 (AdjustmentHandlers a)
+instance Ord a => Ord1 (AdjustmentHandlers a)
 
-substitute :: Spine -> Tm a -> Tm a
-substitute = todo "substitute"
+instance Eq e => Eq1 (Tm e) where
+  liftEq eq l r = case (l, r) of
+    (Variable a, Variable b) -> eq a b
+    (InstantiatePolyVar var1 args1, InstantiatePolyVar var2 args2) ->
+      liftEq (==) args1 args2 && eq var1 var2
+    (Command uid1 row1, Command uid2 row2) -> uid1 == uid2 && row1 == row2
+    (OperatorApplication op1 spine1, OperatorApplication op2 spine2) ->
+      liftEq eq op1 op2 && liftEq (liftEq eq) spine1 spine2
+    (Annotation tm1 ty1, Annotation tm2 ty2) ->
+      liftEq eq tm1 tm2 && ty1 == ty2
+    (ConstructUse tm1, ConstructUse tm2) -> liftEq eq tm1 tm2
+    (Construct uid1 row1 app1, Construct uid2 row2 app2) ->
+      uid1 == uid2 && row1 == row2 && liftEq (liftEq eq) app1 app2
+    (Lambda body1, Lambda body2) -> liftEq eq body1 body2
+    (Case tm1 rows1, Case tm2 rows2) ->
+      liftEq eq tm1 tm2 && liftEq (liftEq eq) rows1 rows2
+    (Handle adj1 rhs1 handlers1 body1, Handle adj2 rhs2 handlers2 body2) ->
+      adj1 == adj2 &&
+      liftEq eq rhs1 rhs2 &&
+      liftEq eq handlers1 handlers2 &&
+      liftEq eq body1 body2
+    (Let pty1 tm1 body1, Let pty2 tm2 body2) ->
+      pty1 == pty2 && liftEq eq tm1 tm2 && liftEq eq body1 body2
+    (Letrec binders1 body1, Letrec binders2 body2) ->
+      liftEq bindersEq binders1 binders2 &&
+      liftEq eq body1 body2
+    _ -> False
 
--- util
+          -- bindersEq :: (Tm t a, Polytype t) -> (Tm t b, Polytype t) -> Bool
+          -- bindersEq l r = eq' *** (==)
+    where bindersEq (tm1, pty1) (tm2, pty2) = liftEq eq tm1 tm2 && pty1 == pty2
 
-assertM :: Bool -> Maybe ()
-assertM valid = if valid then pure () else Nothing
+instance Ord o => Ord1 (Tm o) where
+  liftCompare cmp l r = case (l, r) of
+    (Variable a, Variable b) -> cmp a b
+    (InstantiatePolyVar var1 args1, InstantiatePolyVar var2 args2) ->
+      liftCompare compare args1 args2 <> cmp var1 var2
+    (Command uid1 row1, Command uid2 row2) ->
+      compare uid1 uid2 <> compare row1 row2
+    (OperatorApplication op1 spine1, OperatorApplication op2 spine2) ->
+      (liftCompare cmp) op1 op2 <> liftCompare (liftCompare cmp) spine1 spine2
+    (Annotation tm1 ty1, Annotation tm2 ty2) ->
+      (liftCompare cmp) tm1 tm2 <> compare ty1 ty2
+    (ConstructUse tm1, ConstructUse tm2) -> (liftCompare cmp) tm1 tm2
+    (Construct uid1 row1 app1, Construct uid2 row2 app2) ->
+      compare uid1 uid2 <> compare row1 row2 <> liftCompare (liftCompare cmp) app1 app2
+    (Lambda body1, Lambda body2) -> (liftCompare cmp) body1 body2
+    (Case tm1 rows1, Case tm2 rows2) ->
+      (liftCompare cmp) tm1 tm2 <> liftCompare (liftCompare cmp) rows1 rows2
+    (Handle adj1 rhs1 handlers1 body1, Handle adj2 rhs2 handlers2 body2) ->
+      compare adj1 adj2 <>
+      (liftCompare cmp) rhs1 rhs2 <>
+      liftCompare cmp handlers1 handlers2 <>
+      (liftCompare cmp) body1 body2
+    (Let pty1 tm1 body1, Let pty2 tm2 body2) ->
+      compare pty1 pty2 <> (liftCompare cmp) tm1 tm2 <> (liftCompare cmp) body1 body2
+    (Letrec binders1 body1, Letrec binders2 body2) ->
+      liftCompare bindersCmp binders1 binders2 <>
+      liftCompare cmp body1 body2
 
-assert :: Monad m => e -> Bool -> ExceptT e m ()
-assert reason valid = if valid then pure () else throwError reason
+    (x, y) -> compare (ordering x) (ordering y)
 
-todo :: String -> forall a. a
-todo = error
+          -- bindersCmp :: forall a b t. Ord t => (Tm t a, Polytype t) -> (Tm t b, Polytype t) -> Ordering
+          -- bindersCmp l r = cmp' *** compare
+    where bindersCmp (tm1, pty1) (tm2, pty2) =
+            liftCompare cmp tm1 tm2 <> compare pty1 pty2
 
-strictZip :: Vector a -> Vector b -> Maybe (Vector (a, b))
-strictZip as bs = if length as == length bs then Just (zip as bs) else Nothing
+          -- This section is rather arbitrary
+          ordering = \case
+            Variable{}            -> 0
+            InstantiatePolyVar{}  -> 1
+            Command{}             -> 2
+            OperatorApplication{} -> 3
+            Annotation{}          -> 4
+            ConstructUse{}        -> 5
+            Construct{}           -> 6
+            Lambda{}              -> 7
+            Case{}                -> 8
+            Handle{}              -> 9
+            Let{}                 -> 10
+            Letrec{}              -> 11
 
--- TODO: this has to be a standard function
-withState' :: MonadState s m => (s -> s) -> m a -> m a
-withState' update action = do
-  s <- get
-  put (update s)
-  result <- action
-  put s
-  pure result
+instance Show a => Show1 (Tm a) where
+  liftShowsPrec s sl d = \case
+    -- TODO, obviously
+    Variable b -> showParen (d > 10) $ showString "Variable " . s 11 b
+    InstantiatePolyVar b tys -> showParen (d > 10) $
+      showString "InstantiatePolyVar " . s 11 b . showString " " . shows tys
+    Command uid row ->
+      showString "Command " . shows uid . showString " " . shows row
+    OperatorApplication tm spine ->
+      showString "OperatorApplication " .
+      liftShowsPrec s sl d tm .
+      liftShowList s sl spine
+    Annotation _ _ -> showString "Annotation"
+    ConstructUse _ -> showString "ConstructUse"
+    Construct _ _ _ -> showString "Construct"
+    Lambda scope -> liftShowsPrec s sl d scope
+    Case _ _ -> showString "Case"
+    Handle _ _ _ _ -> showString "Handle"
+    Let _ _ _ -> showString "Let"
+    Letrec _ _ -> showString "Letrec"
+    -- TODO
 
--- Note: though this is in the CheckM monad, we don't access any state, though
--- we do use the monad to signal failure TODO: is this a lie?. This is called from
--- instantiateTypeVariables, which pulls out the state table for us.
-substituteTy :: Vector TyArg -> ValTy -> CheckM ValTy
-substituteTy subs =
-  let sub = substituteTy subs
-      subA = substituteAbility subs
-      subArg = substituteArg subs
-  in \case
-    DataTy uid children -> do
-      children' <- forM children subArg
-      pure (DataTy uid children')
-    SuspendedTy (CompTy domain (Peg ability pVal)) -> do
-      ability' <- subA ability
-      domain' <- forM domain sub
-      pVal' <- sub pVal
-      pure (SuspendedTy (CompTy domain' (Peg ability' pVal')))
-    VariableTy var -> do
-      tyArg <- (subs ^? ix var) ?? FailedVarLookup
-      case tyArg of
-        TyArgVal val -> pure val
-        _ -> throwError FailedVarLookup
+-- instance
 
-substituteArg :: Vector TyArg -> TyArg -> CheckM TyArg
-substituteArg subs = \case
-  TyArgVal valTy -> TyArgVal <$> substituteTy subs valTy
-  TyArgAbility ability -> TyArgAbility <$> substituteAbility subs ability
+instance Monad (Tm a) where
+  return = Variable
 
-substituteAbility :: Vector TyArg -> Ability -> CheckM Ability
-substituteAbility subs (Ability initiate rows)
-  = Ability initiate <$> forM rows mapRow
-  where mapRow :: Vector TyArg -> CheckM (Vector TyArg)
-        mapRow vals = forM vals (substituteArg subs)
+  Variable a >>= f = f a
+  InstantiatePolyVar a _ >>= f = f a
+  Command uid row >>= _ = Command uid row
+  OperatorApplication tm spine >>= f
+    = OperatorApplication (tm >>= f) ((>>= f) <$> spine)
+  Annotation tm ty >>= f = Annotation (tm >>= f) ty
 
-merkle :: Tm sort -> Use'
-merkle = todo "merkle"
-
--- -- TODO: where should this be used?
--- dataTypeSignature
---   :: DataTypeInterface
---   -> Maybe Ability
---   -> Vector ValTy -- ^ saturate
---   -> Int -- ^ constructor number
---   -> CheckM ValTy
--- dataTypeSignature (DataTypeInterface uid numBinders ctrs) ability args ctrIx = do
---   ctr <- (ctrs ^? ix ctrIx) ?? FailedIndex
---   assert InvalidArgumentCount (length args == numBinders)
---   saturatedArgTys <- mapM (substituteArg args) ctr
---   let dataTy = DataTy uid ability args
---   -- TODO: is this the right ability?
---   pure (SuspendedTy (CompTy saturatedArgTys (Peg emptyAbility dataTy)))
-
--- -- TODO: where should this be used?
--- effectSignature
---   :: EffectInterface
---   -> Vector ValTy -- ^ saturate
---   -> Int -- ^ command number
---   -> CheckM ValTy
--- effectSignature (EffectInterface numBinders cmds) args cmdIx = do
---   CommandDeclaration cmdArgs cmdRet <- (cmds ^? ix cmdIx) ?? FailedIndex
---   assert InvalidArgumentCount (length args == numBinders)
---   saturatedArgs <- mapM (substituteTy args) cmdArgs
---   saturatedRet <- substituteTy args cmdRet
---   pure (SuspendedTy (CompTy saturatedArgs (Peg emptyAbility saturatedRet)))
+  ConstructUse tm >>= f = ConstructUse (tm >>= f)
+  Construct uid row tms >>= f = Construct uid row ((>>= f) <$> tms)
+  Lambda body >>= f = Lambda (body >>>= f)
+  Case tm branches >>= f = Case (tm >>= f) ((>>>= f) <$> branches)
+  Handle adj body (AdjustmentHandlers handlers) rhs >>= f = Handle
+    adj
+    (body >>= f)
+    (AdjustmentHandlers ((fmap.fmap) (>>>= f) handlers))
+    (rhs >>>= f)
+  Let poly body rhs >>= f = Let poly (body >>= f) (rhs >>>= f)
+  Letrec bindings rhs >>= f =
+    let g (tm, poly) = (tm >>= f, poly)
+    in Letrec (g <$> bindings) (rhs >>>= f)
