@@ -291,7 +291,7 @@ instance Ord o => Ord1 (Tm o) where
 
           -- This section is rather arbitrary
           ordering = \case
-            Variable{}            -> 0
+            Variable{}            -> (0 :: Int)
             InstantiatePolyVar{}  -> 1
             Command{}             -> 2
             OperatorApplication{} -> 3
@@ -325,8 +325,6 @@ instance Show a => Show1 (Tm a) where
     Let _ _ _ -> showString "Let"
     Letrec _ _ -> showString "Letrec"
     -- TODO
-
--- instance
 
 instance Monad (Tm a) where
   return = Variable
