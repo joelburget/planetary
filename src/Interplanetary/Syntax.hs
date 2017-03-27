@@ -67,10 +67,20 @@ data Kind = ValTy | EffTy
 
 data Polytype a = Polytype
   -- Universally quantify over a bunch of variables
-  { polyBinders :: Vector (a, Kind)
+  { polyBinders :: Vector Kind
   -- resulting in a value type
-  , polyVal :: ValTy a
+  , polyVal :: Scope Int ValTy a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+
+polytype :: Eq a => Vector (a, Kind) -> ValTy a -> Polytype a
+polytype binders body =
+  let (names, kinds) = unzip binders
+  in Polytype kinds (abstract (`elemIndex` names) body)
+
+instance Show1 ValTy where
+instance Ord1 ValTy where
+instance Applicative ValTy where
+instance Monad ValTy where
 
 data DataConstructor a = DataConstructor (Vector (ValTy a))
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
@@ -118,16 +128,16 @@ type InterfaceTable a = IntMap (EffectInterface a)
 
 data Tm :: * -> * -> * where
   -- inferred
-  Variable            :: b                        -> Tm a b
-  InstantiatePolyVar  :: b    -> Vector (TyArg a) -> Tm a b
-  Command             :: Uid  -> Row              -> Tm a b
-  OperatorApplication :: Tm a b -> Spine a b      -> Tm a b
-  Annotation          :: Tm a b -> ValTy a        -> Tm a b
+  Variable            :: b                          -> Tm a b
+  InstantiatePolyVar  :: b      -> Vector (TyArg a) -> Tm a b
+  Command             :: Uid    -> Row              -> Tm a b
+  OperatorApplication :: Tm a b -> Spine a b        -> Tm a b
+  Annotation          :: Tm a b -> ValTy a          -> Tm a b
 
   -- checked
-  ConstructUse :: Tm a b                                   -> Tm a b
-  Construct    :: Uid  -> Row -> Vector (Tm a b)           -> Tm a b
-  Lambda       :: Scope Int (Tm a) b                       -> Tm a b
+  ConstructUse :: Tm a b                                -> Tm a b
+  Construct    :: Uid  -> Row -> Vector (Tm a b)        -> Tm a b
+  Lambda       :: Scope Int (Tm a) b                    -> Tm a b
   Case         :: Tm a b -> Vector (Scope Int (Tm a) b) -> Tm a b
   Handle
     :: Adjustment a
@@ -214,8 +224,7 @@ instance Eq1 TyArg where
 
 instance Eq1 Polytype where
   liftEq eq (Polytype binders1 val1) (Polytype binders2 val2) =
-    let f (a, kind1) (b, kind2) = eq a b && kind1 == kind2
-    in liftEq f binders1 binders2 && liftEq eq val1 val2
+    liftEq (==) binders1 binders2 && liftEq eq val1 val2
 
 instance Eq1 Ability
 instance Eq1 InitiateAbility

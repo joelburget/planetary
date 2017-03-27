@@ -18,6 +18,7 @@ library
     Interplanetary.Predefined
     Interplanetary.Examples
     Interplanetary.Parser
+    Interplanetary.Eval
     Tests.Checking
     Tests.Parser
     -- Interplanetary.Genesis

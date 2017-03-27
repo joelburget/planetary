@@ -1,51 +1,51 @@
 {-# language DataKinds #-}
 {-# language GADTs #-}
+{-# language LambdaCase #-}
 
 module Interplanetary.Eval where
 
-import Control.Lens.Getter (view)
+import Bound
+import Control.Lens hiding ((??))
 import Control.Lens.At (at)
+import Control.Lens.Getter (view)
 import Control.Monad.Reader
 import Control.Monad.Trans.Either (EitherT(runEitherT), left)
 import Data.Dynamic
 import Data.HashMap.Lazy (HashMap)
 import Data.Word (Word32)
 
-import Interplanetary.Genesis
+import Interplanetary.Syntax
+import Interplanetary.Util
+
+type TmI = Tm Int Int
 
 data Halt :: * where
-  Stuck :: GenesisTerm -> Halt
-  BadDynamic :: MultiHash -> Halt
-  MissingOracle :: MultiHash -> Halt
-  BadVecLookup :: Word32 -> Halt
+  Stuck :: TmI -> Halt
+  -- BadDynamic :: MultiHash -> Halt
+  -- MissingOracle :: MultiHash -> Halt
+  -- BadVecLookup :: Word32 -> Halt
+  RowBound :: Halt
 
 deriving instance Show Halt
 
-type Context = EitherT Halt (Reader OracleStore)
+type EvalContext = EitherT Halt (Reader ())
 
-readOracle :: Typeable a => MultiHash -> Context a
-readOracle addr = do
-  mapContents <- view (at addr)
-  case mapContents of
-    Nothing -> left (MissingOracle addr)
-    Just dyn ->
-      case fromDynamic dyn of
-        Nothing -> left (BadDynamic addr)
-        Just a -> pure a
-
-runContext :: OracleStore -> Context GenesisTerm -> Either Halt GenesisTerm
+runContext :: () -> EvalContext TmI -> Either Halt TmI
 runContext store ctxTm = runReader (runEitherT ctxTm) store
 
-step :: GenesisTerm -> Context GenesisTerm
-step v@(Value _) = pure v
-step c@(Covalue _) = pure c
+step :: TmI -> EvalContext TmI
+step = \case
+  -- TODO first case
+  Case (Construct uid row applicands) rows -> do
+    body <- (rows ^? ix row) ?? RowBound
+    pure $ instantiate (applicands !!) body
+  -- TODO handle cases
+  Let (Polytype _pBinders pVal) rhs body ->
+    let fTy' = instantiate (todo "instantiate with what?") pVal
+        body' = instantiate1 (Annotation rhs fTy') body
+    in pure body'
 
-step (Computation (Sum ix body) (Case branches))
-  = domainLookup' (PositionalDomain branches) (Index ix)
-
--- Substitute all terms from the domain (destructured) in the body
-step (Computation (Product subs) (Match body))
-  = pure $ close body (PositionalDomain subs)
-
-step e@(Oracle _) = left (Stuck e)
-step var@(Bound _level _pos) = left (Stuck var) -- we're stuck
+-- TODO find appropriate fixity
+(??) :: Maybe a -> Halt -> EvalContext a
+(Just a) ?? _ = pure a
+Nothing ?? err = left err

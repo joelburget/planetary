@@ -218,7 +218,7 @@ parsePolyty = do
   args <- many parseTyVar
   _ <- dot
   result <- parseValTy
-  pure (Polytype args result)
+  pure (polytype args result)
 
 parseLet :: MonadicParsing m => m Construction
 parseLet =

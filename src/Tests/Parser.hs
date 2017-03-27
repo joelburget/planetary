@@ -111,7 +111,8 @@ unitTests = testGroup "checking"
 
   -- TODO: parseRawTm', parseRawTm, parseLetRec
   , parserTest "let Z : forall. X = W in Z" parseLet $
-    Let (Polytype [] (VTy"X")) (V"W") (abstract1 "Z" (V"Z"))
+    -- TODO use `let_`
+    Let (polytype [] (VTy"X")) (V"W") (abstract1 "Z" (V"Z"))
 
   , let defn = unlines
           [ "let on : forall X Y. {X -> {X -> []Y} -> []Y} ="
@@ -121,7 +122,7 @@ unitTests = testGroup "checking"
         compCodomain = Peg emptyAbility (VTy"Y")
         polyVal = SuspendedTy (CompTy {..})
         polyBinders = [("X", ValTy), ("Y", ValTy)]
-        pty = Polytype {..}
+        pty = polytype polyBinders polyVal
         result = let_ "on" pty
           (lam ["x", "f"] (OperatorApplication (V"f") [V"x"]))
           (OperatorApplication (V"on") [V"n", lam ["x"] (V"body")])
