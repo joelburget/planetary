@@ -29,7 +29,6 @@ import Interplanetary.Util
 -- * Be more granular about the capabilities each function needs instead of
 --   hardcoding its monad.
 -- * What libraries should we be using?
---   - bound
 --   - unification-fd
 -- * Error messaging is pitiful
 --   - show some sort of helpful info
@@ -136,7 +135,7 @@ data Tm :: * -> * -> * where
 
   -- checked
   ConstructUse :: Tm a b                                -> Tm a b
-  Construct    :: Uid  -> Row -> Vector (Tm a b)        -> Tm a b
+  Construct    :: Uid -> Row -> Vector (Tm a b)         -> Tm a b
   Lambda       :: Scope Int (Tm a) b                    -> Tm a b
   Case         :: Tm a b -> Vector (Scope Int (Tm a) b) -> Tm a b
   Handle
