@@ -19,7 +19,7 @@ module Interplanetary.Examples where
 -- on =
 --   let x = Variable 1
 --       f = Variable 0
---   in Lambda 2 (ConstructUse (OperatorApplication f [ConstructUse x]))
+--   in Lambda 2 (ConstructUse (Application f [ConstructUse x]))
 
 -- -- define:
 -- -- send

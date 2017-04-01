@@ -181,7 +181,7 @@ parseInterface = do
   return (EffectInterface tyVars xs)
 
 parseApplication :: MonadicParsing m => m Use
-parseApplication = OperatorApplication
+parseApplication = Application
   <$> (Variable <$> identifier) -- TODO: not sure this line is right
   <*> choice [some parseUseNoApp, bang $> []]
   <?> "Application"

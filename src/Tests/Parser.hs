@@ -106,8 +106,8 @@ unitTests = testGroup "checking"
       , CommandDeclaration [VTy"Y"] (VTy"X")
       ]
 
-  , parserTest "Z!" parseApplication $ OperatorApplication (V"Z") []
-  , parserTest "Z Z Z" parseApplication $ OperatorApplication (V"Z") [V"Z", V"Z"]
+  , parserTest "Z!" parseApplication $ Application (V"Z") []
+  , parserTest "Z Z Z" parseApplication $ Application (V"Z") [V"Z", V"Z"]
 
   -- TODO: parseRawTm', parseRawTm, parseLetRec
   , parserTest "let Z : forall. X = W in Z" parseLet $
@@ -124,8 +124,8 @@ unitTests = testGroup "checking"
         polyBinders = [("X", ValTy), ("Y", ValTy)]
         pty = polytype polyBinders polyVal
         result = let_ "on" pty
-          (lam ["x", "f"] (OperatorApplication (V"f") [V"x"]))
-          (OperatorApplication (V"on") [V"n", lam ["x"] (V"body")])
+          (lam ["x", "f"] (Application (V"f") [V"x"]))
+          (Application (V"on") [V"n", lam ["x"] (V"body")])
     in parserTest defn parseLet result
 
   -- , let defn = unlines

@@ -127,11 +127,11 @@ type InterfaceTable a = IntMap (EffectInterface a)
 
 data Tm :: * -> * -> * where
   -- inferred
-  Variable            :: b                          -> Tm a b
-  InstantiatePolyVar  :: b      -> Vector (TyArg a) -> Tm a b
-  Command             :: Uid    -> Row              -> Tm a b
-  OperatorApplication :: Tm a b -> Spine a b        -> Tm a b
-  Annotation          :: Tm a b -> ValTy a          -> Tm a b
+  Variable           :: b                          -> Tm a b
+  InstantiatePolyVar :: b      -> Vector (TyArg a) -> Tm a b
+  Command            :: Uid    -> Row              -> Tm a b
+  Application        :: Tm a b -> Spine a b        -> Tm a b
+  Annotation         :: Tm a b -> ValTy a          -> Tm a b
 
   -- checked
   ConstructUse :: Tm a b                                -> Tm a b
@@ -236,7 +236,7 @@ instance Eq e => Eq1 (Tm e) where
     (InstantiatePolyVar var1 args1, InstantiatePolyVar var2 args2) ->
       liftEq (==) args1 args2 && eq var1 var2
     (Command uid1 row1, Command uid2 row2) -> uid1 == uid2 && row1 == row2
-    (OperatorApplication op1 spine1, OperatorApplication op2 spine2) ->
+    (Application op1 spine1, Application op2 spine2) ->
       liftEq eq op1 op2 && liftEq (liftEq eq) spine1 spine2
     (Annotation tm1 ty1, Annotation tm2 ty2) ->
       liftEq eq tm1 tm2 && ty1 == ty2
@@ -269,7 +269,7 @@ instance Ord o => Ord1 (Tm o) where
       liftCompare compare args1 args2 <> cmp var1 var2
     (Command uid1 row1, Command uid2 row2) ->
       compare uid1 uid2 <> compare row1 row2
-    (OperatorApplication op1 spine1, OperatorApplication op2 spine2) ->
+    (Application op1 spine1, Application op2 spine2) ->
       (liftCompare cmp) op1 op2 <> liftCompare (liftCompare cmp) spine1 spine2
     (Annotation tm1 ty1, Annotation tm2 ty2) ->
       (liftCompare cmp) tm1 tm2 <> compare ty1 ty2
@@ -299,18 +299,18 @@ instance Ord o => Ord1 (Tm o) where
 
           -- This section is rather arbitrary
           ordering = \case
-            Variable{}            -> (0 :: Int)
-            InstantiatePolyVar{}  -> 1
-            Command{}             -> 2
-            OperatorApplication{} -> 3
-            Annotation{}          -> 4
-            ConstructUse{}        -> 5
-            Construct{}           -> 6
-            Lambda{}              -> 7
-            Case{}                -> 8
-            Handle{}              -> 9
-            Let{}                 -> 10
-            Letrec{}              -> 11
+            Variable{}           -> (0 :: Int)
+            InstantiatePolyVar{} -> 1
+            Command{}            -> 2
+            Application{}        -> 3
+            Annotation{}         -> 4
+            ConstructUse{}       -> 5
+            Construct{}          -> 6
+            Lambda{}             -> 7
+            Case{}               -> 8
+            Handle{}             -> 9
+            Let{}                -> 10
+            Letrec{}             -> 11
 
 instance Show a => Show1 (Tm a) where
   liftShowsPrec s sl d = \case
@@ -320,8 +320,8 @@ instance Show a => Show1 (Tm a) where
       showString "InstantiatePolyVar " . s 11 b . showString " " . shows tys
     Command uid row ->
       showString "Command " . shows uid . showString " " . shows row
-    OperatorApplication tm spine ->
-      showString "OperatorApplication " .
+    Application tm spine ->
+      showString "Application " .
       liftShowsPrec s sl d tm .
       liftShowList s sl spine
     Annotation _ _ -> showString "Annotation"
@@ -340,8 +340,7 @@ instance Monad (Tm a) where
   Variable a >>= f = f a
   InstantiatePolyVar a _ >>= f = f a
   Command uid row >>= _ = Command uid row
-  OperatorApplication tm spine >>= f
-    = OperatorApplication (tm >>= f) ((>>= f) <$> spine)
+  Application tm spine >>= f = Application (tm >>= f) ((>>= f) <$> spine)
   Annotation tm ty >>= f = Annotation (tm >>= f) ty
 
   ConstructUse tm >>= f = ConstructUse (tm >>= f)

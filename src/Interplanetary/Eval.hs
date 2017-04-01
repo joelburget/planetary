@@ -1,72 +1,85 @@
-{-# language DataKinds #-}
-{-# language GADTs #-}
 {-# language LambdaCase #-}
-
 module Interplanetary.Eval where
 
 import Bound
 import Control.Lens hiding ((??))
-import Control.Lens.At (at)
-import Control.Lens.Getter (view)
-import Control.Monad.Reader
-import Control.Monad.Trans.Either (EitherT(runEitherT), left)
-import Data.Dynamic
-import Data.HashMap.Lazy (HashMap)
-import Data.HashSet
-import Data.Word (Word32)
+import Control.Monad.Except
+import Control.Monad.State.Lazy
+import Data.HashSet (HashSet)
+import qualified Data.HashSet as HashSet
+import Data.Monoid
 
-import Interplanetary.Syntax
+import Interplanetary.Syntax (Uid, Row, Spine, Polytype(..), ValTy(..), CompTy(..), AdjustmentHandlers(..), Adjustment, Tm)
+import qualified Interplanetary.Syntax as S
 import Interplanetary.Util
 
-type TmI = Tm Int Int
-type SpineI = Spine Int Int
+data Err
+  = RowBound
 
-data Halt :: * where
-  Stuck :: TmI -> Halt
-  -- BadDynamic :: MultiHash -> Halt
-  -- MissingOracle :: MultiHash -> Halt
-  -- BadVecLookup :: Word32 -> Halt
-  RowBound :: Halt
+-- deriving instance Show Err
 
-deriving instance Show Halt
+data Value a
+  -- use values
+  = Variable a
+  | InstantiatePolyVar (Vector PolytypeI)
+  | Command Uid Row
+  | Annotation (Value a) ValTyI
 
-isValue :: Tm a b -> Bool
-isValue = \case
-  -- Uses: all but OperatorApplication
-  Variable{}           -> True
-  InstantiatePolyVar{} -> True
-  Command{}            -> True
-  Annotation{}         -> True
+  -- construction values
+  | Construct Uid Row (Vector (Value a))
+  | Lambda (Scope Int (Tm Int) a)
 
-  -- Constructions:
-  ConstructUse u       -> isValue u
-  Construct{}          -> True
-  Lambda{}             -> True
-  _                    -> False
+-- isValue :: Tm a b -> Bool
+-- isValue = \case
+--   -- Uses: all but Application
+--   Variable{}           -> True
+--   InstantiatePolyVar{} -> True
+--   Command{}            -> True
+--   Annotation{}         -> True
+--
+--   -- Constructions:
+--   ConstructUse u       -> isValue u
+--   Construct{}          -> True
+--   Lambda{}             -> True
+--   _                    -> False
 
--- type EvalContext = EitherT Halt (Reader ())
+-- type EvalContext = EitherT Err (Reader ())
 
--- runContext :: () -> EvalContext TmI -> Either Halt TmI
+-- runContext :: () -> EvalContext TmI -> Either Err TmI
 -- runContext store ctxTm = runReader (runEitherT ctxTm) store
 
 --
 
 type EVHOLE = EvaluationContext
 type UseI = Tm Int Int
-type UseI = Tm Int Int
+type ConstructionI = Tm Int Int
+type CValI = Value Int
+type ValueI = Value Int
+type PolytypeI = Polytype Int
+type ValTyI = ValTy Int
+type AdjustmentHandlersI = AdjustmentHandlers Int Int
+type AdjustmentI = Adjustment Int
+type TmI = Tm Int Int
+type SpineI = Spine Int Int
+type ConstructionValueI = Value Int
 
-data EvaluationContext
+data EvaluationContext a
   = HaltK
-  | OperatorK EVHOLE SpineI
-  | ApplicationSpineK UseI (Vector CValI) EVHOLE (Vector Construction)
-  | AnnotationK EVHOLE ValTyI
-  | ConstructK Uid Row (Vector CValI) EVHOLE (Vector Construction)
-  | CaseK EVHOLE (Vector (Scope Int (Tm Int) Int))
-  | HandleK AdjustmentI EVHOLE AdjustmentHandlersI (Scope () (Tm Int) Int)
-  | LetK PolytypeI EVHOLE (Scope () (Tm Int) Int)
+  | OperatorK a SpineI
+  | ApplicationSpineK UseI (Vector CValI) a (Vector ConstructionI)
+  | AnnotationK a ValTyI
+  | ConstructK Uid Row (Vector CValI) a (Vector ConstructionI)
+  | CaseK a (Vector (Scope Int (Tm Int) Int))
+  | HandleK AdjustmentI a AdjustmentHandlersI (Scope () (Tm Int) Int)
+  | LetK PolytypeI a (Scope () (Tm Int) Int)
+  deriving Functor
 
-handledCommands :: EvaluationContext -> HashSet (Int, Int)
-handledCommands = \case
+newtype Fix f = Fix (f (Fix f))
+
+type EvaluationContext' = Fix EvaluationContext
+
+handledCommands :: EvaluationContext' -> HashSet (Int, Int)
+handledCommands (Fix f) = case f of
   HaltK                       -> HashSet.empty
   OperatorK ctx _             -> handledCommands ctx
   ApplicationSpineK _ _ ctx _ -> handledCommands ctx
@@ -80,26 +93,31 @@ handledCommands = \case
             iforM_ ctrs $ \ix _ -> modify (HashSet.singleton (uid, ix) <>))
           HashSet.empty
 
-step :: TmI -> EvalContext TmI
-step = \case
-  OperatorApplication
-    (Annotation (Lambda lBody) (SuspendedTy (CompTy domain codomain)))
-    spine ->
-      let spine' = zipWith Annotation spine domain
-      in pure $ instantiate (spine' !!) lBody
-  Case (Construct uid row applicands) rows -> do
-    body <- (rows ^? ix row) ?? RowBound
-    pure $ instantiate (applicands !!) body
-  Handle _adj scrutinee _handlers fallthrough ->
-    pure $ instantiate1 scrutinee fallthrough
-  Handle _adj scrutinee (AdjustmentHandlers handlers) _fallthrough -> todo "eval handle"
-  Let (Polytype _pBinders pVal) rhs body ->
-    let fTy' = instantiate (todo "instantiate with what?") pVal
-        body' = instantiate1 (Annotation rhs fTy') body
-    in pure body'
-  -- Letrec binders body -> instantiate
+fillContext :: EvaluationContext () -> ValueI -> ValueI
+fillContext HaltK val = val
+fillContext (OperatorK () spine) _val = todo "XXX"
+fillContext (ApplicationSpineK _ _ _ _) _val = todo "XXX"
+fillContext (AnnotationK () ty) val = Annotation val ty
+fillContext (ConstructK uid row vals () cs) val = todo "fillContext"
+
+-- step :: (EvaluationContext, ValueI)
+--      -> (EvaluationContext, ValueI)
+-- step (context, focus) = case context of
+--   -- ApplicationSpineK
+--   CaseK hole conts -> todo "case focus"
+--     -- case focus of
+--     -- Construct uid row applicands -> case conts ^? ix row of
+--     --   Just body -> pure $ (hole, instantiate (applicands !!) body)
+--     --   Nothing -> throwError RowBound
+--     -- _ -> todo "foo"
+
+--   HandleK _adj scrutinee _handlers fallthrough ->
+--     (scrutinee, instantiate1 scrutinee fallthrough)
+--   HandleK _adj scrutinee (AdjustmentHandlers handlers) fallthrough ->
+--     todo "evaluate handle"
+--   LetK (Polytype _pBinders pVal) rhs body -> todo "letk"
 
 -- TODO find appropriate fixity
-(??) :: Maybe a -> Halt -> EvalContext a
-(Just a) ?? _ = pure a
-Nothing ?? err = left err
+(??) :: MonadError Err m => Maybe a -> Err -> m a
+(Just a) ?? _  = pure a
+Nothing ?? err = throwError err
