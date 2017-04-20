@@ -1,10 +1,10 @@
-{-# LANGUAGE PackageImports #-}
+{-# language PackageImports #-}
 {-# language ConstraintKinds #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# language DataKinds #-}
+{-# language GeneralizedNewtypeDeriving #-}
 {-# language FlexibleInstances #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE TupleSections #-}
+{-# language StandaloneDeriving #-}
+{-# language TupleSections #-}
 -- A simple Core Frank parser based on the frankjnr implementation
 module Interplanetary.Parser where
 
@@ -16,7 +16,6 @@ import Text.Trifecta
 import "indentation-trifecta" Text.Trifecta.Indentation
 
 import Data.Char
-import qualified Data.IntMap as IntMap
 
 import Text.Parser.Token as Tok
 import Text.Parser.Token.Style
@@ -30,6 +29,8 @@ import Interplanetary.Util
 type Tm' = Tm String String
 type Construction = Tm'
 type Use = Tm'
+type Cont' = Continuation String String
+type Value' = Value String String
 
 newtype CoreParser t m a =
   CoreParser { runCoreParser :: IndentationParserT t m a }
@@ -54,7 +55,18 @@ frankensteinStyle = IdentifierStyle {
     _styleName = "Frankenstein"
   , _styleStart = satisfy (\c -> isAlpha c || c == '_')
   , _styleLetter = satisfy (\c -> isAlphaNum c || c == '_' || c == '\'')
-  , _styleReserved = HashSet.fromList ["data", "interface", "let", "letrec", "in", "forall"]
+  , _styleReserved = HashSet.fromList
+    [ "data"
+    , "interface"
+    , "let"
+    , "letrec"
+    , "in"
+    , "forall"
+    , "case"
+    , "handle"
+    , "of"
+    , "with"
+    ]
   , _styleHighlight = Hi.Identifier
   , _styleReservedHighlight = Hi.ReservedIdentifier }
 
@@ -90,11 +102,11 @@ parseTyArg = TyArgVal <$> parseValTy'
          <|> TyArgAbility <$> brackets parseAbilityBody
          <?> "Ty Arg"
 
-parseConstructors :: MonadicParsing m => m (Vector (DataConstructor String))
+parseConstructors :: MonadicParsing m => m (Vector (ConstructorDecl String))
 parseConstructors = sepBy parseConstructor bar <?> "Constructors"
 
-parseConstructor :: MonadicParsing m => m (DataConstructor String)
-parseConstructor = DataConstructor <$> many parseValTy' <?> "Constructor"
+parseConstructor :: MonadicParsing m => m (ConstructorDecl String)
+parseConstructor = ConstructorDecl <$> many parseValTy' <?> "Constructor"
 
 -- Parse a potential datatype. Note it may actually be a type variable.
 parseDataTy :: MonadicParsing m => m (ValTy String)
@@ -123,11 +135,11 @@ parseAbilityBody =
   let closedAb = do
         _ <- symbol "0"
         xs <- option [] (bar *> parseInterfaceInstances)
-        return $ Ability ClosedAbility (IntMap.fromList xs)
+        return $ Ability ClosedAbility (uidMapFromList xs)
       varAb = do
         e <- option "e" (try $ identifier <* bar)
         xs <- parseInterfaceInstances
-        return $ Ability (OpenAbility e) (IntMap.fromList xs)
+        return $ Ability OpenAbility (uidMapFromList xs)
   in try closedAb <|> varAb <?> "Ability Body"
 
 parseAbility :: MonadicParsing m => m (Ability String)
@@ -181,35 +193,104 @@ parseInterface = do
   return (EffectInterface tyVars xs)
 
 parseApplication :: MonadicParsing m => m Use
-parseApplication = Application
-  <$> (Variable <$> identifier) -- TODO: not sure this line is right
-  <*> choice [some parseUseNoApp, bang $> []]
-  <?> "Application"
+parseApplication =
+  let parser = do
+        fun <- (Variable <$> identifier) -- TODO: not sure this line is right
+        spine <- choice [some parseUseNoAp, bang $> []]
+        pure $ Cut (Application spine) fun
+  in parser <?> "Application"
+
+parseValue :: MonadicParsing m => m Value'
+parseValue = choice
+  -- [ parseDataConstructor
+  -- parseCommand
+  [ parseLambda
+  ]
 
 parseConstruction :: MonadicParsing m => m Construction
 parseConstruction = choice
   [ parseLet
-  , parseLetRec
-  , parseLambda
+  -- , parseLetRec
   , parseUse
   ] <?> "Construction"
 
--- To avoid recurring back into an app:
+-- To avoid recurring back into an ap:
 -- good: f f f -> f [f, f]
 -- bad: f f f -> (f (f f))
-parseUseNoApp :: MonadicParsing m => m Use
-parseUseNoApp = choice
+parseUseNoAp :: MonadicParsing m => m Use
+parseUseNoAp = choice
   [ Variable <$> identifier
-  ] <?> "Use (no app)"
+  ] <?> "Use (no ap)"
+
+parseCase :: MonadicParsing m => m Tm'
+parseCase = do
+  _ <- reserved "case"
+  m <- parseTm
+  _ <- reserved "of"
+  (uid, branches) <- localIndentation Gt $ do
+    uid <- parseUid
+    branches <- localIndentation Gt $ many $ absoluteIndentation $ do
+      _ <- bar
+      vars <- many identifier
+      _ <- arr
+      rhs <- parseTm
+      pure (vars, rhs)
+    pure (uid, branches)
+  pure $ Cut (case_ uid branches) m
+
+parseHandle :: MonadicParsing m => m Tm'
+parseHandle = do
+  _ <- reserved "handle"
+  adj <- parseAdjustment
+  peg <- parsePeg
+  tm <- parseTm
+  _ <- reserved "with"
+  (handlers, fallthrough) <- localIndentation Gt $ do
+    -- parse handlers
+    -- TODO: many vs some?
+    handlers <- many $ absoluteIndentation $ do
+      uid <- parseUid
+      _ <- colon
+
+      rows <- localIndentation Gt $ many $ absoluteIndentation $ do
+        _ <- bar
+        vars <- many identifier
+        _ <- arr
+        kVar <- arr
+        _ <- arr
+        rhs <- parseTm
+        pure $ (vars, kVar, rhs)
+
+      pure (uid, rows)
+
+    -- and fallthrough
+    fallthrough <- localIndentation Eq $ do
+      var <- identifier
+      _ <- arr
+      rhs <- parseTm
+      pure (var, rhs)
+
+    pure (uidMapFromList handlers, fallthrough)
+
+  let cont = handle adj peg handlers fallthrough
+  pure (Cut cont tm)
+
+parseTm :: MonadicParsing m => m Tm'
+parseTm = Value <$> parseValue
+  <?> "Tm"
+
+parseAdjustment :: MonadicParsing m => m (Adjustment String)
+parseAdjustment = todo "parseAdjustment"
+
+-- parseContinuation
 
 parseUse :: MonadicParsing m => m Use
-parseUse = choice [ try parseApplication, parseUseNoApp ]
+parseUse = choice [ try parseApplication, parseUseNoAp ]
   <?> "Use"
 
-parseLambda :: MonadicParsing m => m Construction
+parseLambda :: MonadicParsing m => m Value'
 parseLambda = lam
-  <$> (symbol "\\" *> some identifier)
-  <*> (arr *> parseConstruction)
+  <$> (symbol "\\" *> some identifier) <*> (arr *> parseConstruction)
   <?> "Lambda"
 
 parsePolyty :: MonadicParsing m => m (Polytype String)
@@ -228,29 +309,29 @@ parseLet =
         _ <- colon
         ty <- parsePolyty
         _ <- assign
-        rhs <- parseConstruction
+        rhs <- parseValue
         reserved "in"
         body <- parseConstruction
         let body' = abstract1 name body
-        return $ Let ty rhs body'
+        return $ Cut (Let ty body') (Value rhs)
   in parser <?> "Let"
 
-reorgTuple :: (a, b, c) -> (a, (c, b))
-reorgTuple (a, b, c) = (a, (c, b))
+-- reorgTuple :: (a, b, c) -> (a, (c, b))
+-- reorgTuple (a, b, c) = (a, (c, b))
 
-parseLetRec :: MonadicParsing m => m Construction
-parseLetRec =
-  let parser = do
-        reserved "letrec"
-        definitions <- some $ (,,)
-          <$> identifier <* colon
-          <*> parsePolyty <* assign
-          <*> parseLambda
-        reserved "in"
-        body <- parseConstruction
-        let (names, binderVals) = unzip (reorgTuple <$> definitions)
-        return $ letrec names binderVals body
-  in parser <?> "Letrec"
+-- parseLetRec :: MonadicParsing m => m Construction
+-- parseLetRec =
+--   let parser = do
+--         reserved "letrec"
+--         definitions <- some $ (,,)
+--           <$> identifier <* colon
+--           <*> parsePolyty <* assign
+--           <*> parseLambda
+--         reserved "in"
+--         body <- parseConstruction
+--         let (names, binderVals) = unzip (reorgTuple <$> definitions)
+--         return $ letrec names binderVals body
+--   in parser <?> "Letrec"
 
 parseDecl :: MonadicParsing m => m (Construction, ValTy String)
 parseDecl =
@@ -272,7 +353,8 @@ evalTokenIndentationParserT
   :: Monad m => CoreParser Token m a -> IndentationState -> m a
 evalTokenIndentationParserT = evalIndentationParserT . runCoreParser
 
-runParse :: (t -> IndentationState-> Parser b) -> t -> String -> Either String b
+runParse
+  :: (t -> IndentationState -> Parser b) -> t -> String -> Either String b
 runParse ev p input
  = let indA = ev p $ mkIndentationState 0 infIndentation True Ge
    in case parseString indA mempty input of

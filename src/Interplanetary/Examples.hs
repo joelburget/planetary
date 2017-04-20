@@ -1,9 +1,55 @@
 {-# language OverloadedLists #-}
 module Interplanetary.Examples where
 
--- import qualified Data.IntMap as IntMap
+import qualified Data.IntMap as IntMap
 
--- import Interplanetary.Syntax
+import Interplanetary.Syntax
+
+intId, boolId, strId :: Uid
+intId = 1
+boolId = 2
+strId = 3
+
+intTy :: ValTyI
+intTy = DataTy intId []
+
+boolTy :: ValTyI
+boolTy = DataTy boolId []
+
+strTy :: ValTyI
+strTy = DataTy strId []
+
+dataTyTable :: DataTypeTable Int
+dataTyTable = IntMap.empty
+
+intOpsId, subIntsId, concatStrsId, orId, andId :: Uid
+intOpsId = 239482
+concatStrsId = 5
+orId = 6
+andId = 7
+
+interfaceTable :: InterfaceTable Int
+interfaceTable = IntMap.fromList
+  [ (intOpsId, EffectInterface []
+    [ CommandDeclaration [intTy, intTy] intTy -- +
+    , CommandDeclaration [intTy, intTy] intTy -- -
+    ])
+  , (boolOpsId, EffectInterface []
+    [ CommandDeclaration [boolTy, boolTy] boolTy -- &&
+    , CommandDeclaration [boolTy, boolTy] boolTy -- ||
+    ])
+  , (strOpsId, EffectInterface []
+    [ CommandDeclaration [strTy, strTy] strTy -- concat
+    ])
+  ]
+
+-- now, to define a typechecker and evaluator for this language
+-- * typechecking: just restrict to int / bool / str / ops, then check
+-- * evaluation: just evaluate!
+
+-- typecheckIntBoolStr ::
+
+
 
 -- -- de bruijn:  2 1 0     1           1     2 0      2 0
 -- -- on : forall e X Y. <i>X -> <i>{<i>X -> [e]Y} -> [e]Y
@@ -38,7 +84,7 @@ module Interplanetary.Examples where
 -- unitTy = DataTy unitUid []
 
 -- unitVal :: Construction'
--- unitVal = Construct unitUid 0 []
+-- unitVal = DataConstructor unitUid 0 []
 
 -- dataTypeTable :: DataTypeTable
 -- dataTypeTable = IntMap.fromList

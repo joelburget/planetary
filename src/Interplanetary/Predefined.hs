@@ -1,7 +1,7 @@
 {-# language OverloadedLists #-}
 module Interplanetary.Predefined where
 
-import qualified Data.IntMap as IntMap
+import qualified Data.HashMap.Lazy as HashMap
 
 import Interplanetary.Syntax
 
@@ -9,29 +9,29 @@ import Interplanetary.Syntax
 
 valueTyUid, computationTyUid, pegUid, tyVarUid, tyArgUid, polyTyUid :: Uid
 abilityUid, adjustmentUid, tyEnvUid :: Uid
-valueTyUid = 0
+valueTyUid       = 0
 computationTyUid = 1
-pegUid = 2
-tyVarUid = 3
-tyArgUid = 4
-polyTyUid = 5
-abilityUid = 6
-adjustmentUid = 7
-tyEnvUid = 8
+pegUid           = 2
+tyVarUid         = 3
+tyArgUid         = 4
+polyTyUid        = 5
+abilityUid       = 6
+adjustmentUid    = 7
+tyEnvUid         = 8
 
 -- terms
 
 useUid, constructionUid, spineUid :: Uid
-useUid = 9
+useUid          = 9
 constructionUid = 10
-spineUid = 11
+spineUid        = 11
 
 -- other
 uidUid :: Uid
 uidUid = 12
 
 dataTypeTable :: DataTypeTable String
-dataTypeTable = IntMap.fromList
+dataTypeTable = UidMap $ HashMap.fromList
   -- A, B = D [R] | { C } | X
   [ (valueTyUid, [
       -- [uidUid

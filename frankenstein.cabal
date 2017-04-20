@@ -19,14 +19,13 @@ library
     Interplanetary.Examples
     Interplanetary.Parser
     Interplanetary.Eval
+    Interplanetary.Typecheck
+    Interplanetary.Meta
+    Interplanetary.Util
     Tests.Checking
     Tests.Parser
-    -- Interplanetary.Genesis
-    -- Interplanetary.Typecheck
+    Tests.Syntax
     -- Interplanetary.JSON
-    -- Interplanetary.Oracles
-    -- Interplanetary.Eval
-    -- Interplanetary.Meta
     -- Interplanetary.StrNat
   -- other-extensions:
   build-depends:
@@ -46,10 +45,14 @@ library
     -- bytestring,
     -- aeson >= 1.1,
     -- monad-gen,
-    -- unification-fd,
+    unification-fd,
     errors == 2.1.*,
     -- scientific
     bound == 2,
+    byteable >= 0.1 && < 1.0,
+    cryptohash == 0.11.*,
+    bytestring == 0.10.*,
+    list-extras == 0.4.*,
 
     -- testing
     tasty == 0.11.*,

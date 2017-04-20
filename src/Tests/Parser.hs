@@ -1,9 +1,9 @@
-{-# LANGUAGE PackageImports #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE PatternSynonyms #-}
+{-# language PackageImports #-}
+{-# language RecordWildCards #-}
+{-# language PatternSynonyms #-}
+{-# language OverloadedStrings #-}
 module Tests.Parser where
 
-import qualified Data.IntMap as IntMap
 import Test.Tasty
 import Test.Tasty.HUnit
 import Text.Trifecta
@@ -17,7 +17,12 @@ import Interplanetary.Parser
 -- "(\\x -> x : Unit -> [o]Unit)"
 -- "unit : Unit"
 
-parserTest :: (Eq a, Show a) => String -> CoreParser Token Parser a -> a -> TestTree
+parserTest
+  :: (Eq a, Show a)
+  => String
+  -> CoreParser Token Parser a
+  -> a
+  -> TestTree
 parserTest input parser parsed = testCase input $
   case runTokenParse parser input of
     Right actual -> parsed @=? actual
@@ -30,8 +35,8 @@ unitTests = testGroup "checking"
   , parserTest "X" parseValTy' (VTy"X")
 
   , parserTest "X | X Y" parseConstructors
-    [ DataConstructor [VTy"X"]
-    , DataConstructor [VTy"X", VTy"Y"]
+    [ ConstructorDecl [VTy"X"]
+    , ConstructorDecl [VTy"X", VTy"Y"]
     ]
   , parserTest "1 X" parseDataTy $
     DataTy 1 [TyArgVal (VTy"X")]
@@ -40,8 +45,8 @@ unitTests = testGroup "checking"
   -- Bool
   , parserTest "data = | " parseDataDecl $
     DataTypeInterface []
-      [ DataConstructor []
-      , DataConstructor []
+      [ ConstructorDecl []
+      , ConstructorDecl []
       ]
 
   -- TODO: this syntax is deeply unintuitive
@@ -49,33 +54,33 @@ unitTests = testGroup "checking"
   -- Either
   , parserTest "data X Y = X | Y" parseDataDecl $
     DataTypeInterface [("X", ValTy), ("Y", ValTy)]
-      [ DataConstructor [VTy"X"]
-      , DataConstructor [VTy"Y"]
+      [ ConstructorDecl [VTy"X"]
+      , ConstructorDecl [VTy"Y"]
       ]
 
   -- also test effect ty, multiple instances
   , parserTest "1 X" parseInterfaceInstance $ (1, [TyArgVal (VTy"X")])
 
   , parserTest "1 [0]" parseInterfaceInstance $ (1, [
-    TyArgAbility (Ability ClosedAbility IntMap.empty)
+    TyArgAbility (Ability ClosedAbility emptyUidMap)
     ])
 
   , parserTest "1 []" parseInterfaceInstance $ (1, [
-    TyArgAbility (Ability (OpenAbility "e") IntMap.empty)
+    TyArgAbility (Ability OpenAbility emptyUidMap)
     ])
 
   , parserTest "1" parseInterfaceInstance $ (1, [])
 
   , parserTest "0" parseAbilityBody closedAbility
   , parserTest "0|1" parseAbilityBody $
-    Ability ClosedAbility (IntMap.fromList [(1, [])])
+    Ability ClosedAbility (uidMapFromList [(1, [])])
   , parserTest "e" parseAbilityBody emptyAbility
   , parserTest "e|1" parseAbilityBody $
-    Ability (OpenAbility "e") (IntMap.fromList [(1, [])])
+    Ability OpenAbility (uidMapFromList [(1, [])])
 
   -- TODO: parseAbility
   , parserTest "[0|1]" parseAbility $
-    Ability ClosedAbility (IntMap.fromList [(1, [])])
+    Ability ClosedAbility (uidMapFromList [(1, [])])
 
   , parserTest "[]" parseAbility emptyAbility
   , parserTest "[0]" parseAbility closedAbility
@@ -106,13 +111,22 @@ unitTests = testGroup "checking"
       , CommandDeclaration [VTy"Y"] (VTy"X")
       ]
 
-  , parserTest "Z!" parseApplication $ Application (V"Z") []
-  , parserTest "Z Z Z" parseApplication $ Application (V"Z") [V"Z", V"Z"]
+  , parserTest "Z!" parseApplication $ Cut (Application []) (V"Z")
+  , parserTest "Z Z Z" parseApplication $
+      Cut (Application [V"Z", V"Z"]) (V"Z")
 
-  -- TODO: parseRawTm', parseRawTm, parseLetRec
+  -- TODO:
+  -- * parseLetRec
+  -- * parseCase
+  -- * parseHandle
+  -- * parseUseNoAp
+  -- * parseConstruction
+  -- * parseValue
   , parserTest "let Z : forall. X = W in Z" parseLet $
     -- TODO use `let_`
-    Let (polytype [] (VTy"X")) (V"W") (abstract1 "Z" (V"Z"))
+    Cut
+      (Let (polytype [] (VTy"X")) (abstract1 "Z" (V"Z")))
+      (V"W")
 
   , let defn = unlines
           [ "let on : forall X Y. {X -> {X -> []Y} -> []Y} ="
@@ -124,9 +138,25 @@ unitTests = testGroup "checking"
         polyBinders = [("X", ValTy), ("Y", ValTy)]
         pty = polytype polyBinders polyVal
         result = let_ "on" pty
-          (lam ["x", "f"] (Application (V"f") [V"x"]))
-          (Application (V"on") [V"n", lam ["x"] (V"body")])
+          (Value $ lam ["x", "f"] (Cut (Application [V"x"]) (V"f")))
+          -- Kind of a hack: use a no-argument lambda to convert from term to
+          -- value
+          (lam [] $
+            Cut (Application [V"n", Value $ lam ["x"] (V"body")]) (V"on"))
     in parserTest defn parseLet result
+
+  , let defn = unlines
+          [ "case x of"
+          , "  e829515d5"
+          , "    | -> y"
+          , "    | a b c -> z"
+          ]
+        cont = case_ "e829515d5"
+          [ ([], Variable "y")
+          , (["a", "b", "c"], Variable "z")
+          ]
+        result = Cut cont (Variable "x")
+    in parserTest defn parseCase result
 
   -- , let defn = unlines
   --         [ "catch : <Abort>X -> {X} -> X"

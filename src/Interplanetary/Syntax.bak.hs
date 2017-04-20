@@ -2,10 +2,10 @@
 
 -- checking
 
-type CheckM = ExceptT CheckFailure
+type TcM = ExceptT CheckFailure
   (Reader (DataTypeTable, VarTyTable, InterfaceTable, Ability))
 
-runCheckM :: CheckM a -> (DataTypeTable, InterfaceTable) -> Either CheckFailure a
+runCheckM :: TcM a -> (DataTypeTable, InterfaceTable) -> Either CheckFailure a
 runCheckM action (dataTypeTable, interfaceTable) = runReader
   (runExceptT action)
   (dataTypeTable, [], interfaceTable, emptyAbility)
@@ -38,7 +38,7 @@ data CheckFailure
   | PolyvarSaturationMismatch
   deriving Show
 
-check :: Construction'' -> ValTy -> CheckM ()
+check :: Construction'' -> ValTy -> TcM ()
 check tm ty = case tm of
   ConstructUse use -> do
     inferredTy <- infer use
@@ -78,7 +78,7 @@ check tm ty = case tm of
     -- withTypes [Right polyty] $ forM_ handlers (`check` rhsBodyTy)
     -- check body ty
 
-checkHandlers :: ValTy -> ValTy -> AdjustmentHandlers -> CheckM ()
+checkHandlers :: ValTy -> ValTy -> AdjustmentHandlers -> TcM ()
 checkHandlers scrutineeTy expectedTy (AdjustmentHandlers handlers) = do
   iforM_ handlers $ \uid handlerRows ->
     iforM_ handlerRows $ \row handler -> do
@@ -88,28 +88,21 @@ checkHandlers scrutineeTy expectedTy (AdjustmentHandlers handlers) = do
       let contTy = SuspendedTy (CompTy [codom] (Peg ability scrutineeTy))
       withValTypes (dom <> [contTy]) (check handler expectedTy)
 
--- | Get the types each data constructor holds for this data type.
---
--- Question: should this be parametrized by type parameters / abilities? IE do
--- we allow GADTs?
-lookupDataType :: Uid -> CheckM (Vector (Vector ValTy))
-lookupDataType uid = asks (^? _1 . ix uid) >>= (?? FailedDataTypeLookup)
-
-lookupEffectInterface :: Uid -> CheckM EffectInterface
+lookupEffectInterface :: Uid -> TcM EffectInterface
 lookupEffectInterface uid
   = asks (^? _3 . ix uid) >>= (?? FailedEffectInterfaceLookup)
 
 -- TODO: do we need to instantiate polymorphic variables when looking up?
-lookupPolyTy :: TyVar -> CheckM Polytype
+lookupPolyTy :: TyVar -> TcM Polytype
 lookupPolyTy vId = asks (^? _2 . ix vId . _Right) >>= (?? FailedPolytypeLookup)
 
-lookupValTy :: TyVar -> CheckM ValTy
+lookupValTy :: TyVar -> TcM ValTy
 lookupValTy vId = asks (^? _2 . ix vId . _Left) >>= (?? FailedValTyLookup)
 
-getAmbient :: CheckM Ability
+getAmbient :: TcM Ability
 getAmbient = asks (^. _4)
 
-lookupCommandTy :: Uid -> Row -> CheckM CompTy
+lookupCommandTy :: Uid -> Row -> TcM CompTy
 lookupCommandTy uid row = do
   -- TODO use numBinders? Bind here?
   EffectInterface _numBinders cmds <- lookupEffectInterface uid
@@ -117,22 +110,22 @@ lookupCommandTy uid row = do
   ability <- getAmbient
   pure (CompTy domain (Peg ability codomain))
 
-checkWithAmbient :: Construction'' -> Peg -> CheckM ()
+checkWithAmbient :: Construction'' -> Peg -> TcM ()
 checkWithAmbient tm (Peg ability ty) = withAmbient ability $ check tm ty
 
-withAdjustment :: Adjustment -> CheckM a -> CheckM a
+withAdjustment :: Adjustment -> TcM a -> TcM a
 withAdjustment adjustment action = do
   ambient <- getAmbient
   withAmbient (adjustAbility ambient adjustment) action
 
-withAmbient :: Ability -> CheckM a -> CheckM a
+withAmbient :: Ability -> TcM a -> TcM a
 withAmbient ability = local (& _4 .~ ability)
 
 -- Push at the front (the top of the stack)
-withTypes :: Vector (Either ValTy Polytype) -> CheckM a -> CheckM a
+withTypes :: Vector (Either ValTy Polytype) -> TcM a -> TcM a
 withTypes stack = local (& _2 %~ (stack <>))
 
-withValTypes :: Vector ValTy -> CheckM a -> CheckM a
+withValTypes :: Vector ValTy -> TcM a -> TcM a
 withValTypes valTys = withTypes (Left <$> valTys)
 
 -- data Polytype = Polytype (Vector TyEffVar) ValTy
@@ -141,7 +134,7 @@ withValTypes valTys = withTypes (Left <$> valTys)
 
 -- Instantiate type variables (non-recursive). Instantiate effect variables
 -- with the ambient ability. This is Theta from the paper.
-instantiateTypeVariables :: Polytype -> Vector TyArg -> CheckM ValTy
+instantiateTypeVariables :: Polytype -> Vector TyArg -> TcM ValTy
 instantiateTypeVariables (Polytype binders retVal) args = do
   zipped <- strictZip binders args ?? PolyvarSaturationMismatch
   forM_ zipped $ \pairing -> case pairing of
@@ -151,7 +144,7 @@ instantiateTypeVariables (Polytype binders retVal) args = do
 
   substituteTy args retVal
 
-infer :: Use'' -> CheckM ValTy
+infer :: Use'' -> TcM ValTy
 infer use = case use of
   Variable ident -> lookupValTy ident
   InstantiatePolyVar ident args -> do
@@ -212,10 +205,10 @@ substitute = todo "substitute"
 
 -- util
 
--- Note: though this is in the CheckM monad, we don't access any state, though
+-- Note: though this is in the TcM monad, we don't access any state, though
 -- we do use the monad to signal failure TODO: is this a lie?. This is called from
 -- instantiateTypeVariables, which pulls out the state table for us.
-substituteTy :: Vector TyArg -> ValTy -> CheckM ValTy
+substituteTy :: Vector TyArg -> ValTy -> TcM ValTy
 substituteTy subs =
   let sub = substituteTy subs
       subA = substituteAbility subs
@@ -235,15 +228,15 @@ substituteTy subs =
         TyArgVal val -> pure val
         _ -> throwError FailedVarLookup
 
-substituteArg :: Vector TyArg -> TyArg -> CheckM TyArg
+substituteArg :: Vector TyArg -> TyArg -> TcM TyArg
 substituteArg subs = \case
   TyArgVal valTy -> TyArgVal <$> substituteTy subs valTy
   TyArgAbility ability -> TyArgAbility <$> substituteAbility subs ability
 
-substituteAbility :: Vector TyArg -> Ability -> CheckM Ability
+substituteAbility :: Vector TyArg -> Ability -> TcM Ability
 substituteAbility subs (Ability initiate rows)
   = Ability initiate <$> forM rows mapRow
-  where mapRow :: Vector TyArg -> CheckM (Vector TyArg)
+  where mapRow :: Vector TyArg -> TcM (Vector TyArg)
         mapRow vals = forM vals (substituteArg subs)
 
 adjustAbility :: Ability -> Adjustment -> Ability
@@ -260,7 +253,7 @@ merkle = todo "merkle"
 --   -> Maybe Ability
 --   -> Vector ValTy -- ^ saturate
 --   -> Int -- ^ constructor number
---   -> CheckM ValTy
+--   -> TcM ValTy
 -- dataTypeSignature (DataTypeInterface uid numBinders ctrs) ability args ctrIx = do
 --   ctr <- (ctrs ^? ix ctrIx) ?? FailedIndex
 --   assert InvalidArgumentCount (length args == numBinders)
@@ -274,7 +267,7 @@ merkle = todo "merkle"
 --   :: EffectInterface
 --   -> Vector ValTy -- ^ saturate
 --   -> Int -- ^ command number
---   -> CheckM ValTy
+--   -> TcM ValTy
 -- effectSignature (EffectInterface numBinders cmds) args cmdIx = do
 --   CommandDeclaration cmdArgs cmdRet <- (cmds ^? ix cmdIx) ?? FailedIndex
 --   assert InvalidArgumentCount (length args == numBinders)
