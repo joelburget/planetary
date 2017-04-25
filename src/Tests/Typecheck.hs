@@ -1,50 +1,43 @@
 {-# language QuasiQuotes #-}
-module Tests.Eval where
+module Tests.Typecheck where
 
 import qualified Data.IntMap as IntMap
 import Test.Tasty
 import Test.Tasty.HUnit
 import Text.Trifecta
 
-import Interplanetary.Parser.QQ
+-- import Interplanetary.Parser.QQ
+import Interplanetary.Syntax
+import Interplanetary.Typecheck
 
 checkTest
   :: String
-  -> TypingTables String
-  -> TypingEnv String
+  -> Ability Int
+  -> TypingTables Int
+  -> TypingEnv Int
   -> TmI
   -> ValTy Int
   -> TestTree
-checkTest name tables env tm ty = testCase name $
-  runTcM tables env (check tm ty) @=? Right ()
+checkTest name ability tables env tm ty = testCase name $
+  runTcM (ability, tables) env (check tm ty) @=? Right ()
 
 inferTest
   :: String
-  -> TypingTables String
-  -> TypingEnv String
+  -> Ability Int
+  -> TypingTables Int
+  -> TypingEnv Int
   -> TmI
   -> Either TcErr (ValTy Int)
   -> TestTree
-inferTest name tables env tm expected = testCase name $
-  runTcM tables env (infer tm) @=? expected
-
--- TODO: use QQ
-exampleDataTypes :: DataTypeTable String
-exampleDataTypes = uidMapFromList
-  -- void has no constructor
-  [ (1, [])
-  -- unit has a single nullary constructor
-  , (2, [[]])
-  -- `data Id a = Id a`
-  , (3, [[VTy"a"]])
-  ]
+inferTest name ability tables env tm expected = testCase name $
+  runTcM (ability, tables) env (infer tm) @=? expected
 
 -- TODO: use QQ
 exampleInterfaces :: InterfaceTable String
-exampleInterfaces = uidMapFromList []
+exampleInterfaces = uIdMapFromList []
 
 exampleTables :: TypingTables String
-exampleTables = (exampleDataTypes, exampleInterfaces)
+exampleTables = exampleInterfaces
 
 emptyTypingEnv :: TypingEnv String
 emptyTypingEnv = TypingEnv []

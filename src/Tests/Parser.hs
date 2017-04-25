@@ -1,7 +1,8 @@
-{-# language PackageImports #-}
-{-# language RecordWildCards #-}
-{-# language PatternSynonyms #-}
 {-# language OverloadedStrings #-}
+{-# language PackageImports #-}
+{-# language PatternSynonyms #-}
+{-# language RecordWildCards #-}
+{-# language TypeApplications #-}
 module Tests.Parser where
 
 import Test.Tasty
@@ -39,7 +40,7 @@ unitTests = testGroup "checking"
     , ConstructorDecl [VTy"X", VTy"Y"]
     ]
   , parserTest "1 X" parseDataTy $
-    DataTy 1 [TyArgVal (VTy"X")]
+    DataTy oneUid [TyArgVal (VTy"X")]
 
   -- also test with args
   -- Bool
@@ -59,28 +60,28 @@ unitTests = testGroup "checking"
       ]
 
   -- also test effect ty, multiple instances
-  , parserTest "1 X" parseInterfaceInstance $ (1, [TyArgVal (VTy"X")])
+  , parserTest "1 X" parseInterfaceInstance $ (oneUid, [TyArgVal (VTy"X")])
 
-  , parserTest "1 [0]" parseInterfaceInstance $ (1, [
-    TyArgAbility (Ability ClosedAbility emptyUidMap)
+  , parserTest "1 [0]" parseInterfaceInstance $ (oneUid, [
+    TyArgAbility (Ability ClosedAbility mempty)
     ])
 
-  , parserTest "1 []" parseInterfaceInstance $ (1, [
-    TyArgAbility (Ability OpenAbility emptyUidMap)
+  , parserTest "1 []" parseInterfaceInstance $ (oneUid, [
+    TyArgAbility (Ability OpenAbility mempty)
     ])
 
-  , parserTest "1" parseInterfaceInstance $ (1, [])
+  , parserTest "1" parseInterfaceInstance $ (oneUid, [])
 
   , parserTest "0" parseAbilityBody closedAbility
   , parserTest "0|1" parseAbilityBody $
-    Ability ClosedAbility (uidMapFromList [(1, [])])
+    Ability ClosedAbility (uIdMapFromList [(oneUid, [])])
   , parserTest "e" parseAbilityBody emptyAbility
   , parserTest "e|1" parseAbilityBody $
-    Ability OpenAbility (uidMapFromList [(1, [])])
+    Ability OpenAbility (uIdMapFromList [(oneUid, [])])
 
   -- TODO: parseAbility
   , parserTest "[0|1]" parseAbility $
-    Ability ClosedAbility (uidMapFromList [(1, [])])
+    Ability ClosedAbility (uIdMapFromList [(oneUid, [])])
 
   , parserTest "[]" parseAbility emptyAbility
   , parserTest "[0]" parseAbility closedAbility
@@ -88,7 +89,7 @@ unitTests = testGroup "checking"
   , parserTest "[] X" parsePeg $ Peg emptyAbility (VTy"X")
   , parserTest "[]X" parsePeg $ Peg emptyAbility (VTy"X")
   , parserTest "[] 1 X" parsePeg $
-    Peg emptyAbility (DataTy 1 [TyArgVal (VTy"X")])
+    Peg emptyAbility (DataTy oneUid [TyArgVal (VTy"X")])
 
   , parserTest "X" parseCompTy $ CompTy [] (Peg emptyAbility (VTy"X"))
   , parserTest "X -> X" parseCompTy $
@@ -151,7 +152,7 @@ unitTests = testGroup "checking"
           , "    | -> y"
           , "    | a b c -> z"
           ]
-        cont = case_ "e829515d5"
+        cont = case_ (mkUid @Integer 0xe829515d5)
           [ ([], Variable "y")
           , (["a", "b", "c"], Variable "z")
           ]

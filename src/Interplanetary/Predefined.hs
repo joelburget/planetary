@@ -1,39 +1,82 @@
-{-# language OverloadedLists #-}
+{-# language TypeApplications #-}
 module Interplanetary.Predefined where
 
-import qualified Data.HashMap.Lazy as HashMap
+import Control.Distributed.Process.Serializable (Serializable)
+import Control.Lens hiding ((??), op)
+import Control.Monad.Except
+import Control.Monad.State
+import Data.Dynamic
 
+import Interplanetary.Eval
 import Interplanetary.Syntax
+import Interplanetary.Typecheck
+import Interplanetary.Util
 
--- types
+-- TODO: this is really a "haskell int"
+intTy :: ValTyI
+intTy = DataTy intId []
 
-valueTyUid, computationTyUid, pegUid, tyVarUid, tyArgUid, polyTyUid :: Uid
-abilityUid, adjustmentUid, tyEnvUid :: Uid
-valueTyUid       = 0
-computationTyUid = 1
-pegUid           = 2
-tyVarUid         = 3
-tyArgUid         = 4
-polyTyUid        = 5
-abilityUid       = 6
-adjustmentUid    = 7
-tyEnvUid         = 8
+boolTy :: ValTyI
+boolTy = DataTy boolId []
 
--- terms
+strTy :: ValTyI
+strTy = DataTy strId []
 
-useUid, constructionUid, spineUid :: Uid
-useUid          = 9
-constructionUid = 10
-spineUid        = 11
+-- TODO: some way to declare both implementation and type at the same time
+interfaceTable :: InterfaceTable Int
+interfaceTable = uIdMapFromList
+  [ (intOpsId, EffectInterface []
+    [ CommandDeclaration [intTy, intTy] intTy -- +
+    , CommandDeclaration [intTy, intTy] intTy -- -
+    ])
+  , (boolOpsId, EffectInterface []
+    [ CommandDeclaration [boolTy, boolTy] boolTy -- &&
+    , CommandDeclaration [boolTy, boolTy] boolTy -- ||
+    ])
+  , (strOpsId, EffectInterface []
+    [ CommandDeclaration [strTy, strTy] strTy -- concat
+    ])
+  ]
 
--- other
-uidUid :: Uid
-uidUid = 12
+foreignContinuations :: ForeignContinuations Int Int
+foreignContinuations = uIdMapFromList
+  [ (intOpsId, [ liftBinaryOp @Int (+) , liftBinaryOp @Int (-) ])
+  , (boolOpsId, [ liftBinaryOp (&&) , liftBinaryOp (||) ])
+  , (strOpsId, [ liftBinaryOp @String (++) ])
+  ]
 
-dataTypeTable :: DataTypeTable String
-dataTypeTable = UidMap $ HashMap.fromList
+lookupForeign :: Serializable a => UId -> ForeignM Int Int a
+lookupForeign uid = do
+  dyn <- gets (^? ix uid) >>= (?? IndexErr)
+  case fromDynamic dyn of
+    Nothing -> throwError FailedDynamicConversion
+    Just i -> pure i
+
+writeForeign :: Serializable a => a -> ForeignM Int Int UId
+writeForeign a = do
+  let uid = mkUid a
+  modify (& ix uid .~ toDyn a)
+  pure uid
+
+liftBinaryOp
+  :: Serializable s
+  => (s -> s -> s) -> (Spine a b -> ForeignM a b (Tm a b))
+liftBinaryOp op [ForeignDataTm uid1, ForeignDataTm uid2] = do
+  i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
+  ForeignDataTm <$> writeForeign i
+liftBinaryOp _ _ = throwError FailedForeignFun
+
+-- TODO: use QQ
+exampleDataTypes :: DataTypeTable String
+exampleDataTypes = uIdMapFromList
+  -- void has no constructor
+  [ (voidUid, [])
+  -- unit has a single nullary constructor
+  , (unitUid, [[]])
+  -- `data Id a = Id a`
+  , (idUid, [[VTy"a"]])
   -- A, B = D [R] | { C } | X
-  [ (valueTyUid, [
+  , (valueTyUid, [
       -- [uidUid
     ])
   ]

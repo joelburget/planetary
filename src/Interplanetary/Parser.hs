@@ -83,8 +83,8 @@ identifier :: MonadicParsing m => m String
 identifier = Tok.ident frankensteinStyle
   <?> "identifier"
 
-parseUid :: MonadicParsing m => m Uid
-parseUid = fromIntegral <$> natural
+parseUid :: MonadicParsing m => m UId
+parseUid = mkUid <$> natural
   <?> "uid"
 
 parseValTy :: MonadicParsing m => m (ValTy String)
@@ -99,7 +99,7 @@ parseValTy' = parens parseValTy
 
 parseTyArg :: MonadicParsing m => m (TyArg String)
 parseTyArg = TyArgVal <$> parseValTy'
-         <|> TyArgAbility <$> brackets parseAbilityBody
+         <|> TyArgAbility <$> brackets (convAbility =<< parseAbilityBody)
          <?> "Ty Arg"
 
 parseConstructors :: MonadicParsing m => m (Vector (ConstructorDecl String))
@@ -134,12 +134,12 @@ parseAbilityBody :: MonadicParsing m => m (Ability String)
 parseAbilityBody =
   let closedAb = do
         _ <- symbol "0"
-        xs <- option [] (bar *> parseInterfaceInstances)
-        return $ Ability ClosedAbility (uidMapFromList xs)
+        instances <- option [] (bar *> parseInterfaceInstances)
+        return $ Ability ClosedAbility (uIdMapFromList instances)
       varAb = do
         e <- option "e" (try $ identifier <* bar)
-        xs <- parseInterfaceInstances
-        return $ Ability OpenAbility (uidMapFromList xs)
+        instances <- parseInterfaceInstances
+        return $ Ability OpenAbility (uIdMapFromList instances)
   in try closedAb <|> varAb <?> "Ability Body"
 
 parseAbility :: MonadicParsing m => m (Ability String)
@@ -147,8 +147,13 @@ parseAbility = do
   mxs <- optional $ brackets parseAbilityBody
   return $ maybe emptyAbility id mxs
 
+convAbility :: MonadicParsing m => Ability String -> m (Ability Int)
+convAbility ab = case closed ab of
+  Nothing -> empty
+  Just ab' -> pure ab'
+
 parsePeg :: MonadicParsing m => m (Peg String)
-parsePeg = Peg <$> parseAbility <*> parseValTy <?> "Peg"
+parsePeg = Peg <$> (convAbility =<< parseAbility) <*> parseValTy <?> "Peg"
 
 parseCompTy :: MonadicParsing m => m (CompTy String)
 parseCompTy = CompTy
@@ -156,11 +161,11 @@ parseCompTy = CompTy
   <*> parsePeg
   <?> "Comp Ty"
 
-parseInterfaceInstance :: MonadicParsing m => m (Uid, [TyArg String])
+parseInterfaceInstance :: MonadicParsing m => m (UId, [TyArg String])
 parseInterfaceInstance = (,) <$> parseUid <*> many parseTyArg
   <?> "Interface Instance"
 
-parseInterfaceInstances :: MonadicParsing m => m [(Uid, [TyArg String])]
+parseInterfaceInstances :: MonadicParsing m => m [(UId, [TyArg String])]
 parseInterfaceInstances = sepBy parseInterfaceInstance comma
   <?> "Interface Instances"
 
@@ -270,14 +275,28 @@ parseHandle = do
       rhs <- parseTm
       pure (var, rhs)
 
-    pure (uidMapFromList handlers, fallthrough)
+    pure (uIdMapFromList handlers, fallthrough)
 
   let cont = handle adj peg handlers fallthrough
   pure (Cut cont tm)
 
 parseTm :: MonadicParsing m => m Tm'
-parseTm = Value <$> parseValue
-  <?> "Tm"
+parseTm = (do
+  tms <- some parseTmNoApp
+  case tms of
+    [] -> empty
+    [tm] -> pure tm
+    tm:spine -> pure (Cut (Application spine) tm)
+  ) <?> "Tm"
+
+parseTmNoApp :: MonadicParsing m => m Tm'
+parseTmNoApp
+  = parens parseTm
+  <|> Value <$> parseValue
+  <|> parseCase
+  <|> parseHandle
+  -- <|> parseLet
+  <?> "Tm (no app)"
 
 parseAdjustment :: MonadicParsing m => m (Adjustment String)
 parseAdjustment = todo "parseAdjustment"

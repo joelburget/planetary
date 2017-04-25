@@ -1,28 +1,45 @@
+{-# language FlexibleInstances #-}
+{-# language GeneralizedNewtypeDeriving #-}
+{-# language MultiParamTypeClasses #-}
 {-# language LambdaCase #-}
+{-# language StandaloneDeriving #-}
 {-# language TypeOperators #-}
+{-# language TypeFamilies #-}
 module Interplanetary.Typecheck where
 
--- import Control.Unification
-
 import Bound
-import Control.Lens hiding ((??))
+import Control.Lens hiding ((??), from, to)
 import Control.Monad (forM_)
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
-import Control.Unification
 
 import Interplanetary.Syntax
 import Interplanetary.Util
 
 data TcErr
-  = DataUidMismatch
+  = DataUIdMismatch
   | ZipLengthMismatch
   | FailedDataTypeLookup
   | FailedConstructorLookup
+  | AbilityUnification
+  | TyUnification
+  | LookupCommandTy
+  | LookupVarTy
+
+-- Read-only typing information
+type DataTypeTable a = UIdMap (Vector (Vector (ValTy a)))
+type InterfaceTable a = UIdMap (EffectInterface a)
+type TypingTables a = (DataTypeTable a, InterfaceTable a, Ability a)
 
 -- Mutable typing information
-data TypingEnv a = TypingEnv (Stack (Either (ValTy a) PolytypeS))
+type TypingEnvVal a = Either (ValTy a) PolytypeS
+newtype TypingEnv a = TypingEnv (Stack (TypingEnvVal a))
+
+type instance IxValue (TypingEnv a) = TypingEnvVal a
+type instance Index (TypingEnv a) = Int
+instance Ixed (TypingEnv a) where
+  ix k f (TypingEnv m) = TypingEnv <$> ix k f m
 
 newtype TcM a b = TcM
   (ExceptT TcErr
@@ -30,8 +47,8 @@ newtype TcM a b = TcM
   (Reader (Ability a, TypingTables a)))
   b)
   deriving (Functor, Applicative, Monad, MonadError TcErr)
-instance MonadState (TypingEnv a) (TcM a) where
-instance MonadReader (Ability a, TypingTables a) (TcM a) where
+deriving instance MonadState (TypingEnv a) (TcM a)
+deriving instance MonadReader (Ability a, TypingTables a) (TcM a)
 type TcM' = TcM Int
 
 runTcM :: (Ability Int, TypingTables Int) -> TypingEnv Int -> TcM' a -> Either TcErr a
@@ -47,16 +64,19 @@ infer = \case
   -- VAR
   Variable v -> lookupVarTy v
   -- POLYVAR
-  InstantiatePolyVar v tys -> do
-    p <- lookupPolyVarTy v
-    pure $ instantiate (polyVarInstantiator tys) p
+  InstantiatePolyVar v tys -> todo "infer polyvar"
+    -- p <- lookupPolyVarTy v
+    -- pure $ instantiate (polyVarInstantiator tys) p
   -- COMMAND
-  Value (Command uid row) -> SuspendedTy <$> lookupCommandTy uid row
+  Value (Command uid row) -> do
+    CommandDeclaration from to <- lookupCommandTy uid row
+    ambient <- ambientAbility
+    pure $ SuspendedTy (CompTy from (Peg ambient to))
   -- APP
   Cut (Application spine) f -> do
     SuspendedTy (CompTy dom (Peg ability retTy)) <- infer f
     ambient <- ambientAbility
-    _ <- unifyAbility ability ambient
+    _ <- unify ability ambient ?? AbilityUnification
     _ <- mapM_ (uncurry check) =<< strictZip ZipLengthMismatch spine dom
     pure retTy
   -- COERCE
@@ -69,7 +89,7 @@ check (Value (Lambda body)) (SuspendedTy (CompTy dom (Peg ability codom))) = do
   withAbility ability $ check body' codom
 -- DATA
 check (Value (DataConstructor uid1 row values)) (DataTy uid2 valTys) = do
-  assert DataUidMismatch (uid1 == uid2)
+  assert DataUIdMismatch (uid1 == uid2)
   argTys <- lookupConstructorTy uid1 row
   let tms = Value <$> values
   mapM_ (uncurry check) =<< strictZip ZipLengthMismatch tms argTys
@@ -95,19 +115,23 @@ check (Cut (Let (Polytype binders valTy) body) val) ty = do
 -- SWITCH
 check m b = do
   a <- infer m
-  unifyTy a b
+  unify a b ?? TyUnification
   pure ()
 
 -- | Get the types each data constructor holds for this data type.
 --
 -- Question: should this be parametrized by type parameters / abilities? IE do
 -- we allow GADTs?
-lookupDataType :: Uid -> TcM' (Vector (Vector ValTyI))
+lookupDataType :: UId -> TcM' (Vector (Vector ValTyI))
 lookupDataType uid = asks (^? _2 . _1 . ix uid) >>= (?? FailedDataTypeLookup)
 
-lookupConstructorTy :: Uid -> Row -> TcM' [ValTyI]
+lookupConstructorTy :: UId -> Row -> TcM' [ValTyI]
 lookupConstructorTy uid row
   = asks (^? _2 . _1 . ix uid . ix row) >>= (?? FailedConstructorLookup)
+
+lookupCommandTy :: UId -> Row -> TcM' (CommandDeclaration Int)
+lookupCommandTy uid row
+  = asks (^? _2 . _2 . ix uid . commands . ix row) >>= (?? LookupCommandTy)
 
 openWithTypes :: [ValTyI] -> Scope Int (Tm Int) Int -> TcM' TmI
 openWithTypes tys scope = do
@@ -120,21 +144,11 @@ withAbility ability action = local (& _1 .~ ability) action
 ambientAbility :: TcM' AbilityI
 ambientAbility = asks (^?! _1)
 
-unifyAbility :: AbilityI -> AbilityI -> TcM' AbilityI
-unifyAbility ab1 ab2 = do
-  unify (UTerm ab1) (UTerm ab2)
+-- polyVarInstantiator :: [TyArg a] -> Int -> ValTy Int
+-- polyVarInstantiator = _
 
-unifyTy :: ValTy v -> ValTy v -> TcM' (ValTy v)
-unifyTy = _
+-- lookupPolyVarTy :: v -> TcM' (Scope Int ValTy v)
+-- lookupPolyVarTy = _
 
-polyVarInstantiator :: [TyArg a] -> Int -> ValTy Int
-polyVarInstantiator = _
-
-lookupPolyVarTy :: v -> TcM' (Scope Int ValTy v)
-lookupPolyVarTy = _
-
-lookupVarTy :: v -> TcM' (ValTy v)
-lookupVarTy = _
-
-lookupCommandTy :: Uid -> Row -> TcM' CompTyI
-lookupCommandTy = _
+lookupVarTy :: Int -> TcM' ValTyI
+lookupVarTy v = gets (^? ix v . _Left) >>= (?? LookupVarTy)

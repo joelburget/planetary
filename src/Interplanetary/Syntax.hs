@@ -2,47 +2,43 @@
 {-# language DeriveFoldable #-}
 {-# language DeriveFunctor #-}
 {-# language DeriveTraversable #-}
+{-# language FlexibleInstances #-}
 {-# language GADTs #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language KindSignatures #-}
 {-# language LambdaCase #-}
+{-# language MultiParamTypeClasses #-}
 {-# language PatternSynonyms #-}
 {-# language Rank2Types #-}
 {-# language StandaloneDeriving #-}
 {-# language TemplateHaskell #-}
 {-# language TupleSections #-}
 {-# language TypeFamilies #-}
-module Interplanetary.Syntax where
+module Interplanetary.Syntax
+  ( module Interplanetary.Syntax
+  , module Interplanetary.UIds
+  ) where
 
 import Bound
-import Control.Error.Util
-import Control.Lens ((<&>))
 import Control.Lens.At -- (At, Ixed, IxValue, Index)
+import Control.Lens.TH (makeLenses)
 import Control.Monad (ap)
-import Control.Monad.Except
-import Control.Unification
-import Control.Unification.IntVar
-import Control.Unification.Types
+import Control.Newtype
 import Data.Functor.Classes
-import Data.Functor.Identity
 import Data.Foldable (toList)
-import Data.Hashable
 import Data.HashMap.Lazy (HashMap)
 import qualified Data.HashMap.Lazy as HashMap
 import Data.List (elemIndex)
-import Data.List.Extras.Pair
 import Data.Monoid ((<>))
-import Data.String (IsString)
 
 import Interplanetary.Util
+import Interplanetary.UIds
 
 -- TODO:
 -- * Right now we use simple equality to check types but should implement
 --   unification
 -- * Be more granular about the capabilities each function needs instead of
 --   hardcoding its monad.
--- * What libraries should we be using?
---   - unification-fd
 -- * Error messaging is pitiful
 --   - show some sort of helpful info
 --   - our errors are essentially meaningless
@@ -50,103 +46,70 @@ import Interplanetary.Util
 
 type Row = Int
 
--- newtype Merkle256 = Merkle256 (Crypto.Digest Crypto.SHA256)
---   deriving (Eq, Show, Ord)
-
--- instance Num Merkle256 where
---   fromInteger = Merkle256 . Crypto.hash . BS.pack . show
-
--- instance Byteable Merkle256 where
---   toBytes (Merkle256 digest) = toBytes digest
-
--- instance Hashable Merkle256 where
---   hashWithSalt i a = hashWithSalt i (toBytes a)
-
-newtype Uid = Uid String
-  deriving (Eq, Show, Ord, Hashable, IsString)
-
-instance Num Uid where
-  fromInteger = Uid . show
-
-newtype UidMap a = UidMap (HashMap Uid a)
+newtype UIdMap a = UIdMap (HashMap UId a)
   deriving (Eq, Show, Functor, Foldable, Traversable, Monoid)
 
-type instance IxValue (UidMap a) = a
-type instance Index (UidMap a) = Uid
-instance At (UidMap a) where
--- #if MIN_VERSION_containers(0,5,8)
---   at k f = HashMap.alterF f k
--- #else
-  at k f (UidMap m) = f mv <&> \case
-    Nothing -> UidMap $ maybe m (const (HashMap.delete k m)) mv
-    Just v' -> UidMap $ HashMap.insert k v' m
-    where mv = HashMap.lookup k m
--- #endif
-  {-# INLINE at #-}
+instance Newtype (UIdMap a) (HashMap UId a) where
+  pack = UIdMap
+  unpack (UIdMap a) = a
 
-instance Ixed (UidMap a) where
-  ix k f u@(UidMap m) = case HashMap.lookup k m of
-     Just v -> f v <&> \v' -> UidMap (HashMap.insert k v' m)
-     Nothing -> pure u
-  {-# INLINE ix #-}
+type instance IxValue (UIdMap a) = a
+type instance Index (UIdMap a) = UId
+instance At (UIdMap a) where
+  at k f (UIdMap m) = UIdMap <$> at k f m
 
-instance Unifiable UidMap where
-  -- zipMatch (UidMap a) (UidMap b) = UidMap <$> zipMatch a b
+instance Ixed (UIdMap a) where
+  ix k f (UIdMap m) = UIdMap <$> ix k f m
 
-emptyUidMap :: UidMap a
-emptyUidMap = UidMap (HashMap.empty)
+class Unifiable f where
+  unify :: Eq a => f a -> f a -> Maybe (f a)
 
-uidMapFromList :: [(Uid, a)] -> UidMap a
-uidMapFromList = UidMap . HashMap.fromList
+maybeIf :: Bool -> Maybe a -> Maybe a
+maybeIf False a = Nothing
+maybeIf True  a = a
 
-uidMapSingleton :: Uid -> a -> UidMap a
-uidMapSingleton k v = UidMap (HashMap.singleton k v)
+instance Unifiable UIdMap where
+  unify (UIdMap a) (UIdMap b) = maybeIf
+    (HashMap.null (HashMap.difference a b))
+    (Just $ UIdMap (HashMap.union a b))
 
-uidMapGet :: UidMap a -> Uid -> a
-uidMapGet (UidMap hmap) uid = hmap HashMap.! uid
+uIdMapFromList :: [(UId, a)] -> UIdMap a
+uIdMapFromList = UIdMap . HashMap.fromList
 
-uidMapUnion :: UidMap a -> UidMap a -> UidMap a
-uidMapUnion (UidMap a) (UidMap b) = UidMap (HashMap.union a b)
+uidMapUnion :: UIdMap a -> UIdMap a -> UIdMap a
+uidMapUnion = over2 UIdMap HashMap.union
 
-instance (Ord a) => Ord (UidMap a) where
+instance Ord a => Ord (UIdMap a) where
   compare m1 m2 = compare (toList m1) (toList m2)
 
 -- Types
 
 data ValTy a
-  = DataTy Uid (Vector (TyArg a))
+  = DataTy UId (Vector (TyArg a))
   | SuspendedTy (CompTy a)
   | VariableTy a
   deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
 
 instance Unifiable ValTy where
-  zipMatch (DataTy uid1 args1) (DataTy uid2 args2) =
-    if uid1 /= uid2
-    then Nothing
-    else DataTy uid1 <$> zipMatchTyArgs args1 args2
-  zipMatch (SuspendedTy cty1) (SuspendedTy cty2) =
-    SuspendedTy <$> zipMatch cty1 cty2
-  zipMatch (VariableTy a) (VariableTy b) = Just (VariableTy (Right (a, b)))
+  unify (DataTy uid1 args1) (DataTy uId2 args2) = maybeIf
+    (uid1 /= uId2)
+    (DataTy uid1 <$> unifyTyArgs args1 args2)
+  unify (SuspendedTy cty1) (SuspendedTy cty2) = SuspendedTy <$> unify cty1 cty2
+  unify (VariableTy a) (VariableTy b) = maybeIf (a == b) (Just (VariableTy a))
 
 instance Unifiable TyArg where
-  zipMatch (TyArgVal v1) (TyArgVal v2) = TyArgVal <$> zipMatch v1 v2
-  zipMatch (TyArgAbility a1) (TyArgAbility a2)
-    = TyArgAbility <$> unifyAbility a1 a2
-  zipMatch _ _ = Nothing
+  unify (TyArgVal v1) (TyArgVal v2) = TyArgVal <$> unify v1 v2
+  unify (TyArgAbility a1) (TyArgAbility a2) = TyArgAbility <$> unify a1 a2
+  unify _ _ = Nothing
 
-zipMatchTyArgs
-  :: Vector (TyArg a)
+unifyTyArgs
+  :: Eq a
+  => Vector (TyArg a)
   -> Vector (TyArg a)
-  -> Maybe (Vector (TyArg (Either a (a, a))))
-zipMatchTyArgs args1 args2 =
-  if length args1 /= length args2
-  then Nothing
-  else sequence $ zipWith zipMatch args1 args2
-
--- In this instance, expect the same length and pointwise matches
-instance Unifiable [] where
-  zipMatch []     []     = Just []
-  zipMatch (a:as) (b:bs) = (Right (a, b):) <$> zipMatch as bs
+  -> Maybe (Vector (TyArg a))
+unifyTyArgs args1 args2 = maybeIf
+  (length args1 /= length args2)
+  (sequence $ zipWith unify args1 args2)
 
 instance Show1 ValTy where
   liftShowsPrec _ _ _ _ = shows "TODO [Show1 ValTy]"
@@ -168,7 +131,7 @@ instance Ord1 ValTy where
 instance Ord1 TyArg where
   liftCompare cmp (TyArgVal valTy1) (TyArgVal valTy2)
     = liftCompare cmp valTy1 valTy2
-  liftCompare cmp (TyArgAbility ability1) (TyArgAbility ability2)
+  liftCompare _cmp (TyArgAbility ability1) (TyArgAbility ability2)
     = compare ability1 ability2
   liftCompare _ x y = compare (ordering x) (ordering y)
     where ordering = \case
@@ -180,7 +143,6 @@ instance Applicative ValTy where pure = VariableTy; (<*>) = ap
 instance Monad ValTy where
   return = VariableTy
 
-  -- >>= :: ValTy a -> (a -> ValTy b) -> ValTy b
   DataTy uid args >>= f = DataTy uid ((`bindTyArg` f) <$> args)
   SuspendedTy (CompTy dom codom) >>= f = do
     let dom' = (>>= f) <$> dom
@@ -201,18 +163,18 @@ data CompTy a = CompTy
   } deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
 
 instance Unifiable CompTy where
-  zipMatch (CompTy dom1 codom1) (CompTy dom2 codom2) = CompTy
-    <$> zipMatchValTys dom1 dom2
-    <*> zipMatch codom1 codom2
+  unify (CompTy dom1 codom1) (CompTy dom2 codom2) = CompTy
+    <$> unifyValTys dom1 dom2
+    <*> unify codom1 codom2
 
-zipMatchValTys
-  :: Vector (ValTy a)
+unifyValTys
+  :: Eq a
+  => Vector (ValTy a)
   -> Vector (ValTy a)
-  -> Maybe (Vector (ValTy (Either a (a, a))))
-zipMatchValTys vals1 vals2 =
-  if length vals1 /= length vals2
-  then Nothing
-  else sequence $ zipWith zipMatch vals1 vals2
+  -> Maybe (Vector (ValTy a))
+unifyValTys vals1 vals2 = maybeIf
+  (length vals1 /= length vals2)
+  (sequence $ zipWith unify vals1 vals2)
 
 instance Ord1 CompTy where
   liftCompare cmp (CompTy vt1 p1) (CompTy vt2 p2) =
@@ -225,6 +187,8 @@ data Peg a = Peg
   } deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
 
 instance Unifiable Peg where
+  unify (Peg ab1 val1) (Peg ab2 val2)
+    = Peg <$> unify ab1 ab2 <*> unify val1 val2
 
 instance Ord1 Peg where
   liftCompare cmp (Peg ab1 val1) (Peg ab2 val2) =
@@ -257,7 +221,7 @@ data ConstructorDecl a = ConstructorDecl (Vector (ValTy a))
 -- A collection of data constructor signatures (which can refer to bound type /
 -- effect variables).
 data DataTypeInterface a = DataTypeInterface
-  -- { dataTypeUid :: Uid
+  -- { dataTypeUId :: UId
   -- we universally quantify over some number of type variables
   { dataBinders :: Vector (a, Kind)
   -- a collection of constructors taking some arguments
@@ -270,58 +234,20 @@ data CommandDeclaration a = CommandDeclaration (Vector (ValTy a)) (ValTy a)
 
 data EffectInterface a = EffectInterface
   -- we universally quantify some number of type variables
-  { interfaceBinders :: Vector (a, Kind)
+  { _interfaceBinders :: Vector (a, Kind)
   -- a collection of commands
-  , commands :: Vector (CommandDeclaration a)
+  , _commands :: Vector (CommandDeclaration a)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
 
 data InitiateAbility = OpenAbility | ClosedAbility
   deriving (Eq, Show, Ord)
 
-data Ability a = Ability InitiateAbility (UidMap (Vector (TyArg a)))
+data Ability a = Ability InitiateAbility (UIdMap (Vector (TyArg a)))
   deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
 
-type UnificationFailure f = UFailure f IntVar
-type UnificationM f = ExceptT
-  (UnificationFailure f)
-  (IntBindingT f Identity)
-
-runUnificationM :: UnificationM f a -> Maybe a
-runUnificationM = hush . runIdentity . evalIntBindingT . runExceptT
-
-class Wrap f where
-  wrap :: f Int -> UTerm f IntVar
-  unwrap :: UTerm f IntVar -> Maybe (f Int)
-
-instance Wrap TyArg where
-
-instance Wrap Ability where
-  -- wrap :: AbilityI -> UTerm Ability IntVar
-  wrap (Ability init uidMap) =
-    let uidMap' = _ <$$> uidMap
-    in UTerm (Ability init uidMap')
-
-  -- unwrap :: UTerm Ability IntVar -> Maybe AbilityI
-  unwrap = _ . freeze
-
-unifyAbility :: AbilityI -> AbilityI -> Maybe AbilityI
-unifyAbility ab1 ab2 = unwrap =<< runUnificationM (wrap ab1 =:= wrap ab2)
-
--- (Ability init1 (UidMap uids1)) (Ability init2 (UidMap uids2)) =
---   if init1 == init2 && HashMap.null (HashMap.difference uids1 uids2)
---   then case zipMatch uids1 uids2 of
---     Just uids -> Ability init1 <$> _
---     Nothing -> Nothing
---   else Nothing
-
 instance Unifiable Ability where
-  zipMatch
-    (Ability init1 (UidMap uids1)) (Ability init2 (UidMap uids2)) =
-      if init1 == init2 && HashMap.null (HashMap.difference uids1 uids2)
-      then case zipMatch uids1 uids2 of
-        Just uids -> Ability init1 <$> _
-        Nothing -> Nothing
-      else Nothing
+  unify (Ability init1 uids1) (Ability init2 uids2)
+    = maybeIf (init1 == init2) (Ability init1 <$> unify uids1 uids2)
 
 instance Ord1 Ability where
   liftCompare cmp (Ability init1 entries1) (Ability init2 entries2) =
@@ -332,31 +258,33 @@ instance Ord1 Ability where
 
 -- An adjustment is a mapping from effect inferface id to the types it's
 -- applied to. IE a set of saturated interfaces.
-newtype Adjustment a = Adjustment (UidMap (Vector (TyArg a)))
+newtype Adjustment a = Adjustment (UIdMap (Vector (TyArg a)))
   deriving (Monoid, Show, Eq, Ord, Functor, Foldable, Traversable)
-
--- Read-only typing information
-type DataTypeTable a = UidMap (Vector (Vector (ValTy a)))
-type InterfaceTable a = UidMap (EffectInterface a)
-type TypingTables a = (DataTypeTable a, InterfaceTable a, Ability a)
 
 -- Terms
 
 data Value a b
   -- use (inferred)
-  = Command Uid Row
+  = Command UId Row
 
   -- construction (checked)
-  | DataConstructor Uid Row (Vector (Value a b))
+  | DataConstructor UId Row (Vector (Value a b))
   | Lambda (Scope Int (Tm a) b)
+  | ForeignFun UId Row
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+pattern ForeignData :: UId -> Value a b
+pattern ForeignData uid = DataConstructor uid 0 []
+
+pattern ForeignDataTm :: UId -> Tm a b
+pattern ForeignDataTm uid = Value (ForeignData uid)
 
 data Continuation a b
   -- use (inferred)
   = Application (Spine a b)
 
   -- construction (checked)
-  | Case Uid (Vector (Scope Int (Tm a) b))
+  | Case UId (Vector (Scope Int (Tm a) b))
   | Handle (Adjustment a) (Peg a) (AdjustmentHandlers a b) (Scope () (Tm a) b)
   | Let PolytypeS (Scope () (Tm a) b)
 
@@ -377,11 +305,11 @@ data Tm a b
 pattern V :: b -> Tm a b
 pattern V name = Variable name
 
-pattern CommandV :: Uid -> Row -> Tm a b
-pattern CommandV uid row = Value (Command uid row)
+pattern CommandV :: UId -> Row -> Tm a b
+pattern CommandV uId row = Value (Command uId row)
 
-pattern ConstructV :: Uid -> Row -> Vector (Value a b) -> Tm a b
-pattern ConstructV uid row args = Value (DataConstructor uid row args)
+pattern ConstructV :: UId -> Row -> Vector (Value a b) -> Tm a b
+pattern ConstructV uId row args = Value (DataConstructor uId row args)
 
 pattern LambdaV :: Scope Int (Tm a) b -> Tm a b
 pattern LambdaV scope = Value (Lambda scope)
@@ -396,7 +324,7 @@ type Spine a b = Vector (Tm a b)
 -- Encode each constructor argument (x_c) as a `Just Int` and the continuation
 -- (z_c) as `Nothing`.
 newtype AdjustmentHandlers a b = AdjustmentHandlers
-  (UidMap (Vector (Scope (Maybe Int) (Tm a) b)))
+  (UIdMap (Vector (Scope (Maybe Int) (Tm a) b)))
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
 
 -- patterns
@@ -405,7 +333,7 @@ newtype AdjustmentHandlers a b = AdjustmentHandlers
 lam :: Eq b => Vector b -> Tm a b -> Value a b
 lam vars body = Lambda (abstract (`elemIndex` vars) body)
 
-case_ :: Eq b => Uid -> Vector (Vector b, Tm a b) -> Continuation a b
+case_ :: Eq b => UId -> Vector (Vector b, Tm a b) -> Continuation a b
 case_ uid tms =
   let f (vars, tm) = abstract (`elemIndex` vars) tm
   in Case uid (f <$> tms)
@@ -415,7 +343,7 @@ handle
      Eq b
   => Adjustment a
   -> Peg a
-  -> UidMap (Vector (Vector b, b, Tm a b))
+  -> UIdMap (Vector (Vector b, b, Tm a b))
   -> (b, Tm a b)
   -> Continuation a b
 handle adj peg handlers (bodyVar, body) =
@@ -442,16 +370,15 @@ pattern VTy name = VariableTy name
 -- simple abilities
 
 closedAbility :: Ability a
-closedAbility = Ability ClosedAbility emptyUidMap
+closedAbility = Ability ClosedAbility mempty
 
 emptyAbility :: Ability a
-emptyAbility = Ability OpenAbility emptyUidMap
+emptyAbility = Ability OpenAbility mempty
 
 extendAbility :: Ability a -> Adjustment a -> Ability a
 extendAbility (Ability initAb uidMap) (Adjustment adj)
   = Ability initAb (uidMap `uidMapUnion` adj)
 
-type CValI = Value Int
 type ValueI = Value Int
 type PolytypeI = Polytype Int
 type ValTyI = ValTy Int
@@ -635,11 +562,6 @@ bindVal (DataConstructor uid row tms) f =
   DataConstructor uid row ((`bindVal` f) <$> tms)
 bindVal (Lambda body) f = Lambda (body >>>= f)
 
-infixl 4 <$$>
-
-(<$$>) :: (Functor f, Functor g) => (a -> b) -> f (g a) -> f (g b)
-(<$$>) = fmap . fmap
-
 bindContinuation :: Continuation c a -> (a -> Tm c b) -> Continuation c b
 bindContinuation (Application spine) f = Application ((>>= f) <$> spine)
 bindContinuation (Case uid branches) f = Case uid ((>>>= f) <$> branches)
@@ -660,3 +582,7 @@ instance Monad (Tm a) where
   Annotation val ty >>= f = Annotation (bindVal val f) ty
   Value v >>= f = Value (bindVal v f)
   Cut neg pos >>= f = Cut (bindContinuation neg f) (pos >>= f)
+
+-- Lens Hell:
+
+makeLenses ''EffectInterface

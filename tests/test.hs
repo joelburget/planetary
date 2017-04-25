@@ -5,12 +5,13 @@ import Test.Tasty.HUnit
 
 -- import Tests.Checking
 import qualified Tests.Parser as Parser
+import qualified Tests.Eval as Eval
 
 main :: IO ()
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "frankenstein" [Parser.unitTests]
+tests = testGroup "frankenstein" [Parser.unitTests, Eval.unitTests]
 
 -- unitTests :: TestTree
 -- unitTests = testGroup "ipc unit tests"

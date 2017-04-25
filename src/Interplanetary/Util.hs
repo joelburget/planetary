@@ -3,6 +3,7 @@ module Interplanetary.Util where
 
 import Control.Monad.State.Strict
 import Control.Monad.Except
+import Control.Newtype
 
 -- TODO change to Vector
 type Vector a = [a]
@@ -37,3 +38,13 @@ infix 0 ??
 (??) :: MonadError e m => Maybe a -> e -> m a
 (Just a) ?? _  = pure a
 Nothing ?? err = throwError err
+
+infixl 4 <$$>
+
+(<$$>) :: (Functor f, Functor g) => (a -> b) -> f (g a) -> f (g b)
+(<$$>) = fmap . fmap
+
+over2
+  :: (Newtype n o, Newtype n' o')
+  => (o -> n) -> (o -> o -> o') -> (n -> n -> n')
+over2 _newtype f n1 n2 = pack (f (unpack n1) (unpack n2))
