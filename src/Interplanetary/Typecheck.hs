@@ -44,14 +44,14 @@ instance Ixed (TypingEnv a) where
 newtype TcM a b = TcM
   (ExceptT TcErr
   (StateT (TypingEnv a)
-  (Reader (Ability a, TypingTables a)))
+  (Reader (TypingTables a)))
   b)
   deriving (Functor, Applicative, Monad, MonadError TcErr)
 deriving instance MonadState (TypingEnv a) (TcM a)
-deriving instance MonadReader (Ability a, TypingTables a) (TcM a)
+deriving instance MonadReader (TypingTables a) (TcM a)
 type TcM' = TcM Int
 
-runTcM :: (Ability Int, TypingTables Int) -> TypingEnv Int -> TcM' a -> Either TcErr a
+runTcM :: TypingTables Int -> TypingEnv Int -> TcM' a -> Either TcErr a
 runTcM tables env (TcM action) = runReader
   (evalStateT
     (runExceptT action)
@@ -123,15 +123,15 @@ check m b = do
 -- Question: should this be parametrized by type parameters / abilities? IE do
 -- we allow GADTs?
 lookupDataType :: UId -> TcM' (Vector (Vector ValTyI))
-lookupDataType uid = asks (^? _2 . _1 . ix uid) >>= (?? FailedDataTypeLookup)
+lookupDataType uid = asks (^? _1 . ix uid) >>= (?? FailedDataTypeLookup)
 
 lookupConstructorTy :: UId -> Row -> TcM' [ValTyI]
 lookupConstructorTy uid row
-  = asks (^? _2 . _1 . ix uid . ix row) >>= (?? FailedConstructorLookup)
+  = asks (^? _1 . ix uid . ix row) >>= (?? FailedConstructorLookup)
 
 lookupCommandTy :: UId -> Row -> TcM' (CommandDeclaration Int)
 lookupCommandTy uid row
-  = asks (^? _2 . _2 . ix uid . commands . ix row) >>= (?? LookupCommandTy)
+  = asks (^? _2 . ix uid . commands . ix row) >>= (?? LookupCommandTy)
 
 openWithTypes :: [ValTyI] -> Scope Int (Tm Int) Int -> TcM' TmI
 openWithTypes tys scope = do
@@ -139,10 +139,10 @@ openWithTypes tys scope = do
   pure $ instantiate Variable scope
 
 withAbility :: AbilityI -> TcM' b -> TcM' b
-withAbility ability action = local (& _1 .~ ability) action
+withAbility ability action = local (& _3 .~ ability) action
 
 ambientAbility :: TcM' AbilityI
-ambientAbility = asks (^?! _1)
+ambientAbility = asks (^?! _3)
 
 -- polyVarInstantiator :: [TyArg a] -> Int -> ValTy Int
 -- polyVarInstantiator = _

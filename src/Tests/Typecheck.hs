@@ -12,39 +12,37 @@ import Interplanetary.Typecheck
 
 checkTest
   :: String
-  -> Ability Int
   -> TypingTables Int
   -> TypingEnv Int
   -> TmI
   -> ValTy Int
   -> TestTree
-checkTest name ability tables env tm ty = testCase name $
-  runTcM (ability, tables) env (check tm ty) @=? Right ()
+checkTest name tables env tm ty = testCase name $
+  runTcM tables env (check tm ty) @=? Right ()
 
 inferTest
   :: String
-  -> Ability Int
   -> TypingTables Int
   -> TypingEnv Int
   -> TmI
   -> Either TcErr (ValTy Int)
   -> TestTree
-inferTest name ability tables env tm expected = testCase name $
-  runTcM (ability, tables) env (infer tm) @=? expected
+inferTest name tables env tm expected = testCase name $
+  runTcM tables env (infer tm) @=? expected
 
 -- TODO: use QQ
-exampleInterfaces :: InterfaceTable String
+exampleInterfaces :: InterfaceTable Int
 exampleInterfaces = uIdMapFromList []
 
-exampleTables :: TypingTables String
-exampleTables = exampleInterfaces
+exampleTables :: TypingTables Int
+exampleTables = (_, exampleInterfaces, _)
 
-emptyTypingEnv :: TypingEnv String
+emptyTypingEnv :: TypingEnv Int
 emptyTypingEnv = TypingEnv []
 
 unitTests :: TestTree
 unitTests = testGroup "typechecking"
   [ let env = TypingEnv [Left _]
-    in inferTest "VAR 1" exampleTables env (V"x") (Right _)
-  , inferTest "VAR 2" exampleTables emptyTypingEnv (V"x") (Left _)
+    in inferTest "VAR 1" exampleTables env (V 0) (Right _)
+  , inferTest "VAR 2" exampleTables emptyTypingEnv (V 0) (Left _)
   ]
