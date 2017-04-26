@@ -3,31 +3,31 @@
 
 module Interplanetary.StrNat where
 
-import Interplanetary.Genesis
+import Interplanetary.Syntax
 import Interplanetary.Meta
 
 -- A simple language of strings and naturals.
 --
 -- This is the language E from PFPL
 
-{-
-uidOracle :: GenesisTerm
-uidOracle = Oracle (InlineText "PRIM_UID_ORACLE")
+pattern NatStrTy :: TmI
+pattern NatStrTy = DataTm natStrTyUid 0 []
 
--- The oracle yields a unique id, which we consume to produce an opaque type
-uniqueTyDesc :: GenesisTerm
-uniqueTyDesc = ComputationTyRep (OpaqueTyRep (Bound 0 Atom)) uidOracle
--}
+pattern Nat :: TmI
+pattern Nat = DataTm natStrUid 0 []
 
-typeSyntax :: GenesisTerm
-typeSyntax = Product'
+pattern Str :: TmI
+pattern Str = DataTm natStrUid 1 []
+
+typeSyntax :: TmI
+typeSyntax = NatStrTy
   [ Unit -- num
   , Unit -- str
   ]
 
 -- let's describe the syntax
 
-termSyntax :: GenesisTerm
+termSyntax :: TmI
 termSyntax =
  let e = Bound 0 Atom -- It would be nice to do this in a less low-level way
  in Product'
@@ -46,7 +46,7 @@ termSyntax =
 --
 -- question: This is a `[[ Language ]]_Genesis`. Should that be declared
 -- somewhere?
-language :: GenesisTerm
+language :: TmI
 language = Product'
   -- question: types don't appear in the syntax?
   [ termSyntax

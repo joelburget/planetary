@@ -279,6 +279,12 @@ pattern ForeignData uid = DataConstructor uid 0 []
 pattern ForeignDataTm :: UId -> Tm a b
 pattern ForeignDataTm uid = Value (ForeignData uid)
 
+pattern DataTm :: UId -> Row -> Vector (Value a b) -> Tm a b
+pattern DataTm uid row vals = Value (DataConstructor uid row vals)
+
+pattern ForeignFunTm :: UId -> Row -> Tm a b
+pattern ForeignFunTm uid row = Value (ForeignFun uid row)
+
 data Continuation a b
   -- use (inferred)
   = Application (Spine a b)

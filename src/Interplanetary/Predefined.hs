@@ -73,6 +73,8 @@ exampleDataTypes = uIdMapFromList
   [ (voidUid, [])
   -- unit has a single nullary constructor
   , (unitUid, [[]])
+  -- bool has two nullary constructors
+  , (boolUid, [[], []])
   -- `data Id a = Id a`
   , (idUid, [[VTy"a"]])
   -- A, B = D [R] | { C } | X
