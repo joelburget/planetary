@@ -22,6 +22,9 @@ boolTy = DataTy boolId []
 strTy :: ValTyI
 strTy = DataTy strId []
 
+uidTy :: ValTyI
+uidTy = DataTy uidId []
+
 -- TODO: some way to declare both implementation and type at the same time
 interfaceTable :: InterfaceTable Int
 interfaceTable = uIdMapFromList
@@ -35,6 +38,9 @@ interfaceTable = uIdMapFromList
     ])
   , (strOpsId, EffectInterface []
     [ CommandDeclaration [strTy, strTy] strTy -- concat
+    ])
+  , (uidOpsId, EffectInterface []
+    [ CommandDeclaration [] uidTy -- generateUid
     ])
   ]
 
@@ -74,7 +80,7 @@ exampleDataTypes = uIdMapFromList
   -- unit has a single nullary constructor
   , (unitUid, [[]])
   -- bool has two nullary constructors
-  , (boolUid, [[], []])
+  , (boolId, [[], []])
   -- `data Id a = Id a`
   , (idUid, [[VTy"a"]])
   -- A, B = D [R] | { C } | X

@@ -8,7 +8,7 @@ import Interplanetary.Meta
 
 -- A simple language of strings and naturals.
 --
--- This is the language E from PFPL
+-- This is the language E from PFPL, Ch 4
 
 pattern NatStrTy :: TmI
 pattern NatStrTy = DataTm natStrTyUid 0 []
@@ -19,11 +19,33 @@ pattern Nat = DataTm natStrUid 0 []
 pattern Str :: TmI
 pattern Str = DataTm natStrUid 1 []
 
-typeSyntax :: TmI
-typeSyntax = NatStrTy
-  [ Unit -- num
-  , Unit -- str
-  ]
+typeSyntax :: DataTypeInterface Int
+typeSyntax = [dataDecl|
+data
+  | Num
+  | Str
+|]
+
+-- TODO:
+-- * dataDecl QQ
+-- * Change parsing to match this syntax (bar at beginning of each line)
+-- * add predefined types to scope
+--
+-- Think about:
+-- * do we have any support for recursive data or must that be built at a
+--   higher level?
+-- * what built-in support do we have for representing variable binding?
+termSyntax :: DataTypeInterface Int
+termSyntax = [dataDecl|
+data e
+  | Num Int
+  | Str String
+  | Plus e e
+  | Times e e
+  | Cat e e
+  | Len e
+  | Let e e
+|]
 
 -- let's describe the syntax
 

@@ -46,11 +46,9 @@ simpleEnv =
     ]
   )
 
--- extractAndInlineForeign :: TmI -> (ForeignStore Int Int, TmI)
--- extractAndInlineForeign = _
-
-pattern Bool :: Int -> TmI
-pattern Bool i = DataTm boolUid i []
+-- TODO: can this not be a pattern synonym?
+bool :: Int -> TmI
+bool i = DataTm boolId i []
 
 unitTests :: TestTree
 unitTests =
@@ -59,8 +57,8 @@ unitTests =
       two = mkForeignTm @Int 2
       four = mkForeignTm @Int 4
 
-      false = Bool 0
-      true = Bool 1
+      false = bool 0
+      true = bool 1
 
       hello = mkForeignTm @String "hello "
       world = mkForeignTm @String "world"
@@ -93,7 +91,7 @@ unitTests =
          -- stepTest "application 1" [tm| (\y -> y) x |] (Variable "x")
          ]
        , let casePiece =
-               Case boolUid
+               Case boolId
                  [ abstract (`elemIndex` []) one
                  , abstract (`elemIndex` []) zero
                  ]

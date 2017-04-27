@@ -35,7 +35,8 @@ module Interplanetary.UIds
   , voidUid
   , unitUid
   , idUid
-  , boolUid
+  , uidOpsId
+  , uidId
   ) where
 
 import Data.Binary (encode)
@@ -94,7 +95,8 @@ intId
   : voidUid
   : unitUid
   : idUid
-  : boolUid
+  : uidOpsId
+  : uidId
   :_ = generateUIds
 
 oneUid, twoUid, fourUid :: UId
