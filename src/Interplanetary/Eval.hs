@@ -49,7 +49,7 @@ step (Cut (Application spine) (Value (Lambda scope)))
 step (Cut (Case _uid1 rows) (Value (DataConstructor _uid2 rowNum args))) = do
   row <- rows ^? ix rowNum ?? IndexErr
   -- TODO: maybe we need to evaluate the args to a value first
-  pure (instantiate (Value . (args !!)) row)
+  pure (instantiate (args !!) row)
 step (Cut (Application spine) (Value (ForeignFun fUid row))) = do
   store <- asks (^. _2)
   handleForeignFun store fUid row spine

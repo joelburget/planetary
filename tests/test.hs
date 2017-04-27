@@ -3,15 +3,19 @@ import Data.Maybe
 import Test.Tasty
 import Test.Tasty.HUnit
 
--- import Tests.Checking
 import qualified Tests.Parser as Parser
 import qualified Tests.Eval as Eval
+import qualified Tests.Typecheck as Typecheck
 
 main :: IO ()
 main = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "frankenstein" [Parser.unitTests, Eval.unitTests]
+tests = testGroup "frankenstein"
+  [ Parser.unitTests
+  , Eval.unitTests
+  , Typecheck.unitTests
+  ]
 
 -- unitTests :: TestTree
 -- unitTests = testGroup "ipc unit tests"

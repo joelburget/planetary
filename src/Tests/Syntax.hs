@@ -16,11 +16,11 @@ unitTests = testGroup "syntax"
         actual :: Ability String
         actual = extendAbility emptyAbility (Adjustment uidMap)
         expected = Ability OpenAbility uidMap
-    in expected @=? actual
+    in expected @?= actual
   , testCase "extendAbility 2" $
     let uidMap = uIdMapFromList [(unitId, [TyArgVal unitTy])]
         actual :: Ability String
         actual = extendAbility closedAbility (Adjustment uidMap)
         expected = Ability ClosedAbility uidMap
-    in expected @=? actual
+    in expected @?= actual
   ]

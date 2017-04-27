@@ -64,10 +64,6 @@ instance Ixed (UIdMap a) where
 class Unifiable f where
   unify :: Eq a => f a -> f a -> Maybe (f a)
 
-maybeIf :: Bool -> Maybe a -> Maybe a
-maybeIf False a = Nothing
-maybeIf True  a = a
-
 instance Unifiable UIdMap where
   unify (UIdMap a) (UIdMap b) = maybeIf
     (HashMap.null (HashMap.difference a b))
@@ -90,110 +86,15 @@ data ValTy a
   | VariableTy a
   deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
 
-instance Unifiable ValTy where
-  unify (DataTy uid1 args1) (DataTy uId2 args2) = maybeIf
-    (uid1 /= uId2)
-    (DataTy uid1 <$> unifyTyArgs args1 args2)
-  unify (SuspendedTy cty1) (SuspendedTy cty2) = SuspendedTy <$> unify cty1 cty2
-  unify (VariableTy a) (VariableTy b) = maybeIf (a == b) (Just (VariableTy a))
-
-instance Unifiable TyArg where
-  unify (TyArgVal v1) (TyArgVal v2) = TyArgVal <$> unify v1 v2
-  unify (TyArgAbility a1) (TyArgAbility a2) = TyArgAbility <$> unify a1 a2
-  unify _ _ = Nothing
-
-unifyTyArgs
-  :: Eq a
-  => Vector (TyArg a)
-  -> Vector (TyArg a)
-  -> Maybe (Vector (TyArg a))
-unifyTyArgs args1 args2 = maybeIf
-  (length args1 /= length args2)
-  (sequence $ zipWith unify args1 args2)
-
-instance Show1 ValTy where
-  liftShowsPrec _ _ _ _ = shows "TODO [Show1 ValTy]"
-
-instance Ord1 ValTy where
-  liftCompare cmp l r = case (l, r) of
-    (DataTy uid1 args1, DataTy uid2 args2) ->
-      compare uid1 uid2 <> liftCompare (liftCompare cmp) args1 args2
-    (SuspendedTy cty1, SuspendedTy cty2) -> liftCompare cmp cty1 cty2
-    (VariableTy v1, VariableTy v2) -> cmp v1 v2
-    (x, y) -> compare (ordering x) (ordering y)
-
-          -- This section is rather arbitrary
-    where ordering = \case
-            DataTy{}      -> 0 :: Int
-            SuspendedTy{} -> 1
-            VariableTy{}  -> 2
-
-instance Ord1 TyArg where
-  liftCompare cmp (TyArgVal valTy1) (TyArgVal valTy2)
-    = liftCompare cmp valTy1 valTy2
-  liftCompare _cmp (TyArgAbility ability1) (TyArgAbility ability2)
-    = compare ability1 ability2
-  liftCompare _ x y = compare (ordering x) (ordering y)
-    where ordering = \case
-            TyArgVal{}     -> 0 :: Int
-            TyArgAbility{} -> 1
-
-instance Applicative ValTy where pure = VariableTy; (<*>) = ap
-
-instance Monad ValTy where
-  return = VariableTy
-
-  DataTy uid args >>= f = DataTy uid ((`bindTyArg` f) <$> args)
-  SuspendedTy (CompTy dom codom) >>= f = do
-    let dom' = (>>= f) <$> dom
-        codom' = bindPeg codom f
-    SuspendedTy $ CompTy dom' codom'
-  VariableTy a >>= f = f a
-
-bindTyArg :: TyArg a -> (a -> ValTy b) -> TyArg b
-bindTyArg (TyArgVal a) f = TyArgVal (a >>= f)
-bindTyArg (TyArgAbility a) f = TyArgAbility a -- (bindAbility a f)
-
-bindPeg :: Peg a -> (a -> ValTy b) -> Peg b
-bindPeg (Peg ab val) f = Peg ab (val >>= f)
-
 data CompTy a = CompTy
   { compDomain :: Vector (ValTy a)
   , compCodomain :: Peg a
   } deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
 
-instance Unifiable CompTy where
-  unify (CompTy dom1 codom1) (CompTy dom2 codom2) = CompTy
-    <$> unifyValTys dom1 dom2
-    <*> unify codom1 codom2
-
-unifyValTys
-  :: Eq a
-  => Vector (ValTy a)
-  -> Vector (ValTy a)
-  -> Maybe (Vector (ValTy a))
-unifyValTys vals1 vals2 = maybeIf
-  (length vals1 /= length vals2)
-  (sequence $ zipWith unify vals1 vals2)
-
-instance Ord1 CompTy where
-  liftCompare cmp (CompTy vt1 p1) (CompTy vt2 p2) =
-    liftCompare (liftCompare cmp) vt1 vt2 <>
-    liftCompare cmp p1 p2
-
 data Peg a = Peg
   { pegAbility :: Ability Int
   , pegVal :: ValTy a
   } deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
-
-instance Unifiable Peg where
-  unify (Peg ab1 val1) (Peg ab2 val2)
-    = Peg <$> unify ab1 ab2 <*> unify val1 val2
-
-instance Ord1 Peg where
-  liftCompare cmp (Peg ab1 val1) (Peg ab2 val2) =
-    compare ab1 ab2 <>
-    liftCompare cmp val1 val2
 
 data TyArg a
   = TyArgVal (ValTy a)
@@ -245,17 +146,6 @@ data InitiateAbility = OpenAbility | ClosedAbility
 data Ability a = Ability InitiateAbility (UIdMap (Vector (TyArg a)))
   deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
 
-instance Unifiable Ability where
-  unify (Ability init1 uids1) (Ability init2 uids2)
-    = maybeIf (init1 == init2) (Ability init1 <$> unify uids1 uids2)
-
-instance Ord1 Ability where
-  liftCompare cmp (Ability init1 entries1) (Ability init2 entries2) =
-    compare init1 init2 <>
-    liftCompare (liftCompare (liftCompare cmp))
-      (toList entries1)
-      (toList entries2)
-
 -- An adjustment is a mapping from effect inferface id to the types it's
 -- applied to. IE a set of saturated interfaces.
 newtype Adjustment a = Adjustment (UIdMap (Vector (TyArg a)))
@@ -266,12 +156,15 @@ newtype Adjustment a = Adjustment (UIdMap (Vector (TyArg a)))
 data Value a b
   -- use (inferred)
   = Command UId Row
+  | ForeignFun UId Row -- TODO: Is ForeignFun just a Command?
 
   -- construction (checked)
-  | DataConstructor UId Row (Vector (Value a b))
+  | DataConstructor UId Row (Vector (Tm a b))
   | Lambda (Scope Int (Tm a) b)
-  | ForeignFun UId Row
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+pattern CommandTm :: UId -> Row -> Tm a b
+pattern CommandTm uid row = Value (Command uid row)
 
 pattern ForeignData :: UId -> Value a b
 pattern ForeignData uid = DataConstructor uid 0 []
@@ -279,7 +172,7 @@ pattern ForeignData uid = DataConstructor uid 0 []
 pattern ForeignDataTm :: UId -> Tm a b
 pattern ForeignDataTm uid = Value (ForeignData uid)
 
-pattern DataTm :: UId -> Row -> Vector (Value a b) -> Tm a b
+pattern DataTm :: UId -> Row -> Vector (Tm a b) -> Tm a b
 pattern DataTm uid row vals = Value (DataConstructor uid row vals)
 
 pattern ForeignFunTm :: UId -> Row -> Tm a b
@@ -314,7 +207,7 @@ pattern V name = Variable name
 pattern CommandV :: UId -> Row -> Tm a b
 pattern CommandV uId row = Value (Command uId row)
 
-pattern ConstructV :: UId -> Row -> Vector (Value a b) -> Tm a b
+pattern ConstructV :: UId -> Row -> Vector (Tm a b) -> Tm a b
 pattern ConstructV uId row args = Value (DataConstructor uId row args)
 
 pattern LambdaV :: Scope Int (Tm a) b -> Tm a b
@@ -402,6 +295,113 @@ type PolytypeS = Polytype String
 
 -- Instance Hell:
 
+instance Unifiable Ability where
+  unify (Ability init1 uids1) (Ability init2 uids2)
+    = maybeIf (init1 == init2) (Ability init1 <$> unify uids1 uids2)
+
+instance Ord1 Ability where
+  liftCompare cmp (Ability init1 entries1) (Ability init2 entries2) =
+    compare init1 init2 <>
+    liftCompare (liftCompare (liftCompare cmp))
+      (toList entries1)
+      (toList entries2)
+
+instance Unifiable Peg where
+  unify (Peg ab1 val1) (Peg ab2 val2)
+    = Peg <$> unify ab1 ab2 <*> unify val1 val2
+
+instance Ord1 Peg where
+  liftCompare cmp (Peg ab1 val1) (Peg ab2 val2) =
+    compare ab1 ab2 <>
+    liftCompare cmp val1 val2
+
+instance Unifiable CompTy where
+  unify (CompTy dom1 codom1) (CompTy dom2 codom2) = CompTy
+    <$> unifyValTys dom1 dom2
+    <*> unify codom1 codom2
+
+unifyValTys
+  :: Eq a
+  => Vector (ValTy a)
+  -> Vector (ValTy a)
+  -> Maybe (Vector (ValTy a))
+unifyValTys vals1 vals2 = maybeIf
+  (length vals1 /= length vals2)
+  (sequence $ zipWith unify vals1 vals2)
+
+instance Ord1 CompTy where
+  liftCompare cmp (CompTy vt1 p1) (CompTy vt2 p2) =
+    liftCompare (liftCompare cmp) vt1 vt2 <>
+    liftCompare cmp p1 p2
+
+instance Unifiable ValTy where
+  unify (DataTy uid1 args1) (DataTy uId2 args2) = maybeIf
+    (uid1 /= uId2)
+    (DataTy uid1 <$> unifyTyArgs args1 args2)
+  unify (SuspendedTy cty1) (SuspendedTy cty2) = SuspendedTy <$> unify cty1 cty2
+  unify (VariableTy a) (VariableTy b) = maybeIf (a == b) (Just (VariableTy a))
+  unify _ _ = Nothing
+
+instance Unifiable TyArg where
+  unify (TyArgVal v1) (TyArgVal v2) = TyArgVal <$> unify v1 v2
+  unify (TyArgAbility a1) (TyArgAbility a2) = TyArgAbility <$> unify a1 a2
+  unify _ _ = Nothing
+
+unifyTyArgs
+  :: Eq a
+  => Vector (TyArg a)
+  -> Vector (TyArg a)
+  -> Maybe (Vector (TyArg a))
+unifyTyArgs args1 args2 = maybeIf
+  (length args1 /= length args2)
+  (sequence $ zipWith unify args1 args2)
+
+instance Ord1 TyArg where
+  liftCompare cmp (TyArgVal valTy1) (TyArgVal valTy2)
+    = liftCompare cmp valTy1 valTy2
+  liftCompare _cmp (TyArgAbility ability1) (TyArgAbility ability2)
+    = compare ability1 ability2
+  liftCompare _ x y = compare (ordering x) (ordering y)
+    where ordering = \case
+            TyArgVal{}     -> 0 :: Int
+            TyArgAbility{} -> 1
+
+instance Show1 ValTy where
+  liftShowsPrec _ _ _ _ = shows "TODO [Show1 ValTy]"
+
+instance Ord1 ValTy where
+  liftCompare cmp l r = case (l, r) of
+    (DataTy uid1 args1, DataTy uid2 args2) ->
+      compare uid1 uid2 <> liftCompare (liftCompare cmp) args1 args2
+    (SuspendedTy cty1, SuspendedTy cty2) -> liftCompare cmp cty1 cty2
+    (VariableTy v1, VariableTy v2) -> cmp v1 v2
+    (x, y) -> compare (ordering x) (ordering y)
+
+          -- This section is rather arbitrary
+    where ordering = \case
+            DataTy{}      -> 0 :: Int
+            SuspendedTy{} -> 1
+            VariableTy{}  -> 2
+
+instance Applicative ValTy where pure = VariableTy; (<*>) = ap
+
+instance Monad ValTy where
+  return = VariableTy
+
+  DataTy uid args >>= f = DataTy uid ((`bindTyArg` f) <$> args)
+  SuspendedTy (CompTy dom codom) >>= f = do
+    let dom' = (>>= f) <$> dom
+        codom' = bindPeg codom f
+    SuspendedTy $ CompTy dom' codom'
+  VariableTy a >>= f = f a
+
+bindTyArg :: TyArg a -> (a -> ValTy b) -> TyArg b
+bindTyArg (TyArgVal a) f = TyArgVal (a >>= f)
+bindTyArg (TyArgAbility a) f = TyArgAbility a -- (bindAbility a f)
+
+bindPeg :: Peg a -> (a -> ValTy b) -> Peg b
+bindPeg (Peg ab val) f = Peg ab (val >>= f)
+
 instance Eq1 ValTy where
   liftEq eq (DataTy uid1 args1) (DataTy uid2 args2)
     = uid1 == uid2 && liftEq (liftEq eq) args1 args2
@@ -475,12 +475,15 @@ instance Ord o => Ord1 (Value o) where
     (DataConstructor uid1 row1 app1, DataConstructor uid2 row2 app2) ->
       compare uid1 uid2 <> compare row1 row2 <> liftCompare (liftCompare cmp) app1 app2
     (Lambda body1, Lambda body2) -> (liftCompare cmp) body1 body2
+    (ForeignFun uid1 row1, ForeignFun uid2 row2) ->
+      compare uid1 uid2 <> compare row1 row2
     (x, y) -> compare (ordering x) (ordering y)
 
     where ordering = \case
             Command{}            -> 0 :: Int
             DataConstructor{}    -> 1
             Lambda{}             -> 2
+            ForeignFun{}         -> 3
 
 instance Ord o => Ord1 (Continuation o) where
   liftCompare cmp l r = case (l, r) of
@@ -545,6 +548,8 @@ instance Show a => Show1 (Value a) where
       showString "Command " . shows uid . showString " " . shows row
     DataConstructor _ _ _ -> showString "DataConstructor"
     Lambda scope -> liftShowsPrec s sl d scope
+    ForeignFun uid row ->
+      showString "ForeignFun " . shows uid . showString " " . shows row
 
 instance Show a => Show1 (Continuation a) where
   liftShowsPrec s sl _d = \case
@@ -565,8 +570,9 @@ instance Show a => Show1 (Tm a) where
 bindVal :: Value c a -> (a -> Tm c b) -> Value c b
 bindVal (Command uid row) _ = Command uid row
 bindVal (DataConstructor uid row tms) f =
-  DataConstructor uid row ((`bindVal` f) <$> tms)
+  DataConstructor uid row ((>>= f) <$> tms)
 bindVal (Lambda body) f = Lambda (body >>>= f)
+bindVal (ForeignFun uid row) _ = ForeignFun uid row
 
 bindContinuation :: Continuation c a -> (a -> Tm c b) -> Continuation c b
 bindContinuation (Application spine) f = Application ((>>= f) <$> spine)

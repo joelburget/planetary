@@ -21,7 +21,7 @@ stepTest
   -> Either Err TmI
   -> TestTree
 stepTest name env tm expected = testCase name $
-  runEvalM env (step tm) @=? expected
+  runEvalM env (step tm) @?= expected
 
 mkForeign :: Serializable a => a -> (UId, Dynamic)
 mkForeign val = (mkUid val, toDyn val)
@@ -106,4 +106,4 @@ unitTests =
        ]
 
 runEvalTests :: IO ()
-runEvalTests = defaultMain (testGroup "" [unitTests])
+runEvalTests = defaultMain unitTests

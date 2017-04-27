@@ -25,7 +25,7 @@ library
     Tests.Eval
     Tests.Parser
     Tests.Syntax
-    -- Tests.Typecheck
+    Tests.Typecheck
     -- Interplanetary.JSON
     -- Interplanetary.StrNat
   -- other-extensions:

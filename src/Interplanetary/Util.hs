@@ -48,3 +48,7 @@ over2
   :: (Newtype n o, Newtype n' o')
   => (o -> n) -> (o -> o -> o') -> (n -> n -> n')
 over2 _newtype f n1 n2 = pack (f (unpack n1) (unpack n2))
+
+maybeIf :: Bool -> Maybe a -> Maybe a
+maybeIf False _a = Nothing
+maybeIf True   a = a

@@ -26,7 +26,7 @@ parserTest
   -> TestTree
 parserTest input parser parsed = testCase input $
   case runTokenParse parser input of
-    Right actual -> parsed @=? actual
+    Right actual -> parsed @?= actual
     Left errMsg -> assertFailure errMsg
 
 unitTests :: TestTree
