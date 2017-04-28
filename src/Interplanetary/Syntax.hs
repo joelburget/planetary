@@ -62,6 +62,8 @@ instance Ixed (UIdMap a) where
   ix k f (UIdMap m) = UIdMap <$> ix k f m
 
 class Unifiable f where
+  -- TODO: we should give a way for solutions to escape this scope
+  -- (a (mapping) state monad)
   unify :: Eq a => f a -> f a -> Maybe (f a)
 
 instance Unifiable UIdMap where
@@ -326,7 +328,7 @@ unifyValTys
   -> Vector (ValTy a)
   -> Maybe (Vector (ValTy a))
 unifyValTys vals1 vals2 = maybeIf
-  (length vals1 /= length vals2)
+  (length vals1 == length vals2)
   (sequence $ zipWith unify vals1 vals2)
 
 instance Ord1 CompTy where
@@ -336,7 +338,7 @@ instance Ord1 CompTy where
 
 instance Unifiable ValTy where
   unify (DataTy uid1 args1) (DataTy uId2 args2) = maybeIf
-    (uid1 /= uId2)
+    (uid1 == uId2)
     (DataTy uid1 <$> unifyTyArgs args1 args2)
   unify (SuspendedTy cty1) (SuspendedTy cty2) = SuspendedTy <$> unify cty1 cty2
   unify (VariableTy a) (VariableTy b) = maybeIf (a == b) (Just (VariableTy a))
@@ -353,7 +355,7 @@ unifyTyArgs
   -> Vector (TyArg a)
   -> Maybe (Vector (TyArg a))
 unifyTyArgs args1 args2 = maybeIf
-  (length args1 /= length args2)
+  (length args1 == length args2)
   (sequence $ zipWith unify args1 args2)
 
 instance Ord1 TyArg where
