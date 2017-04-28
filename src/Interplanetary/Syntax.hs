@@ -366,9 +366,6 @@ instance Ord1 TyArg where
             TyArgVal{}     -> 0 :: Int
             TyArgAbility{} -> 1
 
-instance Show1 ValTy where
-  liftShowsPrec _ _ _ _ = shows "TODO [Show1 ValTy]"
-
 instance Ord1 ValTy where
   liftCompare cmp l r = case (l, r) of
     (DataTy uid1 args1, DataTy uid2 args2) ->
@@ -542,30 +539,120 @@ instance Ord o => Ord1 (Tm o) where
       Value{}              -> 3
       Cut{}                -> 4
 
+showSpace :: ShowS
+showSpace = showString " "
+
+instance Show1 ValTy where
+  liftShowsPrec s sl d valTy = showParen (d > 10) $ case valTy of
+    DataTy uid tyArgs ->
+        showString "DataTy "
+      . shows uid
+      . liftShowList s sl tyArgs
+    SuspendedTy compTy ->
+        showString "SuspendedTy "
+      . liftShowsPrec s sl 11 compTy
+    VariableTy a ->
+        showString "VariableTy "
+      . s 11 a
+
+instance Show1 TyArg where
+  liftShowsPrec s sl d tyArg = showParen (d > 10) $ case tyArg of
+    TyArgVal vTy ->
+        showString "TyArgVal "
+      . liftShowsPrec s sl 11 vTy
+    TyArgAbility ab ->
+        showString "TyArgAbility "
+      . showsPrec 11 ab
+
+instance Show1 CompTy where
+  liftShowsPrec s sl d (CompTy dom codom) = showParen (d > 10) $
+      showString "CompTy "
+    . liftShowList s sl dom
+    . showSpace
+    . liftShowsPrec s sl 11 codom
+
+instance Show1 Peg where
+  liftShowsPrec s sl d (Peg ab val) = showParen (d > 10) $
+      showString "Peg "
+    . showsPrec 11 ab
+    . showSpace
+    . liftShowsPrec s sl 11 val
+
 instance Show a => Show1 (Value a) where
-  liftShowsPrec s sl d = \case
+  liftShowsPrec s sl d val = showParen (d > 10) $ case val of
     Command uid row ->
-      showString "Command " . shows uid . showString " " . shows row
-    DataConstructor _ _ _ -> showString "DataConstructor"
-    Lambda scope -> liftShowsPrec s sl d scope
+        showString "Command "
+      . shows uid
+      . showSpace
+      . shows row
+    DataConstructor uid row tms ->
+        showString "DataConstructor "
+      . shows uid
+      . showSpace
+      . shows row
+      . liftShowList s sl tms
+    Lambda scope ->
+        showString "Lambda "
+      . liftShowsPrec s sl 11 scope
     ForeignFun uid row ->
-      showString "ForeignFun " . shows uid . showString " " . shows row
+        showString "ForeignFun "
+      . shows uid
+      . showSpace
+      . shows row
 
 instance Show a => Show1 (Continuation a) where
-  liftShowsPrec s sl _d = \case
-    -- TODO, obviously
-    Application spine -> showString "Application " .  liftShowList s sl spine
-    Case uid _ -> showString "Case " . shows uid
-    Handle _ _ _ _ -> showString "Handle"
-    Let _ _ -> showString "Let"
+  liftShowsPrec s sl d cont = showParen (d > 10) $ case cont of
+    Application spine ->
+        showString "Application "
+      . liftShowList s sl spine
+    Case uid branches ->
+        showString "Case "
+      . shows uid
+      . showSpace
+      . liftShowList s sl branches
+    Handle adj peg handlers body ->
+        showString "Handle "
+      . showsPrec 11 adj
+      . showSpace
+      . showsPrec 11 peg
+      . showSpace
+      . liftShowsPrec s sl 11 handlers
+      . showSpace
+      . liftShowsPrec s sl 11 body
+    Let pty body ->
+        showString "Let"
+      . showsPrec 11 pty
+      . liftShowsPrec s sl 11 body
     -- Letrec _ _ -> showString "Letrec"
 
+instance Show a => Show1 (AdjustmentHandlers a) where
+  liftShowsPrec s sl d (AdjustmentHandlers uidMap) = showParen (d > 10) $
+      showString "AdjustmentHandlers "
+    . liftShowList (liftShowsPrec s sl) (liftShowList s sl) (toList uidMap)
+
 instance Show a => Show1 (Tm a) where
-  liftShowsPrec _ _ _ _ = shows "TODO [Show1 Tm]"
-    -- Variable b -> showParen (d > 10) $ showString "Variable " . s 11 b
-    -- InstantiatePolyVar b tys -> showParen (d > 10) $
-    --   showString "InstantiatePolyVar " . s 11 b . showString " " . shows tys
-    -- Annotation _ _ -> showString "Annotation"
+  liftShowsPrec s sl d tm = showParen (d > 10) $ case tm of
+    Variable b ->
+        showString "Variable "
+      . s 11 b
+    InstantiatePolyVar b tys ->
+        showString "InstantiatePolyVar "
+      . s 11 b
+      . showSpace
+      . shows tys
+    Annotation val valTy ->
+        showString "Annotation "
+      . liftShowsPrec s sl 11 val
+      . showSpace
+      . showsPrec 11 valTy
+    Value val ->
+        showString "Value "
+      . liftShowsPrec s sl 11 val
+    Cut cont tm' ->
+        showString "Cut "
+      . liftShowsPrec s sl 11 cont
+      . showSpace
+      . liftShowsPrec s sl 11 tm'
 
 bindVal :: Value c a -> (a -> Tm c b) -> Value c b
 bindVal (Command uid row) _ = Command uid row
