@@ -10,9 +10,12 @@ module Interplanetary.Parser where
 
 import Control.Applicative
 import Control.Lens (unsnoc)
+import qualified Data.ByteString.Char8 as B8
 import Data.Functor (($>))
 
-import Text.Trifecta
+-- TODO: be suspicious of `try`, see where it can be removed
+-- http://blog.ezyang.com/2014/05/parsec-try-a-or-b-considered-harmful/
+import Text.Trifecta -- hiding (try)
 import "indentation-trifecta" Text.Trifecta.Indentation
 
 import Data.Char
@@ -84,11 +87,12 @@ identifier = Tok.ident frankensteinStyle
   <?> "identifier"
 
 parseUid :: MonadicParsing m => m UId
-parseUid = mkUid <$> natural
+-- TODO: get an exact count of digits
+parseUid = parserOnlyMakeUid . B8.pack <$> token (some hexDigit)
   <?> "uid"
 
 parseValTy :: MonadicParsing m => m (ValTy String)
-parseValTy = try parseDataTy <|> parseValTy'
+parseValTy = try parseDataTy <|> parseValTy' -- TODO: bad use of try
   <?> "Val Ty"
 
 parseValTy' :: MonadicParsing m => m (ValTy String)
@@ -112,7 +116,8 @@ parseConstructor = ConstructorDecl <$> many parseValTy' <?> "Constructor"
 parseDataTy :: MonadicParsing m => m (ValTy String)
 parseDataTy = DataTy
   <$> parseUid
-  <*> localIndentation Gt (many parseTyArg)
+  <*> many parseTyArg
+  -- <*> localIndentation Gt (many parseTyArg)
   <?> "Data Ty"
 
 parseTyVar :: MonadicParsing m => m (String, Kind)
@@ -133,14 +138,14 @@ parseEffectVar = do
 parseAbilityBody :: MonadicParsing m => m (Ability String)
 parseAbilityBody =
   let closedAb = do
-        _ <- symbol "0"
+        _ <- try (symbol "0")
         instances <- option [] (bar *> parseInterfaceInstances)
         return $ Ability ClosedAbility (uIdMapFromList instances)
       varAb = do
         e <- option "e" (try $ identifier <* bar)
         instances <- parseInterfaceInstances
         return $ Ability OpenAbility (uIdMapFromList instances)
-  in try closedAb <|> varAb <?> "Ability Body"
+  in closedAb <|> varAb <?> "Ability Body"
 
 parseAbility :: MonadicParsing m => m (Ability String)
 parseAbility = do
@@ -157,7 +162,7 @@ parsePeg = Peg <$> (convAbility =<< parseAbility) <*> parseValTy <?> "Peg"
 
 parseCompTy :: MonadicParsing m => m (CompTy String)
 parseCompTy = CompTy
-  <$> many (try (parseValTy <* arr))
+  <$> many (try (parseValTy <* arr)) -- TODO: bad use of try
   <*> parsePeg
   <?> "Comp Ty"
 
@@ -189,18 +194,26 @@ parseCommandDecl = uncurry CommandDeclaration <$> parseCommandType
   <?> "Command Decl"
 
 parseInterface :: MonadicParsing m => m (EffectInterface String)
-parseInterface = do
+parseInterface = (do
   reserved "interface"
   tyVars <- many parseTyVar
   _ <- assign
   -- inBoundTys
   xs <- localIndentation Gt $ sepBy1 parseCommandDecl bar
   return (EffectInterface tyVars xs)
+  ) <?> "Interface Decl"
+
+parseDataOrInterfaceDecls
+  :: MonadicParsing m
+  => m [Either (DataTypeInterface String) (EffectInterface String)]
+parseDataOrInterfaceDecls = some
+  (Left <$> parseDataDecl <|> Right <$> parseInterface)
+  <?> "Data or Interface Decls"
 
 parseApplication :: MonadicParsing m => m Use
 parseApplication =
   let parser = do
-        fun <- (Variable <$> identifier) -- TODO: not sure this line is right
+        fun <- Variable <$> identifier -- TODO: not sure this line is right
         spine <- choice [some parseUseNoAp, bang $> []]
         pure $ Cut (Application spine) fun
   in parser <?> "Application"
@@ -284,8 +297,8 @@ parseTm :: MonadicParsing m => m Tm'
 parseTm = (do
   tms <- some parseTmNoApp
   case tms of
-    [] -> empty
-    [tm] -> pure tm
+    []       -> empty
+    [tm]     -> pure tm
     tm:spine -> pure (Cut (Application spine) tm)
   ) <?> "Tm"
 
@@ -296,6 +309,7 @@ parseTmNoApp
   <|> parseCase
   <|> parseHandle
   -- <|> parseLet
+  <|> Variable <$> identifier
   <?> "Tm (no app)"
 
 parseAdjustment :: MonadicParsing m => m (Adjustment String)
@@ -304,7 +318,7 @@ parseAdjustment = todo "parseAdjustment"
 -- parseContinuation
 
 parseUse :: MonadicParsing m => m Use
-parseUse = choice [ try parseApplication, parseUseNoAp ]
+parseUse = choice [ try parseApplication, parseUseNoAp ] -- TODO: bad use of try
   <?> "Use"
 
 parseLambda :: MonadicParsing m => m Value'
@@ -383,3 +397,8 @@ runParse ev p input
 --runCharParse = runParse evalCharIndentationParserT
 runTokenParse :: CoreParser Token Parser b -> String -> Either String b
 runTokenParse p = runParse evalTokenIndentationParserT p
+
+-- runTokenLocParse :: CoreParser Token Parser b -> String -> Either String b
+-- runTokenLocParse p =
+--   let ind = _
+--   in case parseString ind mempty of

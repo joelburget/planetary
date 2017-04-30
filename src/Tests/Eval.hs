@@ -2,7 +2,7 @@
 {-# language TypeApplications #-}
 module Tests.Eval where
 
-import Bound (closed, abstract)
+import Bound -- (closed, abstract)
 import Control.Distributed.Process.Serializable (Serializable)
 import Data.Dynamic
 import Data.List (elemIndex)
@@ -10,9 +10,10 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import Interplanetary.Eval
--- import Interplanetary.Parser.QQ
+import Interplanetary.Parser.QQ
 import Interplanetary.Predefined
 import Interplanetary.Syntax
+import Interplanetary.Util
 
 stepTest
   :: String
@@ -84,11 +85,8 @@ unitTests =
            (Right helloWorld)
          ]
        , testGroup "functions"
-         [ let Just f = closed (lam @String ["x"] (V"x"))
-           in stepTest "application: (\\x -> x) x" simpleEnv
-                (Cut (Application [V 0]) (Value f))
-                (Right (V 0))
-         -- stepTest "application 1" [tm| (\y -> y) x |] (Variable "x")
+         [ let Just tm = closeVar ("x", 0) [tmExp| (\y -> y) x |]
+           in stepTest "application 1" simpleEnv tm (Right (V 0))
          ]
        , let casePiece =
                Case boolId
@@ -104,6 +102,9 @@ unitTests =
                 (Right zero)
               ]
        ]
+
+closeVar :: Eq a => (a, b) -> Tm c a -> Maybe (Tm c b)
+closeVar (a, b) = instantiate1 (V b) <$$> closed . abstract1 a
 
 runEvalTests :: IO ()
 runEvalTests = defaultMain unitTests

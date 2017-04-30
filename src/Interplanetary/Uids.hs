@@ -1,4 +1,5 @@
 {-# options_ghc -fno-warn-missing-signatures #-}
+{-# language DeriveDataTypeable #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language OverloadedStrings #-}
 {-# language TypeApplications #-}
@@ -6,6 +7,7 @@
 module Interplanetary.UIds
   ( UId
   , mkUid
+  , parserOnlyMakeUid
   , intId
   , boolId
   , strId
@@ -39,9 +41,15 @@ module Interplanetary.UIds
   , uidId
   ) where
 
-import Data.Binary (encode)
+import Data.Binary (Binary, encode)
 import Data.Byteable (toBytes)
+import Data.ByteString (ByteString)
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Base16 as Hex
+import qualified Data.ByteString.Char8 as B8
+import Data.Data
 import Data.Hashable (Hashable(hashWithSalt))
+import Data.Word (Word8)
 import Control.Distributed.Process.Serializable (Serializable)
 import Crypto.Hash
 
@@ -57,17 +65,31 @@ import Crypto.Hash
 -- instance Hashable Merkle256 where
 --   hashWithSalt i a = hashWithSalt i (toBytes a)
 
-newtype UId = UId (Digest SHA3_256)
-  deriving (Eq, Show, Ord) --, Hashable) -- , IsString)
+-- We need the content of the UId to be:
+-- * Something we can parse into (I don't know how to parse into a `Digest`,
+--   but can parse into something downstream of the digest).
+-- * An instance of `Data` (so we can quote it for TH)
+newtype UId = UId [Word8]
+  deriving (Eq, Ord, Typeable, Data, Binary)
+
+instance Show UId where
+  showsPrec d (UId w8s) = showParen (d > 10) $
+    showString "UId " . showString (B8.unpack (Hex.encode (BS.pack w8s)))
 
 instance Hashable UId where
-  hashWithSalt salt (UId val) = hashWithSalt salt (toBytes val)
+  hashWithSalt salt (UId val) = hashWithSalt salt val
+
+type D = Digest SHA3_256
 
 mkUid :: Serializable a => a -> UId
-mkUid = UId . hashlazy . encode
+mkUid = UId . BS.unpack . toBytes @D . hashlazy . encode
+
+parserOnlyMakeUid :: ByteString -> UId
+parserOnlyMakeUid = UId . BS.unpack
 
 generateUIds :: [UId]
-generateUIds = UId . hashFinalize <$> iterate (`hashUpdate` "abcd") hashInit
+generateUIds = UId . BS.unpack . toBytes @D . hashFinalize <$>
+  iterate (`hashUpdate` "abcd") hashInit
 
 intId
   : boolId

@@ -1,6 +1,8 @@
 {-# language DataKinds #-}
+{-# language DeriveDataTypeable #-}
 {-# language DeriveFoldable #-}
 {-# language DeriveFunctor #-}
+{-# language DeriveGeneric #-}
 {-# language DeriveTraversable #-}
 {-# language FlexibleInstances #-}
 {-# language GADTs #-}
@@ -24,12 +26,15 @@ import Control.Lens.At -- (At, Ixed, IxValue, Index)
 import Control.Lens.TH (makeLenses)
 import Control.Monad (ap)
 import Control.Newtype
-import Data.Functor.Classes
+import Data.Binary (Binary(..))
+import Data.Data
 import Data.Foldable (toList)
+import Data.Functor.Classes
 import Data.HashMap.Lazy (HashMap)
-import qualified Data.HashMap.Lazy as HashMap
 import Data.List (elemIndex)
 import Data.Monoid ((<>))
+import qualified Data.HashMap.Lazy as HashMap
+import GHC.Generics
 
 import Interplanetary.Util
 import Interplanetary.UIds
@@ -47,7 +52,12 @@ import Interplanetary.UIds
 type Row = Int
 
 newtype UIdMap a = UIdMap (HashMap UId a)
-  deriving (Eq, Show, Functor, Foldable, Traversable, Monoid)
+  deriving (Eq, Show, Functor, Foldable, Traversable, Monoid, Typeable, Data, Generic)
+
+instance Binary (UIdMap (Vector (TyArg Int))) where
+  put = todo "put"
+  get = todo "get"
+  putList = todo "putList"
 
 instance Newtype (UIdMap a) (HashMap UId a) where
   pack = UIdMap
@@ -86,32 +96,42 @@ data ValTy a
   = DataTy UId (Vector (TyArg a))
   | SuspendedTy (CompTy a)
   | VariableTy a
-  deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
+  deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
+
+instance Binary (ValTy Int)
 
 data CompTy a = CompTy
   { compDomain :: Vector (ValTy a)
   , compCodomain :: Peg a
-  } deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
+  } deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
+
+instance Binary (CompTy Int)
 
 data Peg a = Peg
   { pegAbility :: Ability Int
   , pegVal :: ValTy a
-  } deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
+  } deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
+
+instance Binary (Peg Int)
 
 data TyArg a
   = TyArgVal (ValTy a)
   | TyArgAbility (Ability Int)
-  deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
+  deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
+
+instance Binary (TyArg Int)
 
 data Kind = ValTy | EffTy
-  deriving (Show, Eq, Ord)
+  deriving (Show, Eq, Ord, Typeable, Data, Generic)
+
+instance Binary Kind
 
 data Polytype a = Polytype
   -- Universally quantify over a bunch of variables
   { polyBinders :: Vector Kind
   -- resulting in a value type
   , polyVal :: Scope Int ValTy a
-  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 polytype :: Eq a => Vector (a, Kind) -> ValTy a -> Polytype a
 polytype binders body =
@@ -119,7 +139,9 @@ polytype binders body =
   in Polytype kinds (abstract (`elemIndex` names) body)
 
 data ConstructorDecl a = ConstructorDecl (Vector (ValTy a))
-  deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
+
+instance Binary (ConstructorDecl Int)
 
 -- A collection of data constructor signatures (which can refer to bound type /
 -- effect variables).
@@ -129,29 +151,46 @@ data DataTypeInterface a = DataTypeInterface
   { dataBinders :: Vector (a, Kind)
   -- a collection of constructors taking some arguments
   , constructors :: Vector (ConstructorDecl a)
-  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
+
+instance Binary (DataTypeInterface Int)
+
+dataInterface :: DataTypeInterface a -> Vector (Vector (ValTy a))
+dataInterface (DataTypeInterface _ ctors) =
+  let f (ConstructorDecl args) = args
+  in f <$> ctors
 
 -- commands take arguments (possibly including variables) and return a value
 data CommandDeclaration a = CommandDeclaration (Vector (ValTy a)) (ValTy a)
-  deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
+
+instance Binary (CommandDeclaration Int)
 
 data EffectInterface a = EffectInterface
   -- we universally quantify some number of type variables
   { _interfaceBinders :: Vector (a, Kind)
   -- a collection of commands
   , _commands :: Vector (CommandDeclaration a)
-  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable)
+  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
+
+instance Binary (EffectInterface Int)
 
 data InitiateAbility = OpenAbility | ClosedAbility
-  deriving (Eq, Show, Ord)
+  deriving (Eq, Show, Ord, Typeable, Data, Generic)
+
+instance Binary InitiateAbility
 
 data Ability a = Ability InitiateAbility (UIdMap (Vector (TyArg a)))
-  deriving (Eq, Show, Ord, Functor, Foldable, Traversable)
+  deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
+
+instance Binary (Ability Int)
 
 -- An adjustment is a mapping from effect inferface id to the types it's
 -- applied to. IE a set of saturated interfaces.
 newtype Adjustment a = Adjustment (UIdMap (Vector (TyArg a)))
-  deriving (Monoid, Show, Eq, Ord, Functor, Foldable, Traversable)
+  deriving (Monoid, Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
+
+instance Binary (Adjustment Int)
 
 -- Terms
 
@@ -163,7 +202,7 @@ data Value a b
   -- construction (checked)
   | DataConstructor UId Row (Vector (Tm a b))
   | Lambda (Scope Int (Tm a) b)
-  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 pattern CommandTm :: UId -> Row -> Tm a b
 pattern CommandTm uid row = Value (Command uid row)
@@ -187,13 +226,13 @@ data Continuation a b
   -- construction (checked)
   | Case UId (Vector (Scope Int (Tm a) b))
   | Handle (Adjustment a) (Peg a) (AdjustmentHandlers a b) (Scope () (Tm a) b)
-  | Let PolytypeS (Scope () (Tm a) b)
+  | Let (Polytype a) (Scope () (Tm a) b)
 
   -- Letrec
-  --   :: Vector (Tm a b, PolytypeS)
+  --   :: Vector (Tm a b, PolytypeI)
   --   -> Scope Int (Tm a) b
   --   -> Continuation a b
-  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 data Tm a b
   = Variable b
@@ -201,7 +240,7 @@ data Tm a b
   | Annotation (Value a b) (ValTy a)
   | Value (Value a b)
   | Cut (Continuation a b) (Tm a b)
-  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 pattern V :: b -> Tm a b
 pattern V name = Variable name
@@ -226,7 +265,7 @@ type Spine a b = Vector (Tm a b)
 -- (z_c) as `Nothing`.
 newtype AdjustmentHandlers a b = AdjustmentHandlers
   (UIdMap (Vector (Scope (Maybe Int) (Tm a) b)))
-  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 -- patterns
 -- TODO: make these bidirectional
@@ -258,7 +297,7 @@ handle adj peg handlers (bodyVar, body) =
       body' = abstract1 bodyVar body
   in Handle adj peg handlers' body'
 
-let_ :: Eq b => b -> PolytypeS -> Tm a b -> Value a b -> Tm a b
+let_ :: Eq b => b -> Polytype a -> Tm a b -> Value a b -> Tm a b
 let_ name pty rhs body = Cut (Let pty (abstract1 name rhs)) (Value body)
 
 -- letrec :: Eq b => Vector b -> Vector (Tm a b, Polytype a) -> Tm a b -> Tm a b
@@ -292,7 +331,6 @@ type TmI = Tm Int Int
 type SpineI = Spine Int Int
 type ConstructionValueI = Value Int
 type AbilityI = Ability Int
-type PolytypeS = Polytype String
 
 
 -- Instance Hell:

@@ -28,6 +28,7 @@ data TcErr
   | LookupCommandTy
   | LookupVarTy
   | CantInfer TmI
+  | NotClosed
   deriving (Eq, Show)
 
 -- Read-only typing information
@@ -42,7 +43,7 @@ type TypingTables a = (DataTypeTable a, InterfaceTable a, Ability a)
 --
 -- This is mutable so we can solve for a type variable in some context and
 -- carry the solution back out.
-type TypingEnvVal a = Either (ValTy a) PolytypeS
+type TypingEnvVal a = Either (ValTy a) PolytypeI
 newtype TypingEnv a = TypingEnv (Stack (TypingEnvVal a))
 
 type instance IxValue (TypingEnv a) = TypingEnvVal a
@@ -81,7 +82,12 @@ infer = \case
     CommandDeclaration from to <- lookupCommandTy uid row
     ambient <- getAmbient
     pure $ SuspendedTy (CompTy from (Peg ambient to))
-  Value (ForeignFun _uid _row) -> todo "infer ForeignFun"
+  Value (ForeignFun uid row) -> do
+    -- TODO:
+    -- Again, I wonder whether ForeignFun and Command are exactly the same.
+    CommandDeclaration from to <- lookupCommandTy uid row
+    ambient <- getAmbient
+    pure $ SuspendedTy (CompTy from (Peg ambient to))
   -- APP
   Cut (Application spine) f -> do
     SuspendedTy (CompTy dom (Peg ability retTy)) <- infer f
@@ -111,32 +117,42 @@ check (Cut (Case uid1 rows) m) ty = do
 
   dataRows <- lookupDataType uid1 -- :: Vector (Vector ValTyI)
   zipped <- strictZip ZipLengthMismatch dataRows rows
-  forM_ zipped $ \(dataConTys, rhs) -> do
-    -- tys <- get
-    let tys = todo "tys"
-        rhs' = instantiate (tys !!) rhs
-    withValTypes dataConTys (check rhs' ty)
+  forM_ zipped $ \(dataConTys, rhs) ->
+    withValTypes' dataConTys rhs (`check` ty)
 -- HANDLE
 check (Cut (Handle adj peg handlers fallthrouh) val) ty = do
   ambient <- getAmbient
   valTy <- withAbility (extendAbility ambient adj) (infer val)
-  let adjTys = extendAbility emptyAbility adj
-  forM_ adjTys (todo "check HANDLE")
+  let Ability init adjTys = extendAbility emptyAbility adj
+  forM_ adjTys _
 -- LET
-check (Cut (Let (Polytype binders valTy) body) val) ty = do
-  todo "check LET"
-  -- check val valTy
-  -- check body ty
+check (Cut (Let pty body) val) ty = do
+  valTy <- instantiateWithEnv pty
+  check val valTy
+  withPolyty pty $ check (instantiate1 (V 0) body) ty
 -- SWITCH
 check m b = do
   a <- infer m
   _ <- unify a b ?? TyUnification
   pure ()
 
+instantiateWithEnv :: PolytypeI -> TcM' ValTyI
+instantiateWithEnv = todo "instantiateWithEnv"
+
 -- TODO: should we push these in this order?
+-- * we should reverse and push at the head
 withValTypes :: [ValTyI] -> TcM' a -> TcM' a
 withValTypes tys = withState'
   (\(TypingEnv env) -> TypingEnv $ env <> (Left <$> tys))
+
+withValTypes' :: [ValTyI] -> Scope Int (Tm Int) Int -> (TmI -> TcM' a) -> TcM' a
+withValTypes' tys scope cb =
+  let body = instantiate V scope
+  in withValTypes tys (cb body)
+
+withPolyty :: PolytypeI -> TcM' a -> TcM' a
+withPolyty pty = withState'
+  (\(TypingEnv env) -> TypingEnv $ env <> [Right pty])
 
 -- | Get the types each data constructor holds for this data type.
 --

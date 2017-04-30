@@ -14,20 +14,26 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:
-    Interplanetary.Syntax
-    Interplanetary.Predefined
-    Interplanetary.Examples
-    Interplanetary.Parser
     Interplanetary.Eval
-    Interplanetary.Typecheck
+    Interplanetary.Examples
     Interplanetary.Meta
+    Interplanetary.Parser
+    Interplanetary.Parser.QQ
+    Interplanetary.Predefined
+    Interplanetary.Syntax
+    Interplanetary.Typecheck
     Interplanetary.Util
+
+    -- Interplanetary.JSON
+    -- Interplanetary.StrNat
+
     Tests.Eval
     Tests.Parser
     Tests.Syntax
     Tests.Typecheck
-    -- Interplanetary.JSON
-    -- Interplanetary.StrNat
+
+    -- load last so it'll be in scope
+    Tests
   -- other-extensions:
   build-depends:
     base >=4.9 && <4.10,
@@ -57,6 +63,9 @@ library
     random == 1.1.*,
     binary == 0.8.*,
     distributed-process == 0.6.*,
+    template-haskell == 2.11.*,
+    syb == 0.6.*,
+    base16-bytestring == 0.1.*,
 
     -- testing
     tasty == 0.11.*,

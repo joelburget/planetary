@@ -7,7 +7,7 @@ module Tests.Parser where
 
 import Test.Tasty
 import Test.Tasty.HUnit
-import Text.Trifecta
+import Text.Trifecta hiding (expected)
 import "indentation-trifecta" Text.Trifecta.Indentation
 import Bound
 
@@ -18,19 +18,23 @@ import Interplanetary.Parser
 -- "(\\x -> x : Unit -> [o]Unit)"
 -- "unit : Unit"
 
+-- TODO: Should both this and `oneUid` exist?
+oneUid' :: UId
+oneUid' = parserOnlyMakeUid "1"
+
 parserTest
   :: (Eq a, Show a)
   => String
   -> CoreParser Token Parser a
   -> a
   -> TestTree
-parserTest input parser parsed = testCase input $
+parserTest input parser expected = testCase input $
   case runTokenParse parser input of
-    Right actual -> parsed @?= actual
+    Right actual -> expected @=? actual
     Left errMsg -> assertFailure errMsg
 
 unitTests :: TestTree
-unitTests = testGroup "checking"
+unitTests = testGroup "parsing"
   [ parserTest "X" identifier "X"
 
   , parserTest "X" parseValTy' (VTy"X")
@@ -39,8 +43,18 @@ unitTests = testGroup "checking"
     [ ConstructorDecl [VTy"X"]
     , ConstructorDecl [VTy"X", VTy"Y"]
     ]
+
+  , parserTest "X" parseTyArg $ TyArgVal (VTy"X")
+
+  , parserTest "X X X" (many parseTyArg) $
+      let x = TyArgVal (VTy"X") in [x, x, x]
+
+  , parserTest "1" parseUid $ parserOnlyMakeUid "1"
+
+  , parserTest "123" parseUid $ parserOnlyMakeUid "123"
+
   , parserTest "1 X" parseDataTy $
-    DataTy oneUid [TyArgVal (VTy"X")]
+    DataTy oneUid' [TyArgVal (VTy"X")]
 
   -- also test with args
   -- Bool
@@ -60,28 +74,28 @@ unitTests = testGroup "checking"
       ]
 
   -- also test effect ty, multiple instances
-  , parserTest "1 X" parseInterfaceInstance $ (oneUid, [TyArgVal (VTy"X")])
+  , parserTest "1 X" parseInterfaceInstance $ (oneUid', [TyArgVal (VTy"X")])
 
-  , parserTest "1 [0]" parseInterfaceInstance $ (oneUid, [
+  , parserTest "1 [0]" parseInterfaceInstance $ (oneUid', [
     TyArgAbility (Ability ClosedAbility mempty)
     ])
 
-  , parserTest "1 []" parseInterfaceInstance $ (oneUid, [
+  , parserTest "1 []" parseInterfaceInstance $ (oneUid', [
     TyArgAbility (Ability OpenAbility mempty)
     ])
 
-  , parserTest "1" parseInterfaceInstance $ (oneUid, [])
+  , parserTest "1" parseInterfaceInstance $ (oneUid', [])
 
   , parserTest "0" parseAbilityBody closedAbility
   , parserTest "0|1" parseAbilityBody $
-    Ability ClosedAbility (uIdMapFromList [(oneUid, [])])
+    Ability ClosedAbility (uIdMapFromList [(oneUid', [])])
   , parserTest "e" parseAbilityBody emptyAbility
   , parserTest "e|1" parseAbilityBody $
-    Ability OpenAbility (uIdMapFromList [(oneUid, [])])
+    Ability OpenAbility (uIdMapFromList [(oneUid', [])])
 
   -- TODO: parseAbility
   , parserTest "[0|1]" parseAbility $
-    Ability ClosedAbility (uIdMapFromList [(oneUid, [])])
+    Ability ClosedAbility (uIdMapFromList [(oneUid', [])])
 
   , parserTest "[]" parseAbility emptyAbility
   , parserTest "[0]" parseAbility closedAbility
@@ -89,7 +103,7 @@ unitTests = testGroup "checking"
   , parserTest "[] X" parsePeg $ Peg emptyAbility (VTy"X")
   , parserTest "[]X" parsePeg $ Peg emptyAbility (VTy"X")
   , parserTest "[] 1 X" parsePeg $
-    Peg emptyAbility (DataTy oneUid [TyArgVal (VTy"X")])
+    Peg emptyAbility (DataTy oneUid' [TyArgVal (VTy"X")])
 
   , parserTest "X" parseCompTy $ CompTy [] (Peg emptyAbility (VTy"X"))
   , parserTest "X -> X" parseCompTy $
@@ -152,12 +166,13 @@ unitTests = testGroup "checking"
           , "    | -> y"
           , "    | a b c -> z"
           ]
-        cont = case_ (mkUid @Integer 0xe829515d5)
+        cont = case_ (parserOnlyMakeUid "e829515d5")
           [ ([], Variable "y")
           , (["a", "b", "c"], Variable "z")
           ]
         result = Cut cont (Variable "x")
-    in parserTest defn parseCase result
+    -- in parserTest defn parseCase result
+    in parserTest defn parseTm result
 
   -- , let defn = unlines
   --         [ "catch : <Abort>X -> {X} -> X"
@@ -167,3 +182,6 @@ unitTests = testGroup "checking"
   --         ]
   --   in parserTest defn
   ]
+
+runParserTests :: IO ()
+runParserTests = defaultMain unitTests
