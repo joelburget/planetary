@@ -21,6 +21,8 @@ library
     Interplanetary.Parser.QQ
     Interplanetary.Predefined
     Interplanetary.Syntax
+    Interplanetary.UIdMap
+    Interplanetary.UIds
     Interplanetary.Typecheck
     Interplanetary.Util
 

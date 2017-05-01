@@ -182,6 +182,29 @@ unitTests = testGroup "typechecking"
             env = TypingEnv [Left dataTy]
         in checkTest "SWITCH" exampleTables env tm expectedTy
       ]
+
+    , let simpleTables = _
+      in testGroup "check handle"
+        [ let tm = [tmExp|
+                handle (Abort) ([e | Abort]HaskellInt) (abort!) with
+                  Abort:
+                    | abort -> 1
+                  | k -> 2
+              |]
+              expectedTy = _
+          in checkTest "HANDLE (abort)" simpleTables env tm expectedTy
+        , let tm = [tmExp|
+                handle (adj) (peg) x with
+                  Send:
+                    | send y ->
+                  Receive:
+                    | receive ->
+                  | ->
+              |]
+              expectedTy = _
+          in checkTest "HANDLE (multi)" simpleTables env tm expectedTy
+        ]
+
   ]
 
 runTypecheckingTests :: IO ()

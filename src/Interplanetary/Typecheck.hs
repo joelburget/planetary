@@ -1,3 +1,4 @@
+{-# language FlexibleContexts #-}
 {-# language FlexibleInstances #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language MultiParamTypeClasses #-}
@@ -13,6 +14,7 @@ import Control.Monad (forM_)
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.HashMap.Lazy (intersectionWith)
 import Data.Monoid ((<>))
 
 import Interplanetary.Syntax
@@ -25,6 +27,7 @@ data TcErr
   | FailedConstructorLookup
   | AbilityUnification
   | TyUnification
+  | LookupCommands
   | LookupCommandTy
   | LookupVarTy
   | CantInfer TmI
@@ -120,11 +123,17 @@ check (Cut (Case uid1 rows) m) ty = do
   forM_ zipped $ \(dataConTys, rhs) ->
     withValTypes' dataConTys rhs (`check` ty)
 -- HANDLE
-check (Cut (Handle adj peg handlers fallthrouh) val) ty = do
+check (Cut (Handle adj peg (AdjustmentHandlers handlers) fallthrough) val) ty = do
   ambient <- getAmbient
   valTy <- withAbility (extendAbility ambient adj) (infer val)
-  let Ability init adjTys = extendAbility emptyAbility adj
-  forM_ adjTys _
+  cmds <- instantiateAbility $ extendAbility emptyAbility adj
+  pairs <- uidZip handlers cmds
+  forMOf_ (traverse . traverse) pairs $ \(handler, CommandDeclaration as b) ->
+    openAdjustmentHandler handler as (CompTy [b] (Peg ambient valTy)) $ \tm ->
+      check tm ty
+  withValTypes [valTy] $
+    let fallthrough' = instantiate1 (V 0) fallthrough
+    in check fallthrough' ty
 -- LET
 check (Cut (Let pty body) val) ty = do
   valTy <- instantiateWithEnv pty
@@ -136,8 +145,19 @@ check m b = do
   _ <- unify a b ?? TyUnification
   pure ()
 
+instantiateAbility :: AbilityI -> TcM' (UIdMap [CommandDeclaration Int])
+instantiateAbility (Ability _ uidmap) = do
+  iforM uidmap $ \uid tyArgs -> lookupCommands uid
+    -- iforM cmds $ \row (CommandDeclaration as b) ->
+    --   -- TODO should we be unifying the args and as? what's wrong here?
+    --   todo "instantiateAbility" tyArgs as b
+
 instantiateWithEnv :: PolytypeI -> TcM' ValTyI
 instantiateWithEnv = todo "instantiateWithEnv"
+
+uidZip :: MonadError TcErr m => UIdMap [a] -> UIdMap [b] -> m (UIdMap [(a, b)])
+uidZip (UIdMap as) (UIdMap bs) = UIdMap <$>
+  sequence (intersectionWith (strictZip ZipLengthMismatch) as bs)
 
 -- TODO: should we push these in this order?
 -- * we should reverse and push at the head
@@ -145,10 +165,30 @@ withValTypes :: [ValTyI] -> TcM' a -> TcM' a
 withValTypes tys = withState'
   (\(TypingEnv env) -> TypingEnv $ env <> (Left <$> tys))
 
+-- TODO: these next two functions seem the same?
 withValTypes' :: [ValTyI] -> Scope Int (Tm Int) Int -> (TmI -> TcM' a) -> TcM' a
 withValTypes' tys scope cb =
   let body = instantiate V scope
   in withValTypes tys (cb body)
+
+openWithTypes :: [ValTyI] -> Scope Int (Tm Int) Int -> TcM' TmI
+openWithTypes tys scope = withValTypes tys $
+  pure $ instantiate V scope
+
+openAdjustmentHandler
+  :: Scope (Maybe Int) (Tm Int) Int
+  -> [ValTyI]
+  -> CompTyI
+  -> (TmI -> TcM' a)
+  -> TcM' a
+openAdjustmentHandler handler argTys handlerTy cb =
+  let envAdj (TypingEnv env) = TypingEnv $
+        (Left <$> argTys) <> ((Left $ SuspendedTy handlerTy):env)
+
+      instantiator Nothing  = V 0
+      instantiator (Just i) = V (length argTys + 1)
+
+  in withState' envAdj (cb (instantiate instantiator handler))
 
 withPolyty :: PolytypeI -> TcM' a -> TcM' a
 withPolyty pty = withState'
@@ -165,13 +205,12 @@ lookupConstructorTy :: UId -> Row -> TcM' [ValTyI]
 lookupConstructorTy uid row
   = asks (^? _1 . ix uid . ix row) >>= (?? FailedConstructorLookup)
 
+lookupCommands :: UId -> TcM' [CommandDeclaration Int]
+lookupCommands uid = asks (^? _2 . ix uid . commands) >>= (?? LookupCommands)
+
 lookupCommandTy :: UId -> Row -> TcM' (CommandDeclaration Int)
 lookupCommandTy uid row
   = asks (^? _2 . ix uid . commands . ix row) >>= (?? LookupCommandTy)
-
-openWithTypes :: [ValTyI] -> Scope Int (Tm Int) Int -> TcM' TmI
-openWithTypes tys scope = withValTypes tys $
-  pure $ instantiate Variable scope
 
 withAbility :: AbilityI -> TcM' b -> TcM' b
 withAbility ability action = local (& _3 .~ ability) action

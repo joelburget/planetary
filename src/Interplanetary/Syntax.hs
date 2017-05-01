@@ -18,25 +18,23 @@
 {-# language TypeFamilies #-}
 module Interplanetary.Syntax
   ( module Interplanetary.Syntax
+  , module Interplanetary.UIdMap
   , module Interplanetary.UIds
   ) where
 
 import Bound
-import Control.Lens.At -- (At, Ixed, IxValue, Index)
 import Control.Lens.TH (makeLenses)
 import Control.Monad (ap)
-import Control.Newtype
 import Data.Binary (Binary(..))
 import Data.Data
 import Data.Foldable (toList)
 import Data.Functor.Classes
-import Data.HashMap.Lazy (HashMap)
 import Data.List (elemIndex)
 import Data.Monoid ((<>))
-import qualified Data.HashMap.Lazy as HashMap
 import GHC.Generics
 
 import Interplanetary.Util
+import Interplanetary.UIdMap
 import Interplanetary.UIds
 
 -- TODO:
@@ -51,44 +49,11 @@ import Interplanetary.UIds
 
 type Row = Int
 
-newtype UIdMap a = UIdMap (HashMap UId a)
-  deriving (Eq, Show, Functor, Foldable, Traversable, Monoid, Typeable, Data, Generic)
-
+-- TODO: remove
 instance Binary (UIdMap (Vector (TyArg Int))) where
   put = todo "put"
   get = todo "get"
   putList = todo "putList"
-
-instance Newtype (UIdMap a) (HashMap UId a) where
-  pack = UIdMap
-  unpack (UIdMap a) = a
-
-type instance IxValue (UIdMap a) = a
-type instance Index (UIdMap a) = UId
-instance At (UIdMap a) where
-  at k f (UIdMap m) = UIdMap <$> at k f m
-
-instance Ixed (UIdMap a) where
-  ix k f (UIdMap m) = UIdMap <$> ix k f m
-
-class Unifiable f where
-  -- TODO: we should give a way for solutions to escape this scope
-  -- (a (mapping) state monad)
-  unify :: Eq a => f a -> f a -> Maybe (f a)
-
-instance Unifiable UIdMap where
-  unify (UIdMap a) (UIdMap b) = maybeIf
-    (HashMap.null (HashMap.difference a b))
-    (Just $ UIdMap (HashMap.union a b))
-
-uIdMapFromList :: [(UId, a)] -> UIdMap a
-uIdMapFromList = UIdMap . HashMap.fromList
-
-uidMapUnion :: UIdMap a -> UIdMap a -> UIdMap a
-uidMapUnion = over2 UIdMap HashMap.union
-
-instance Ord a => Ord (UIdMap a) where
-  compare m1 m2 = compare (toList m1) (toList m2)
 
 -- Types
 
@@ -161,6 +126,8 @@ dataInterface (DataTypeInterface _ ctors) =
   in f <$> ctors
 
 -- commands take arguments (possibly including variables) and return a value
+--
+-- TODO: maybe rename this to `Command` if we do reuse it in instantiateAbility
 data CommandDeclaration a = CommandDeclaration (Vector (ValTy a)) (ValTy a)
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
@@ -180,6 +147,7 @@ data InitiateAbility = OpenAbility | ClosedAbility
 
 instance Binary InitiateAbility
 
+-- "For each UID, instantiate it with these args"
 data Ability a = Ability InitiateAbility (UIdMap (Vector (TyArg a)))
   deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 

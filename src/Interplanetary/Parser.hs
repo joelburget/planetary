@@ -29,6 +29,8 @@ import Bound
 import Interplanetary.Syntax
 import Interplanetary.Util
 
+import Debug.Trace
+
 type Tm' = Tm String String
 type Construction = Tm'
 type Use = Tm'
@@ -88,7 +90,7 @@ identifier = Tok.ident frankensteinStyle
 
 parseUid :: MonadicParsing m => m UId
 -- TODO: get an exact count of digits
-parseUid = parserOnlyMakeUid . B8.pack <$> token (some hexDigit)
+parseUid = parserOnlyMakeUid . B8.pack <$> token (some alphaNum)
   <?> "uid"
 
 parseValTy :: MonadicParsing m => m (ValTy String)
@@ -103,7 +105,7 @@ parseValTy' = parens parseValTy
 
 parseTyArg :: MonadicParsing m => m (TyArg String)
 parseTyArg = TyArgVal <$> parseValTy'
-         <|> TyArgAbility <$> brackets (convAbility =<< parseAbilityBody)
+         <|> TyArgAbility <$> brackets (liftClosed =<< parseAbilityBody)
          <?> "Ty Arg"
 
 parseConstructors :: MonadicParsing m => m (Vector (ConstructorDecl String))
@@ -132,33 +134,40 @@ parseEffectVar = do
     Nothing -> "0"
     Just x -> x
 
--- 0 | 0|Interfaces | E|Interfaces | Interfaces
+-- 0 | 0|Interfaces | e|Interfaces | Interfaces
 -- TODO: change to comma?
 -- TODO: allow explicit e? `[e]`
 parseAbilityBody :: MonadicParsing m => m (Ability String)
 parseAbilityBody =
   let closedAb = do
         _ <- try (symbol "0")
+        traceM "got 0"
         instances <- option [] (bar *> parseInterfaceInstances)
         return $ Ability ClosedAbility (uIdMapFromList instances)
       varAb = do
         e <- option "e" (try $ identifier <* bar)
+        traceShowM e
         instances <- parseInterfaceInstances
+        traceShowM instances
         return $ Ability OpenAbility (uIdMapFromList instances)
   in closedAb <|> varAb <?> "Ability Body"
 
 parseAbility :: MonadicParsing m => m (Ability String)
 parseAbility = do
   mxs <- optional $ brackets parseAbilityBody
+  traceShowM mxs
   return $ maybe emptyAbility id mxs
 
-convAbility :: MonadicParsing m => Ability String -> m (Ability Int)
-convAbility ab = case closed ab of
+liftClosed :: (Traversable f, Alternative m) => f String -> m (f Int)
+liftClosed tm = case closed tm of
   Nothing -> empty
-  Just ab' -> pure ab'
+  Just tm' -> pure tm'
 
 parsePeg :: MonadicParsing m => m (Peg String)
-parsePeg = Peg <$> (convAbility =<< parseAbility) <*> parseValTy <?> "Peg"
+parsePeg = Peg
+  <$> (liftClosed =<< parseAbility)
+  <*> parseValTy
+  <?> "Peg"
 
 parseCompTy :: MonadicParsing m => m (CompTy String)
 parseCompTy = CompTy
@@ -259,8 +268,8 @@ parseCase = do
 parseHandle :: MonadicParsing m => m Tm'
 parseHandle = do
   _ <- reserved "handle"
-  adj <- parseAdjustment
-  peg <- parsePeg
+  adj <- parens parseAdjustment
+  peg <- parens parsePeg
   tm <- parseTm
   _ <- reserved "with"
   (handlers, fallthrough) <- localIndentation Gt $ do
@@ -283,6 +292,7 @@ parseHandle = do
 
     -- and fallthrough
     fallthrough <- localIndentation Eq $ do
+      _ <- bar
       var <- identifier
       _ <- arr
       rhs <- parseTm
@@ -313,7 +323,12 @@ parseTmNoApp
   <?> "Tm (no app)"
 
 parseAdjustment :: MonadicParsing m => m (Adjustment String)
-parseAdjustment = todo "parseAdjustment"
+parseAdjustment = (do
+  -- TODO: re parseUid: also parse name?
+  let adjItem = (,) <$> parseUid <*> many parseTyArg
+  rows <- adjItem `sepBy1` (symbol "+")
+  pure $ Adjustment $ uIdMapFromList rows
+  ) <?> "Adjustment"
 
 -- parseContinuation
 
