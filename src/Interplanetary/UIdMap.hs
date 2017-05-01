@@ -10,18 +10,21 @@
 {-# language TypeFamilies #-}
 module Interplanetary.UIdMap where
 
-import Control.Lens (FunctorWithIndex, FoldableWithIndex, TraversableWithIndex(..))
+import Control.Lens (
+  FunctorWithIndex(..),
+  FoldableWithIndex(..),
+  TraversableWithIndex(..)
+  )
 import Control.Lens.At -- (At, Ixed, IxValue, Index)
 import Control.Newtype
 import Data.Data
 import Data.Foldable (toList)
+import Data.Hashable (Hashable)
 import Data.HashMap.Lazy (HashMap)
 import qualified Data.HashMap.Lazy as HashMap
 import GHC.Generics
 
-import Interplanetary.UIds
 import Interplanetary.Util
-
 
 type IdMap f a =
   ( Eq (f a)
@@ -35,20 +38,22 @@ type IdMap f a =
   , Generic (f a)
   )
 
-newtype UIdMap a = UIdMap (HashMap UId a)
+type IsUid uid = (Ord uid, Hashable uid)
+
+newtype UIdMap uid a = UIdMap (HashMap uid a)
   deriving (Eq, Show, Functor, Foldable, Traversable, Monoid, Typeable, Data,
             Generic)
 
-instance Newtype (UIdMap a) (HashMap UId a) where
+instance Newtype (UIdMap uid a) (HashMap uid a) where
   pack = UIdMap
   unpack (UIdMap a) = a
 
-type instance IxValue (UIdMap a) = a
-type instance Index (UIdMap a) = UId
-instance At (UIdMap a) where
+type instance IxValue (UIdMap uid a) = a
+type instance Index (UIdMap uid a) = uid
+instance IsUid uid => At (UIdMap uid a) where
   at k f (UIdMap m) = UIdMap <$> at k f m
 
-instance Ixed (UIdMap a) where
+instance IsUid uid => Ixed (UIdMap uid a) where
   ix k f (UIdMap m) = UIdMap <$> ix k f m
 
 class Unifiable f where
@@ -56,25 +61,29 @@ class Unifiable f where
   -- (a (mapping) state monad)
   unify :: Eq a => f a -> f a -> Maybe (f a)
 
-instance Unifiable UIdMap where
+instance IsUid uid => Unifiable (UIdMap uid) where
   unify (UIdMap a) (UIdMap b) = maybeIf
     (HashMap.null (HashMap.difference a b))
     (Just $ UIdMap (HashMap.union a b))
 
-uIdMapFromList :: [(UId, a)] -> UIdMap a
+uIdMapFromList :: IsUid uid => [(uid, a)] -> UIdMap uid a
 uIdMapFromList = UIdMap . HashMap.fromList
 
-uidMapUnion :: UIdMap a -> UIdMap a -> UIdMap a
+uidMapUnion :: IsUid uid => UIdMap uid a -> UIdMap uid a -> UIdMap uid a
 uidMapUnion = over2 UIdMap HashMap.union
 
-instance Ord a => Ord (UIdMap a) where
+instance (IsUid uid, Ord a) => Ord (UIdMap uid a) where
   compare m1 m2 = compare (toList m1) (toList m2)
 
-instance FunctorWithIndex UId UIdMap where
+instance FunctorWithIndex uid (UIdMap uid) where
+  imap = undefined
   -- TODO
-instance FoldableWithIndex UId UIdMap where
+
+instance FoldableWithIndex uid (UIdMap uid) where
+  ifoldMap = undefined
   -- TODO
-instance TraversableWithIndex UId UIdMap where
+
+instance TraversableWithIndex uid (UIdMap uid) where
   -- TODO
   itraverse = undefined
   itraversed = undefined

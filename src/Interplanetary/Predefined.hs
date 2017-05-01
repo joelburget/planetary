@@ -26,7 +26,7 @@ uidTy :: ValTyI
 uidTy = DataTy uidId []
 
 -- TODO: some way to declare both implementation and type at the same time
-interfaceTable :: InterfaceTable Int
+interfaceTable :: InterfaceTable UId Int
 interfaceTable = uIdMapFromList
   [ (intOpsId, EffectInterface []
     [ CommandDeclaration [intTy, intTy] intTy -- +
@@ -66,14 +66,14 @@ writeForeign a = do
 
 liftBinaryOp
   :: Serializable s
-  => (s -> s -> s) -> (Spine a b -> ForeignM a b (Tm a b))
+  => (s -> s -> s) -> (Spine UId a b -> ForeignM a b (Tm UId a b))
 liftBinaryOp op [ForeignDataTm uid1, ForeignDataTm uid2] = do
   i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
   ForeignDataTm <$> writeForeign i
 liftBinaryOp _ _ = throwError FailedForeignFun
 
 -- TODO: use QQ
-exampleDataTypes :: DataTypeTable String
+exampleDataTypes :: DataTypeTable UId String
 exampleDataTypes = uIdMapFromList
   -- void has no constructor
   [ (voidUid, [])

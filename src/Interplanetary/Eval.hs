@@ -21,8 +21,9 @@ data Err
   | FailedDynamicConversion
   deriving (Eq, Show)
 
-type ForeignContinuations a b = UIdMap [Spine a b -> ForeignM a b (Tm a b)]
-type ForeignStore a b = UIdMap Dynamic
+type ForeignContinuations a b =
+  UIdMap UId [Spine UId a b -> ForeignM a b (Tm UId a b)]
+type ForeignStore a b = UIdMap UId Dynamic
 
 type ForeignM a b c = ExceptT Err (State (ForeignStore a b)) c
 
@@ -88,7 +89,7 @@ handleCommand uid row spine val (AdjustmentHandlers (UIdMap handlers)) = do
 
   pure (instantiate inst handler)
 
-handleForeignFun :: ForeignStore Int Int -> UId -> Row -> Spine Int Int -> EvalM TmI
+handleForeignFun :: ForeignStore Int Int -> UId -> Row -> Spine UId Int Int -> EvalM TmI
 handleForeignFun store uid row spine = do
   cont <- asks (^? _1 . ix uid . ix row) >>= (?? FailedForeignFun)
   cont spine `runForeignM` store

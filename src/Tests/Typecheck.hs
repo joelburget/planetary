@@ -1,3 +1,4 @@
+{-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
 module Tests.Typecheck where
@@ -13,38 +14,38 @@ import Interplanetary.Typecheck
 
 checkTest
   :: String
-  -> TypingTables Int
-  -> TypingEnv Int
+  -> TypingTables UId Int
+  -> TypingEnv UId Int
   -> TmI
-  -> ValTy Int
+  -> ValTy UId Int
   -> TestTree
 checkTest name tables env tm ty = testCase name $
   runTcM tables env (check tm ty) @?= Right ()
 
 inferTest
   :: String
-  -> TypingTables Int
-  -> TypingEnv Int
+  -> TypingTables UId Int
+  -> TypingEnv UId Int
   -> TmI
-  -> Either TcErr (ValTy Int)
+  -> Either TcErr (ValTy UId Int)
   -> TestTree
 inferTest name tables env tm expected = testCase name $
   runTcM tables env (infer tm) @?= expected
 
 -- TODO: use QQ
-exampleInterfaces :: InterfaceTable Int
+exampleInterfaces :: InterfaceTable UId Int
 exampleInterfaces = uIdMapFromList []
 
-dataTypeTable :: DataTypeTable Int
+dataTypeTable :: DataTypeTable UId Int
 dataTypeTable = mempty
 
-ambientAbility :: Ability Int
+ambientAbility :: Ability UId Int
 ambientAbility = emptyAbility
 
-exampleTables :: TypingTables Int
+exampleTables :: TypingTables UId Int
 exampleTables = (dataTypeTable, exampleInterfaces, ambientAbility)
 
-emptyTypingEnv :: TypingEnv Int
+emptyTypingEnv :: TypingEnv UId Int
 emptyTypingEnv = TypingEnv []
 
 unitTests :: TestTree

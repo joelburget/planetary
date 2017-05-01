@@ -35,36 +35,40 @@ data TcErr
   deriving (Eq, Show)
 
 -- Read-only typing information
-type DataTypeTable a = UIdMap (Vector (Vector (ValTy a)))
-type InterfaceTable a = UIdMap (EffectInterface a)
+type DataTypeTable  uid a = UIdMap uid (Vector (Vector (ValTy uid a)))
+type InterfaceTable uid a = UIdMap uid (EffectInterface uid a)
 
 -- * The data type table and interface table are global and never change
 -- * The ability changes as we push in and pop out of rules
-type TypingTables a = (DataTypeTable a, InterfaceTable a, Ability a)
+type TypingTables uid a = (DataTypeTable uid a, InterfaceTable uid a, Ability uid a)
 
 -- Mutable typing information
 --
 -- This is mutable so we can solve for a type variable in some context and
 -- carry the solution back out.
-type TypingEnvVal a = Either (ValTy a) PolytypeI
-newtype TypingEnv a = TypingEnv (Stack (TypingEnvVal a))
+type TypingEnvVal uid a = Either (ValTy uid a) PolytypeI
+newtype TypingEnv uid a = TypingEnv (Stack (TypingEnvVal uid a))
 
-type instance IxValue (TypingEnv a) = TypingEnvVal a
-type instance Index (TypingEnv a) = Int
-instance Ixed (TypingEnv a) where
+type instance IxValue (TypingEnv uid a) = TypingEnvVal uid a
+type instance Index (TypingEnv uid a) = Int
+instance Ixed (TypingEnv uid a) where
   ix k f (TypingEnv m) = TypingEnv <$> ix k f m
 
-newtype TcM a b = TcM
+newtype TcM uid a b = TcM
   (ExceptT TcErr
-  (StateT (TypingEnv a)
-  (Reader (TypingTables a)))
+  (StateT (TypingEnv uid a)
+  (Reader (TypingTables uid a)))
   b)
   deriving (Functor, Applicative, Monad, MonadError TcErr)
-deriving instance MonadState (TypingEnv a) (TcM a)
-deriving instance MonadReader (TypingTables a) (TcM a)
-type TcM' = TcM Int
+deriving instance MonadState (TypingEnv uid a) (TcM uid a)
+deriving instance MonadReader (TypingTables uid a) (TcM uid a)
+type TcM' = TcM UId Int
 
-runTcM :: TypingTables Int -> TypingEnv Int -> TcM' a -> Either TcErr a
+runTcM
+  :: TypingTables UId Int
+  -> TypingEnv UId Int
+  -> TcM' a
+  -> Either TcErr a
 runTcM tables env (TcM action) = runReader
   (evalStateT
     (runExceptT action)
@@ -145,7 +149,7 @@ check m b = do
   _ <- unify a b ?? TyUnification
   pure ()
 
-instantiateAbility :: AbilityI -> TcM' (UIdMap [CommandDeclaration Int])
+instantiateAbility :: AbilityI -> TcM' (UIdMap UId [CommandDeclaration UId Int])
 instantiateAbility (Ability _ uidmap) = do
   iforM uidmap $ \uid tyArgs -> lookupCommands uid
     -- iforM cmds $ \row (CommandDeclaration as b) ->
@@ -155,7 +159,11 @@ instantiateAbility (Ability _ uidmap) = do
 instantiateWithEnv :: PolytypeI -> TcM' ValTyI
 instantiateWithEnv = todo "instantiateWithEnv"
 
-uidZip :: MonadError TcErr m => UIdMap [a] -> UIdMap [b] -> m (UIdMap [(a, b)])
+uidZip
+  :: MonadError TcErr m
+  => UIdMap UId [a]
+  -> UIdMap UId [b]
+  -> m (UIdMap UId [(a, b)])
 uidZip (UIdMap as) (UIdMap bs) = UIdMap <$>
   sequence (intersectionWith (strictZip ZipLengthMismatch) as bs)
 
@@ -166,17 +174,21 @@ withValTypes tys = withState'
   (\(TypingEnv env) -> TypingEnv $ env <> (Left <$> tys))
 
 -- TODO: these next two functions seem the same?
-withValTypes' :: [ValTyI] -> Scope Int (Tm Int) Int -> (TmI -> TcM' a) -> TcM' a
+withValTypes'
+  :: [ValTyI]
+  -> Scope Int (Tm UId Int) Int
+  -> (TmI -> TcM' a)
+  -> TcM' a
 withValTypes' tys scope cb =
   let body = instantiate V scope
   in withValTypes tys (cb body)
 
-openWithTypes :: [ValTyI] -> Scope Int (Tm Int) Int -> TcM' TmI
+openWithTypes :: [ValTyI] -> Scope Int (Tm UId Int) Int -> TcM' TmI
 openWithTypes tys scope = withValTypes tys $
   pure $ instantiate V scope
 
 openAdjustmentHandler
-  :: Scope (Maybe Int) (Tm Int) Int
+  :: Scope (Maybe Int) (Tm UId Int) Int
   -> [ValTyI]
   -> CompTyI
   -> (TmI -> TcM' a)
@@ -205,10 +217,10 @@ lookupConstructorTy :: UId -> Row -> TcM' [ValTyI]
 lookupConstructorTy uid row
   = asks (^? _1 . ix uid . ix row) >>= (?? FailedConstructorLookup)
 
-lookupCommands :: UId -> TcM' [CommandDeclaration Int]
+lookupCommands :: UId -> TcM' [CommandDeclaration UId Int]
 lookupCommands uid = asks (^? _2 . ix uid . commands) >>= (?? LookupCommands)
 
-lookupCommandTy :: UId -> Row -> TcM' (CommandDeclaration Int)
+lookupCommandTy :: UId -> Row -> TcM' (CommandDeclaration UId Int)
 lookupCommandTy uid row
   = asks (^? _2 . ix uid . commands . ix row) >>= (?? LookupCommandTy)
 

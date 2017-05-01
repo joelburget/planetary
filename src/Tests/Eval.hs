@@ -103,7 +103,7 @@ unitTests =
               ]
        ]
 
-closeVar :: Eq a => (a, b) -> Tm c a -> Maybe (Tm c b)
+closeVar :: Eq a => (a, b) -> Tm uid c a -> Maybe (Tm uid c b)
 closeVar (a, b) = instantiate1 (V b) <$$> closed . abstract1 a
 
 runEvalTests :: IO ()

@@ -19,8 +19,8 @@ import Interplanetary.Parser
 -- "unit : Unit"
 
 -- TODO: Should both this and `oneUid` exist?
-oneUid' :: UId
-oneUid' = parserOnlyMakeUid "1"
+oneUid' :: String
+oneUid' = "1"
 
 parserTest
   :: (Eq a, Show a)
@@ -49,9 +49,9 @@ unitTests = testGroup "parsing"
   , parserTest "X X X" (many parseTyArg) $
       let x = TyArgVal (VTy"X") in [x, x, x]
 
-  , parserTest "1" parseUid $ parserOnlyMakeUid "1"
+  , parserTest "1" parseUid "1"
 
-  , parserTest "123" parseUid $ parserOnlyMakeUid "123"
+  , parserTest "123" parseUid "123"
 
   , parserTest "1 X" parseDataTy $
     DataTy oneUid' [TyArgVal (VTy"X")]
@@ -166,7 +166,7 @@ unitTests = testGroup "parsing"
           , "    | -> y"
           , "    | a b c -> z"
           ]
-        cont = case_ (parserOnlyMakeUid "e829515d5")
+        cont = case_ "e829515d5"
           [ ([], Variable "y")
           , (["a", "b", "c"], Variable "z")
           ]

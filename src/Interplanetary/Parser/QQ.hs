@@ -1,17 +1,14 @@
-{-# language TypeApplications #-}
 module Interplanetary.Parser.QQ where
 
-import Bound (closed)
-import Control.Lens ((&), ix, (.~), _1, _2)
 import Data.Char (isSpace)
 import Data.List (sort)
 import Data.Maybe (listToMaybe)
 import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Quote
 
+import Interplanetary.MakeTables
 import Interplanetary.Parser
 import Interplanetary.Syntax
-import Interplanetary.Typecheck
 
 -- TODO:
 -- * data / interface declaration quoter
@@ -22,43 +19,28 @@ import Interplanetary.Typecheck
 
 tmExp :: QuasiQuoter
 tmExp = QuasiQuoter
-  { quoteExp = quoteTmExp
-  , quotePat = const (fail "can't quote patterns")
-  , quoteType = const (fail "can't quote types")
-  , quoteDec = const (fail "can't quote declarations")
+  { quoteExp  = quoteTmExp
+  , quotePat  = const (fail "can't quote tm patterns")
+  , quoteType = const (fail "can't quote tm types")
+  , quoteDec  = const (fail "can't quote tm declarations")
   }
 
 declarations :: QuasiQuoter
 declarations = QuasiQuoter
-  { quoteExp = quoteDeclarations
-  , quotePat = const (fail "can't quote patterns")
-  , quoteType = const (fail "can't quote types")
-  , quoteDec = const (fail "can't quote declarations")
+  { quoteExp  = quoteDeclarations
+  , quotePat  = const (fail "can't quote declarations patterns")
+  , quoteType = const (fail "can't quote declarations types")
+  , quoteDec  = const (fail "can't quote declarations declarations")
   }
-
-makeTables
-  :: [Either (DataTypeInterface String) (EffectInterface String)]
-  -> Maybe (DataTypeTable Int, InterfaceTable Int)
-makeTables (Left ddecl:xs) = do
-  ddeclI <- closed ddecl :: Maybe (DataTypeInterface Int)
-  let uid = mkUid ddeclI
-  xs' <- makeTables xs
-  -- TODO: inconsistency with DataTypeTable not using DataTypeInterface
-  -- `dataInterface` shouldn't be necessary
-  pure (xs' & _1 . ix uid .~ dataInterface ddeclI)
-makeTables (Right iface:xs) = do
-  ifaceI <- closed iface
-  let uid = mkUid ifaceI
-  xs' <- makeTables xs
-  pure (xs' & _2 . ix uid .~ ifaceI)
-makeTables [] = Just (mempty, mempty)
 
 quoteDeclarations :: String -> TH.ExpQ
 quoteDeclarations str = do
   let str' = normalizeQQInput str
   case runTokenParse parseDataOrInterfaceDecls str' of
     Left err -> fail ("failed to parse declarations: " ++ err)
-    Right decls -> dataToExpQ (const Nothing) (makeTables decls)
+    Right decls -> case makeTables decls of
+      Left err -> fail ("failed to make tables: " ++ show err)
+      Right tables -> dataToExpQ (const Nothing) tables
 
 quoteTmExp :: String -> TH.ExpQ
 quoteTmExp str = do

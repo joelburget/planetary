@@ -23,10 +23,12 @@ module Interplanetary.Syntax
   ) where
 
 import Bound
+import Control.Lens.Plated
 import Control.Lens.TH (makeLenses)
 import Control.Monad (ap)
 import Data.Binary (Binary(..))
 import Data.Data
+import Data.Data.Lens
 import Data.Foldable (toList)
 import Data.Functor.Classes
 import Data.List (elemIndex)
@@ -50,77 +52,85 @@ import Interplanetary.UIds
 type Row = Int
 
 -- TODO: remove
-instance Binary (UIdMap (Vector (TyArg Int))) where
+instance Binary (UIdMap uid (Vector (TyArg uid Int))) where
   put = todo "put"
   get = todo "get"
   putList = todo "putList"
 
 -- Types
 
-data ValTy a
-  = DataTy UId (Vector (TyArg a))
-  | SuspendedTy (CompTy a)
+data ValTy uid a
+  = DataTy uid (Vector (TyArg uid a))
+  | SuspendedTy (CompTy uid a)
   | VariableTy a
   deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary (ValTy Int)
+instance Binary uid => Binary (ValTy uid Int)
+instance (IsUid uid, Data uid, Data a) => Plated (ValTy uid a) where
+  plate = uniplate
 
-data CompTy a = CompTy
-  { compDomain :: Vector (ValTy a)
-  , compCodomain :: Peg a
+data CompTy uid a = CompTy
+  { compDomain :: Vector (ValTy uid a)
+  , compCodomain :: Peg uid a
   } deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary (CompTy Int)
+instance Binary uid => Binary (CompTy uid Int)
+instance (IsUid uid, Data uid, Data a) => Plated (CompTy uid a) where
+  plate = uniplate
 
-data Peg a = Peg
-  { pegAbility :: Ability Int
-  , pegVal :: ValTy a
+data Peg uid a = Peg
+  { pegAbility :: Ability uid Int
+  , pegVal :: ValTy uid a
   } deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary (Peg Int)
+instance Binary uid => Binary (Peg uid Int)
+instance (IsUid uid, Data uid, Data a) => Plated (Peg uid a) where
+  plate = uniplate
 
-data TyArg a
-  = TyArgVal (ValTy a)
-  | TyArgAbility (Ability Int)
+data TyArg uid a
+  = TyArgVal (ValTy uid a)
+  | TyArgAbility (Ability uid Int)
   deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary (TyArg Int)
+instance Binary uid => Binary (TyArg uid Int)
 
 data Kind = ValTy | EffTy
   deriving (Show, Eq, Ord, Typeable, Data, Generic)
 
 instance Binary Kind
 
-data Polytype a = Polytype
+data Polytype uid a = Polytype
   -- Universally quantify over a bunch of variables
   { polyBinders :: Vector Kind
   -- resulting in a value type
-  , polyVal :: Scope Int ValTy a
+  , polyVal :: Scope Int (ValTy uid) a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-polytype :: Eq a => Vector (a, Kind) -> ValTy a -> Polytype a
+polytype :: Eq a => Vector (a, Kind) -> ValTy uid a -> Polytype uid a
 polytype binders body =
   let (names, kinds) = unzip binders
   in Polytype kinds (abstract (`elemIndex` names) body)
 
-data ConstructorDecl a = ConstructorDecl (Vector (ValTy a))
+data ConstructorDecl uid a = ConstructorDecl (Vector (ValTy uid a))
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary (ConstructorDecl Int)
+instance Binary uid => Binary (ConstructorDecl uid Int)
 
 -- A collection of data constructor signatures (which can refer to bound type /
 -- effect variables).
-data DataTypeInterface a = DataTypeInterface
+data DataTypeInterface uid a = DataTypeInterface
   -- { dataTypeUId :: UId
   -- we universally quantify over some number of type variables
   { dataBinders :: Vector (a, Kind)
   -- a collection of constructors taking some arguments
-  , constructors :: Vector (ConstructorDecl a)
+  , constructors :: Vector (ConstructorDecl uid a)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary (DataTypeInterface Int)
+instance Binary uid => Binary (DataTypeInterface uid Int)
+instance (IsUid uid, Data uid, Data a) => Plated (DataTypeInterface uid a) where
+  plate = todo "plate DataTypeInterface"
 
-dataInterface :: DataTypeInterface a -> Vector (Vector (ValTy a))
+dataInterface :: DataTypeInterface uid a -> Vector (Vector (ValTy uid a))
 dataInterface (DataTypeInterface _ ctors) =
   let f (ConstructorDecl args) = args
   in f <$> ctors
@@ -128,19 +138,19 @@ dataInterface (DataTypeInterface _ ctors) =
 -- commands take arguments (possibly including variables) and return a value
 --
 -- TODO: maybe rename this to `Command` if we do reuse it in instantiateAbility
-data CommandDeclaration a = CommandDeclaration (Vector (ValTy a)) (ValTy a)
+data CommandDeclaration uid a = CommandDeclaration (Vector (ValTy uid a)) (ValTy uid a)
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary (CommandDeclaration Int)
+instance Binary uid => Binary (CommandDeclaration uid Int)
 
-data EffectInterface a = EffectInterface
+data EffectInterface uid a = EffectInterface
   -- we universally quantify some number of type variables
   { _interfaceBinders :: Vector (a, Kind)
   -- a collection of commands
-  , _commands :: Vector (CommandDeclaration a)
+  , _commands :: Vector (CommandDeclaration uid a)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary (EffectInterface Int)
+instance Binary uid => Binary (EffectInterface uid Int)
 
 data InitiateAbility = OpenAbility | ClosedAbility
   deriving (Eq, Show, Ord, Typeable, Data, Generic)
@@ -148,112 +158,120 @@ data InitiateAbility = OpenAbility | ClosedAbility
 instance Binary InitiateAbility
 
 -- "For each UID, instantiate it with these args"
-data Ability a = Ability InitiateAbility (UIdMap (Vector (TyArg a)))
+data Ability uid a = Ability InitiateAbility (UIdMap uid (Vector (TyArg uid a)))
   deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary (Ability Int)
+instance Binary uid => Binary (Ability uid Int)
 
 -- An adjustment is a mapping from effect inferface id to the types it's
 -- applied to. IE a set of saturated interfaces.
-newtype Adjustment a = Adjustment (UIdMap (Vector (TyArg a)))
+newtype Adjustment uid a = Adjustment (UIdMap uid (Vector (TyArg uid a)))
   deriving (Monoid, Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary (Adjustment Int)
+instance Binary uid => Binary (Adjustment uid Int)
 
 -- Terms
 
-data Value a b
+data Value uid a b
   -- use (inferred)
   = Command UId Row
   | ForeignFun UId Row -- TODO: Is ForeignFun just a Command?
 
   -- construction (checked)
-  | DataConstructor UId Row (Vector (Tm a b))
-  | Lambda (Scope Int (Tm a) b)
+  | DataConstructor UId Row (Vector (Tm uid a b))
+  | Lambda (Scope Int (Tm uid a) b)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-pattern CommandTm :: UId -> Row -> Tm a b
+pattern CommandTm :: UId -> Row -> Tm uid a b
 pattern CommandTm uid row = Value (Command uid row)
 
-pattern ForeignData :: UId -> Value a b
+pattern ForeignData :: UId -> Value uid a b
 pattern ForeignData uid = DataConstructor uid 0 []
 
-pattern ForeignDataTm :: UId -> Tm a b
+pattern ForeignDataTm :: UId -> Tm uid a b
 pattern ForeignDataTm uid = Value (ForeignData uid)
 
-pattern DataTm :: UId -> Row -> Vector (Tm a b) -> Tm a b
+pattern DataTm :: UId -> Row -> Vector (Tm uid a b) -> Tm uid a b
 pattern DataTm uid row vals = Value (DataConstructor uid row vals)
 
-pattern ForeignFunTm :: UId -> Row -> Tm a b
+pattern ForeignFunTm :: UId -> Row -> Tm uid a b
 pattern ForeignFunTm uid row = Value (ForeignFun uid row)
 
-data Continuation a b
+data Continuation uid a b
   -- use (inferred)
-  = Application (Spine a b)
+  = Application (Spine uid a b)
 
   -- construction (checked)
-  | Case UId (Vector (Scope Int (Tm a) b))
-  | Handle (Adjustment a) (Peg a) (AdjustmentHandlers a b) (Scope () (Tm a) b)
-  | Let (Polytype a) (Scope () (Tm a) b)
+  | Case uid (Vector (Scope Int (Tm uid a) b))
+  | Handle
+      (Adjustment uid a)
+      (Peg uid a)
+      (AdjustmentHandlers uid a b)
+      (Scope () (Tm uid a) b)
+  | Let (Polytype uid a) (Scope () (Tm uid a) b)
 
   -- Letrec
-  --   :: Vector (Tm a b, PolytypeI)
-  --   -> Scope Int (Tm a) b
-  --   -> Continuation a b
+  --   :: Vector (Tm uid a b, PolytypeI)
+  --   -> Scope Int (Tm uid a) b
+  --   -> Continuation uid a b
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-data Tm a b
+data Tm uid a b
   = Variable b
-  | InstantiatePolyVar b (Vector (TyArg a))
-  | Annotation (Value a b) (ValTy a)
-  | Value (Value a b)
-  | Cut (Continuation a b) (Tm a b)
+  | InstantiatePolyVar b (Vector (TyArg uid a))
+  | Annotation (Value uid a b) (ValTy uid a)
+  | Value (Value uid a b)
+  | Cut (Continuation uid a b) (Tm uid a b)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-pattern V :: b -> Tm a b
+pattern V :: b -> Tm uid a b
 pattern V name = Variable name
 
-pattern CommandV :: UId -> Row -> Tm a b
+pattern CommandV :: UId -> Row -> Tm uid a b
 pattern CommandV uId row = Value (Command uId row)
 
-pattern ConstructV :: UId -> Row -> Vector (Tm a b) -> Tm a b
+pattern ConstructV :: UId -> Row -> Vector (Tm uid a b) -> Tm uid a b
 pattern ConstructV uId row args = Value (DataConstructor uId row args)
 
-pattern LambdaV :: Scope Int (Tm a) b -> Tm a b
+pattern LambdaV :: Scope Int (Tm uid a) b -> Tm uid a b
 pattern LambdaV scope = Value (Lambda scope)
 
 
 -- type? newtype?
-type Spine a b = Vector (Tm a b)
+type Spine uid a b = Vector (Tm uid a b)
 
 -- Adjustment handlers are a mapping from effect interface id to the handlers
 -- for each of that interface's constructors.
 --
 -- Encode each constructor argument (x_c) as a `Just Int` and the continuation
 -- (z_c) as `Nothing`.
-newtype AdjustmentHandlers a b = AdjustmentHandlers
-  (UIdMap (Vector (Scope (Maybe Int) (Tm a) b)))
+newtype AdjustmentHandlers uid a b = AdjustmentHandlers
+  (UIdMap uid (Vector (Scope (Maybe Int) (Tm uid a) b)))
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 -- patterns
 -- TODO: make these bidirectional
 
-lam :: Eq b => Vector b -> Tm a b -> Value a b
+lam :: Eq b => Vector b -> Tm uid a b -> Value uid a b
 lam vars body = Lambda (abstract (`elemIndex` vars) body)
 
-case_ :: Eq b => UId -> Vector (Vector b, Tm a b) -> Continuation a b
+case_
+  :: (IsUid uid, Eq b)
+  => uid
+  -> Vector (Vector b, Tm uid a b)
+  -> Continuation uid a b
 case_ uid tms =
   let f (vars, tm) = abstract (`elemIndex` vars) tm
   in Case uid (f <$> tms)
 
 handle
-  :: forall a b.
+  :: forall uid a b.
      Eq b
-  => Adjustment a
-  -> Peg a
-  -> UIdMap (Vector (Vector b, b, Tm a b))
-  -> (b, Tm a b)
-  -> Continuation a b
+  => Adjustment uid a
+  -> Peg uid a
+  -> UIdMap uid (Vector (Vector b, b, Tm uid a b))
+  -> (b, Tm uid a b)
+  -> Continuation uid a b
 handle adj peg handlers (bodyVar, body) =
   let -- abstractor :: Vector b -> b -> b -> Maybe (Maybe Int)
       abstractor vars kVar var
@@ -265,84 +283,92 @@ handle adj peg handlers (bodyVar, body) =
       body' = abstract1 bodyVar body
   in Handle adj peg handlers' body'
 
-let_ :: Eq b => b -> Polytype a -> Tm a b -> Value a b -> Tm a b
+let_ :: Eq b => b -> Polytype uid a -> Tm uid a b -> Value uid a b -> Tm uid a b
 let_ name pty rhs body = Cut (Let pty (abstract1 name rhs)) (Value body)
 
--- letrec :: Eq b => Vector b -> Vector (Tm a b, Polytype a) -> Tm a b -> Tm a b
+-- letrec :: Eq b => Vector b -> Vector (Tm uid a b, Polytype uid a) -> Tm uid a b -> Tm uid a b
 -- letrec names binderVals body =
 --   Letrec binderVals (abstract (`elemIndex` names) body)
 
-pattern VTy :: a -> ValTy a
+pattern VTy :: a -> ValTy uid a
 pattern VTy name = VariableTy name
 
 -- simple abilities
 
-closedAbility :: Ability a
+closedAbility :: IsUid uid => Ability uid a
 closedAbility = Ability ClosedAbility mempty
 
-emptyAbility :: Ability a
+emptyAbility :: IsUid uid => Ability uid a
 emptyAbility = Ability OpenAbility mempty
 
-extendAbility :: Ability a -> Adjustment a -> Ability a
+extendAbility
+  :: IsUid uid
+  => Ability uid a
+  -> Adjustment uid a
+  -> Ability uid a
 extendAbility (Ability initAb uidMap) (Adjustment adj)
   = Ability initAb (uidMap `uidMapUnion` adj)
 
-type ValueI = Value Int
-type PolytypeI = Polytype Int
-type ValTyI = ValTy Int
-type CompTyI = CompTy Int
-type UseI = Tm Int Int
-type ConstructionI = Tm Int Int
-type AdjustmentHandlersI = AdjustmentHandlers Int Int
-type AdjustmentI = Adjustment Int
-type TmI = Tm Int Int
-type SpineI = Spine Int Int
-type ConstructionValueI = Value Int
-type AbilityI = Ability Int
+type Executable1 f = f UId Int
+type Executable2 f = f UId Int Int
+
+type PolytypeI = Executable1 Polytype
+type ValTyI    = Executable1 ValTy
+type CompTyI   = Executable1 CompTy
+
+type UseI                = Executable2 Tm
+type ConstructionI       = Executable2 Tm
+type AdjustmentHandlersI = Executable2 AdjustmentHandlers
+type TmI                 = Executable2 Tm
+type SpineI              = Spine UId Int Int
+type ValueI              = Executable2 Value
+
+type AdjustmentI = Executable1 Adjustment
+type AbilityI    = Executable1 Ability
 
 
 -- Instance Hell:
 
-instance Unifiable Ability where
+instance IsUid uid => Unifiable (Ability uid) where
   unify (Ability init1 uids1) (Ability init2 uids2)
     = maybeIf (init1 == init2) (Ability init1 <$> unify uids1 uids2)
 
-instance Ord1 Ability where
+instance IsUid uid => Ord1 (Ability uid) where
   liftCompare cmp (Ability init1 entries1) (Ability init2 entries2) =
     compare init1 init2 <>
     liftCompare (liftCompare (liftCompare cmp))
       (toList entries1)
       (toList entries2)
 
-instance Unifiable Peg where
+instance IsUid uid => Unifiable (Peg uid) where
   unify (Peg ab1 val1) (Peg ab2 val2)
     = Peg <$> unify ab1 ab2 <*> unify val1 val2
 
-instance Ord1 Peg where
+instance IsUid uid => Ord1 (Peg uid) where
   liftCompare cmp (Peg ab1 val1) (Peg ab2 val2) =
     compare ab1 ab2 <>
     liftCompare cmp val1 val2
 
-instance Unifiable CompTy where
+instance IsUid uid => Unifiable (CompTy uid) where
   unify (CompTy dom1 codom1) (CompTy dom2 codom2) = CompTy
     <$> unifyValTys dom1 dom2
     <*> unify codom1 codom2
 
 unifyValTys
-  :: Eq a
-  => Vector (ValTy a)
-  -> Vector (ValTy a)
-  -> Maybe (Vector (ValTy a))
+  :: (IsUid uid, Eq a)
+  => Vector (ValTy uid a)
+  -> Vector (ValTy uid a)
+  -> Maybe (Vector (ValTy uid a))
 unifyValTys vals1 vals2 = maybeIf
   (length vals1 == length vals2)
   (sequence $ zipWith unify vals1 vals2)
 
-instance Ord1 CompTy where
+instance IsUid uid => Ord1 (CompTy uid) where
   liftCompare cmp (CompTy vt1 p1) (CompTy vt2 p2) =
     liftCompare (liftCompare cmp) vt1 vt2 <>
     liftCompare cmp p1 p2
 
-instance Unifiable ValTy where
+instance IsUid uid => Unifiable (ValTy uid) where
   unify (DataTy uid1 args1) (DataTy uId2 args2) = maybeIf
     (uid1 == uId2)
     (DataTy uid1 <$> unifyTyArgs args1 args2)
@@ -350,21 +376,21 @@ instance Unifiable ValTy where
   unify (VariableTy a) (VariableTy b) = maybeIf (a == b) (Just (VariableTy a))
   unify _ _ = Nothing
 
-instance Unifiable TyArg where
+instance IsUid uid => Unifiable (TyArg uid) where
   unify (TyArgVal v1) (TyArgVal v2) = TyArgVal <$> unify v1 v2
   unify (TyArgAbility a1) (TyArgAbility a2) = TyArgAbility <$> unify a1 a2
   unify _ _ = Nothing
 
 unifyTyArgs
-  :: Eq a
-  => Vector (TyArg a)
-  -> Vector (TyArg a)
-  -> Maybe (Vector (TyArg a))
+  :: (IsUid uid, Eq a)
+  => Vector (TyArg uid a)
+  -> Vector (TyArg uid a)
+  -> Maybe (Vector (TyArg uid a))
 unifyTyArgs args1 args2 = maybeIf
   (length args1 == length args2)
   (sequence $ zipWith unify args1 args2)
 
-instance Ord1 TyArg where
+instance IsUid uid => Ord1 (TyArg uid) where
   liftCompare cmp (TyArgVal valTy1) (TyArgVal valTy2)
     = liftCompare cmp valTy1 valTy2
   liftCompare _cmp (TyArgAbility ability1) (TyArgAbility ability2)
@@ -374,7 +400,7 @@ instance Ord1 TyArg where
             TyArgVal{}     -> 0 :: Int
             TyArgAbility{} -> 1
 
-instance Ord1 ValTy where
+instance IsUid uid => Ord1 (ValTy uid) where
   liftCompare cmp l r = case (l, r) of
     (DataTy uid1 args1, DataTy uid2 args2) ->
       compare uid1 uid2 <> liftCompare (liftCompare cmp) args1 args2
@@ -388,9 +414,9 @@ instance Ord1 ValTy where
             SuspendedTy{} -> 1
             VariableTy{}  -> 2
 
-instance Applicative ValTy where pure = VariableTy; (<*>) = ap
+instance Applicative (ValTy uid) where pure = VariableTy; (<*>) = ap
 
-instance Monad ValTy where
+instance Monad (ValTy uid) where
   return = VariableTy
 
   DataTy uid args >>= f = DataTy uid ((`bindTyArg` f) <$> args)
@@ -400,53 +426,53 @@ instance Monad ValTy where
     SuspendedTy $ CompTy dom' codom'
   VariableTy a >>= f = f a
 
-bindTyArg :: TyArg a -> (a -> ValTy b) -> TyArg b
+bindTyArg :: TyArg uid a -> (a -> ValTy uid b) -> TyArg uid b
 bindTyArg (TyArgVal a) f = TyArgVal (a >>= f)
 bindTyArg (TyArgAbility a) f = TyArgAbility a -- (bindAbility a f)
 
-bindPeg :: Peg a -> (a -> ValTy b) -> Peg b
+bindPeg :: Peg uid a -> (a -> ValTy uid b) -> Peg uid b
 bindPeg (Peg ab val) f = Peg ab (val >>= f)
 
-instance Eq1 ValTy where
+instance IsUid uid => Eq1 (ValTy uid) where
   liftEq eq (DataTy uid1 args1) (DataTy uid2 args2)
     = uid1 == uid2 && liftEq (liftEq eq) args1 args2
   liftEq eq (SuspendedTy cty1) (SuspendedTy cty2) = liftEq eq cty1 cty2
   liftEq eq (VariableTy v1) (VariableTy v2) = eq v1 v2
   liftEq _ _ _ = False
 
-instance Eq1 CompTy where
+instance IsUid uid => Eq1 (CompTy uid) where
   liftEq eq (CompTy dom1 codom1) (CompTy dom2 codom2)
     = liftEq (liftEq eq) dom1 dom2 && liftEq eq codom1 codom2
 
-instance Eq1 Peg where
+instance IsUid uid => Eq1 (Peg uid) where
   liftEq eq (Peg ab1 val1) (Peg ab2 val2)
     = ab1 == ab2 && liftEq eq val1 val2
 
-instance Eq1 TyArg where
+instance IsUid uid => Eq1 (TyArg uid) where
   liftEq eq (TyArgVal val1) (TyArgVal val2) = liftEq eq val1 val2
   liftEq _eq (TyArgAbility ab1) (TyArgAbility ab2) = ab1 == ab2
   liftEq _ _ _ = False
 
-instance Eq1 Polytype where
+instance IsUid uid => Eq1 (Polytype uid) where
   liftEq eq (Polytype binders1 val1) (Polytype binders2 val2) =
     liftEq (==) binders1 binders2 && liftEq eq val1 val2
 
-instance Eq1 Ability where
+instance IsUid uid => Eq1 (Ability uid) where
   liftEq eq (Ability init1 entries1) (Ability init2 entries2) =
     init1 == init2 &&
     liftEq (liftEq (liftEq eq)) (toList entries1) (toList entries2)
 
-instance Eq a => Eq1 (AdjustmentHandlers a) where
+instance (IsUid uid, Eq a) => Eq1 (AdjustmentHandlers uid a) where
   liftEq eq (AdjustmentHandlers handlers1) (AdjustmentHandlers handlers2) =
     liftEq (liftEq (liftEq eq)) (toList handlers1) (toList handlers2)
 
-instance Ord a => Ord1 (AdjustmentHandlers a) where
+instance (IsUid uid, Ord a) => Ord1 (AdjustmentHandlers uid a) where
   liftCompare cmp (AdjustmentHandlers handlers1) (AdjustmentHandlers handlers2)
     = liftCompare (liftCompare (liftCompare cmp))
         (toList handlers1)
         (toList handlers2)
 
-instance Eq e => Eq1 (Value e) where
+instance (IsUid uid, Eq e) => Eq1 (Value uid e) where
   liftEq _ (Command uid1 row1) (Command uid2 row2) =
     uid1 == uid2 && row1 == row2
   liftEq eq (DataConstructor uid1 row1 app1) (DataConstructor uid2 row2 app2) =
@@ -454,7 +480,7 @@ instance Eq e => Eq1 (Value e) where
   liftEq eq (Lambda body1) (Lambda body2) = liftEq eq body1 body2
   liftEq _ _ _ = False
 
-instance Eq e => Eq1 (Continuation e) where
+instance (IsUid uid, Eq e) => Eq1 (Continuation uid e) where
   liftEq eq l r = case (l, r) of
     (Application spine1, Application spine2) ->
       liftEq (liftEq eq) spine1 spine2
@@ -473,7 +499,7 @@ instance Eq e => Eq1 (Continuation e) where
     --   liftEq eq body1 body2
     _ -> False
 
-instance Ord o => Ord1 (Value o) where
+instance (IsUid uid, Ord o) => Ord1 (Value uid o) where
   liftCompare cmp l r = case (l, r) of
     (Command uid1 row1, Command uid2 row2) ->
       compare uid1 uid2 <> compare row1 row2
@@ -490,7 +516,7 @@ instance Ord o => Ord1 (Value o) where
             Lambda{}             -> 2
             ForeignFun{}         -> 3
 
-instance Ord o => Ord1 (Continuation o) where
+instance (IsUid uid, Ord o) => Ord1 (Continuation uid o) where
   liftCompare cmp l r = case (l, r) of
     (Application spine1, Application spine2) ->
       liftCompare (liftCompare cmp) spine1 spine2
@@ -517,7 +543,7 @@ instance Ord o => Ord1 (Continuation o) where
             Let{}                -> 4
             -- Letrec{}             -> 5
 
-instance Eq e => Eq1 (Tm e) where
+instance (IsUid uid, Eq e) => Eq1 (Tm uid e) where
   liftEq eq (Variable a) (Variable b) = eq a b
   liftEq eq (InstantiatePolyVar var1 args1) (InstantiatePolyVar var2 args2)
     = eq var1 var2 && liftEq (liftEq (==)) args1 args2
@@ -529,7 +555,7 @@ instance Eq e => Eq1 (Tm e) where
     = liftEq eq cont1 cont2 && liftEq eq val1 val2
   liftEq _ _ _ = False
 
-instance Ord o => Ord1 (Tm o) where
+instance (IsUid uid, Ord o) => Ord1 (Tm uid o) where
   liftCompare cmp (Variable a) (Variable b) = cmp a b
   liftCompare cmp (InstantiatePolyVar var1 args1) (InstantiatePolyVar var2 args2)
     = cmp var1 var2 <> liftCompare (liftCompare compare) args1 args2
@@ -550,7 +576,7 @@ instance Ord o => Ord1 (Tm o) where
 showSpace :: ShowS
 showSpace = showString " "
 
-instance Show1 ValTy where
+instance Show uid => Show1 (ValTy uid) where
   liftShowsPrec s sl d valTy = showParen (d > 10) $ case valTy of
     DataTy uid tyArgs ->
         showString "DataTy "
@@ -563,7 +589,7 @@ instance Show1 ValTy where
         showString "VariableTy "
       . s 11 a
 
-instance Show1 TyArg where
+instance Show uid => Show1 (TyArg uid) where
   liftShowsPrec s sl d tyArg = showParen (d > 10) $ case tyArg of
     TyArgVal vTy ->
         showString "TyArgVal "
@@ -572,21 +598,21 @@ instance Show1 TyArg where
         showString "TyArgAbility "
       . showsPrec 11 ab
 
-instance Show1 CompTy where
+instance Show uid => Show1 (CompTy uid) where
   liftShowsPrec s sl d (CompTy dom codom) = showParen (d > 10) $
       showString "CompTy "
     . liftShowList s sl dom
     . showSpace
     . liftShowsPrec s sl 11 codom
 
-instance Show1 Peg where
+instance Show uid => Show1 (Peg uid) where
   liftShowsPrec s sl d (Peg ab val) = showParen (d > 10) $
       showString "Peg "
     . showsPrec 11 ab
     . showSpace
     . liftShowsPrec s sl 11 val
 
-instance Show a => Show1 (Value a) where
+instance (Show uid, Show a) => Show1 (Value uid a) where
   liftShowsPrec s sl d val = showParen (d > 10) $ case val of
     Command uid row ->
         showString "Command "
@@ -608,7 +634,7 @@ instance Show a => Show1 (Value a) where
       . showSpace
       . shows row
 
-instance Show a => Show1 (Continuation a) where
+instance (Show uid, Show a) => Show1 (Continuation uid a) where
   liftShowsPrec s sl d cont = showParen (d > 10) $ case cont of
     Application spine ->
         showString "Application "
@@ -633,12 +659,12 @@ instance Show a => Show1 (Continuation a) where
       . liftShowsPrec s sl 11 body
     -- Letrec _ _ -> showString "Letrec"
 
-instance Show a => Show1 (AdjustmentHandlers a) where
+instance (Show uid, Show a) => Show1 (AdjustmentHandlers uid a) where
   liftShowsPrec s sl d (AdjustmentHandlers uidMap) = showParen (d > 10) $
       showString "AdjustmentHandlers "
     . liftShowList (liftShowsPrec s sl) (liftShowList s sl) (toList uidMap)
 
-instance Show a => Show1 (Tm a) where
+instance (Show uid, Show a) => Show1 (Tm uid a) where
   liftShowsPrec s sl d tm = showParen (d > 10) $ case tm of
     Variable b ->
         showString "Variable "
@@ -662,14 +688,14 @@ instance Show a => Show1 (Tm a) where
       . showSpace
       . liftShowsPrec s sl 11 tm'
 
-bindVal :: Value c a -> (a -> Tm c b) -> Value c b
+bindVal :: Value uid c a -> (a -> Tm uid c b) -> Value uid c b
 bindVal (Command uid row) _ = Command uid row
 bindVal (DataConstructor uid row tms) f =
   DataConstructor uid row ((>>= f) <$> tms)
 bindVal (Lambda body) f = Lambda (body >>>= f)
 bindVal (ForeignFun uid row) _ = ForeignFun uid row
 
-bindContinuation :: Continuation c a -> (a -> Tm c b) -> Continuation c b
+bindContinuation :: Continuation uid c a -> (a -> Tm uid c b) -> Continuation uid c b
 bindContinuation (Application spine) f = Application ((>>= f) <$> spine)
 bindContinuation (Case uid branches) f = Case uid ((>>>= f) <$> branches)
 bindContinuation (Handle adj peg (AdjustmentHandlers handlers) rhs) f = Handle
@@ -679,11 +705,11 @@ bindContinuation (Handle adj peg (AdjustmentHandlers handlers) rhs) f = Handle
   (rhs >>>= f)
 bindContinuation (Let poly rhs) f = Let poly (rhs >>>= f)
 
-instance Applicative (Tm a) where pure = Variable; (<*>) = ap
-instance Monad (Tm a) where
+instance Applicative (Tm uid a) where pure = Variable; (<*>) = ap
+instance Monad (Tm uid a) where
   return = Variable
 
-  -- (>>=) :: Tm c a -> (a -> Tm c b) -> Tm c b
+  -- (>>=) :: Tm uid c a -> (a -> Tm uid c b) -> Tm uid c b
   Variable a >>= f = f a
   InstantiatePolyVar a _ >>= f = f a
   Annotation val ty >>= f = Annotation (bindVal val f) ty
