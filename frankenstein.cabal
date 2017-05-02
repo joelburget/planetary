@@ -69,6 +69,7 @@ library
     template-haskell == 2.11.*,
     syb == 0.6.*,
     base16-bytestring == 0.1.*,
+    bifunctors == 5.4.*,
 
     -- testing
     tasty == 0.11.*,

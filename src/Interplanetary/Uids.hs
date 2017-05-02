@@ -68,7 +68,7 @@ import Crypto.Hash
 -- We need the content of the UId to be:
 -- * Something we can parse into (I don't know how to parse into a `Digest`,
 --   but can parse into something downstream of the digest).
--- * An instance of `Data` (so we can quote it for TH)
+-- * An instance of `Data` (not ByteString) (so we can quote it for TH)
 newtype UId = UId [Word8]
   deriving (Eq, Ord, Typeable, Data, Binary)
 

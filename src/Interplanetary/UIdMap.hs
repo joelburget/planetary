@@ -87,4 +87,3 @@ instance TraversableWithIndex uid (UIdMap uid) where
   -- TODO
   itraverse = undefined
   itraversed = undefined
-
