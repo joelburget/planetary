@@ -1,3 +1,4 @@
+{-# language NamedFieldPuns #-}
 {-# language OverloadedStrings #-}
 {-# language PackageImports #-}
 {-# language PatternSynonyms #-}
@@ -8,7 +9,6 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Text.Trifecta hiding (expected)
 import "indentation-trifecta" Text.Trifecta.Indentation
-import Bound
 
 import Planetary.Core
 import Planetary.Support.Parser
@@ -48,25 +48,23 @@ unitTests = testGroup "parsing"
 
   , parserTest "123" parseUid "123"
 
-  , parserTest "1 X" parseDataTy $
+  , parserTest "d:1 X" parseDataTy $
     DataTy "1" [TyArgVal (VTy"X")]
 
   -- also test with args
   -- Bool
-  , parserTest "data = | " parseDataDecl $
-    DataTypeInterface []
+  , parserTest "data Bool = | " parseDataDecl $
+    ("Bool", DataTypeInterface []
       [ ConstructorDecl []
       , ConstructorDecl []
-      ]
+      ])
 
-  -- TODO: this syntax is deeply unintuitive
   -- TODO: also test with effect parameter
-  -- Either
-  , parserTest "data X Y = X | Y" parseDataDecl $
-    DataTypeInterface [("X", ValTy), ("Y", ValTy)]
+  , parserTest "data Either X Y = X | Y" parseDataDecl $
+    ("Either", DataTypeInterface [("X", ValTy), ("Y", ValTy)]
       [ ConstructorDecl [VTy"X"]
       , ConstructorDecl [VTy"Y"]
-      ]
+      ])
 
   -- also test effect ty, multiple instances
   , parserTest "1 X" parseInterfaceInstance ("1", [TyArgVal (VTy"X")])
@@ -97,7 +95,7 @@ unitTests = testGroup "parsing"
 
   , parserTest "[] X" parsePeg $ Peg emptyAbility (VTy"X")
   , parserTest "[]X" parsePeg $ Peg emptyAbility (VTy"X")
-  , parserTest "[] 1 X" parsePeg $
+  , parserTest "[] d:1 X" parsePeg $
     Peg emptyAbility (DataTy "1" [TyArgVal (VTy"X")])
 
   , parserTest "X" parseCompTy $ CompTy [] (Peg emptyAbility (VTy"X"))
@@ -115,45 +113,42 @@ unitTests = testGroup "parsing"
 
   , parserTest "X -> X" parseCommandDecl $ CommandDeclaration [VTy"X"] (VTy"X")
 
-  , parserTest "interface X Y = X -> Y | Y -> X" parseInterface $
-    EffectInterface [("X", ValTy), ("Y", ValTy)]
+  , parserTest "interface Iface X Y = X -> Y | Y -> X" parseInterfaceDecl $
+    ("Iface", EffectInterface [("X", ValTy), ("Y", ValTy)]
       [ CommandDeclaration [VTy"X"] (VTy"Y")
       , CommandDeclaration [VTy"Y"] (VTy"X")
-      ]
+      ])
 
   , parserTest "Z!" parseApplication $ Cut (Application []) (V"Z")
   , parserTest "Z Z Z" parseApplication $
       Cut (Application [V"Z", V"Z"]) (V"Z")
 
-  -- TODO:
-  -- * parseLetRec
-  -- * parseCase
-  -- * parseHandle
-  -- * parseUseNoAp
-  -- * parseConstruction
-  -- * parseValue
-  , parserTest "let Z : forall. X = W in Z" parseLet $
-    -- TODO use `let_`
-    Cut
-      (Let (polytype [] (VTy"X")) (abstract1 "Z" (V"Z")))
-      (V"W")
+  , parserTest "let Z: forall. X = W in Z" parseLet $
+    let_ "Z" (polytype [] (VTy"X")) (V"W") (V"Z")
 
   , let defn = unlines
           [ "let on : forall X Y. {X -> {X -> []Y} -> []Y} ="
-          , "  \\x f -> f x in on n (\\x -> body)"
+          , "    \\x f -> f x in on n (\\x -> body)"
           ]
         compDomain = [VTy"X", SuspendedTy (CompTy [VTy"X"] (Peg emptyAbility (VTy"Y")))]
         compCodomain = Peg emptyAbility (VTy"Y")
         polyVal = SuspendedTy CompTy {..}
         polyBinders = [("X", ValTy), ("Y", ValTy)]
         pty = polytype polyBinders polyVal
-        result = let_ "on" pty
+        expected = let_ "on" pty
           (Value $ lam ["x", "f"] (Cut (Application [V"x"]) (V"f")))
-          -- Kind of a hack: use a no-argument lambda to convert from term to
-          -- value
-          (lam [] $
-            Cut (Application [V"n", Value $ lam ["x"] (V"body")]) (V"on"))
-    in parserTest defn parseLet result
+          (Cut (Application [V"n", Value $ lam ["x"] (V"body")]) (V"on"))
+    in parserTest defn parseLet expected
+
+  , let defn = "on n (\\x -> body)"
+        expected = Cut
+          (Application [V"n", Value (lam ["x"] (V"body"))])
+          (V"on")
+    in parserTest defn parseTm expected
+
+  , let defn = "\\x f -> f x"
+        expected = Value (lam ["x", "f"] (Cut (Application [V"x"]) (V"f")))
+    in parserTest defn parseTm expected
 
   , let defn = unlines
           [ "case x of"
@@ -165,9 +160,47 @@ unitTests = testGroup "parsing"
           [ ([], Variable "y")
           , (["a", "b", "c"], Variable "z")
           ]
-        result = Cut cont (Variable "x")
-    -- in parserTest defn parseCase result
-    in parserTest defn parseTm result
+        expected = Cut cont (Variable "x")
+    in testGroup "case"
+         [ parserTest defn parseTm expected
+         , parserTest defn parseCase expected
+         ]
+
+  , let defn = "data Maybe x = x |"
+          -- "data Maybe x = Just x | Nothing"
+        expected = ("Maybe", DataTypeInterface [("x", ValTy)]
+          [ ConstructorDecl [VariableTy "x"]
+          , ConstructorDecl []
+          ])
+    in parserTest defn parseDataDecl expected
+
+  , let defn = "interface IFace = foo -> bar | baz"
+        expected = ("IFace", EffectInterface []
+          [ CommandDeclaration [VariableTy "foo"] (VariableTy "bar")
+          , CommandDeclaration [] (VariableTy "baz")
+          ])
+    in parserTest defn parseInterfaceDecl expected
+
+  , let defn = unlines
+          [ "handle (i + Receive X) ([e | Abort] Y) y! with"
+          , "  receive:"
+          , "    | -> r -> abort!"
+          , "    | y    -> y"
+          ]
+        target = Cut (Application []) (V"y")
+        adj = Adjustment (uIdMapFromList [("Receive", [TyArgVal (VariableTy"X")])])
+        peg = Peg (Ability OpenAbility (uIdMapFromList [("Abort", [])])) (VariableTy "Y")
+        handlers =
+          [ ("receive", [([], "r", Cut (Application []) (V"abort"))])
+          ]
+        fallthrough = ("y", V"y")
+        cont = handle adj peg (uIdMapFromList handlers) fallthrough
+        expected = Cut {cont, target}
+    in parserTest defn parseHandle expected
+
+  -- TODO:
+  -- * parseLetRec
+  -- * parseValue
 
   -- , let defn = unlines
   --         [ "catch : <Abort>X -> {X} -> X"

@@ -19,6 +19,7 @@ import Data.Monoid ((<>))
 import Network.IPLD hiding (Row)
 
 import Planetary.Core.Syntax
+import Planetary.Core.UIdMap
 import Planetary.Util
 
 data TcErr
@@ -36,6 +37,7 @@ data TcErr
   deriving (Eq, Show)
 
 -- Read-only typing information
+-- TODO: why does DataTypeTable not hold `DataTypeInterface`s?
 type DataTypeTable  uid a = UIdMap uid (Vector (Vector (ValTy uid a)))
 type InterfaceTable uid a = UIdMap uid (EffectInterface uid a)
 
@@ -137,18 +139,23 @@ check (Cut (Handle adj peg (AdjustmentHandlers handlers) fallthrough) val) ty = 
     openAdjustmentHandler handler as (CompTy [b] (Peg ambient valTy)) $ \tm ->
       check tm ty
   withValTypes [valTy] $
-    let fallthrough' = instantiate1 (V 0) fallthrough
+    let fallthrough' = open1 fallthrough
     in check fallthrough' ty
 -- LET
 check (Cut (Let pty body) val) ty = do
   valTy <- instantiateWithEnv pty
   check val valTy
-  withPolyty pty $ check (instantiate1 (V 0) body) ty
+  withPolyty pty $ check (open1 body) ty
 -- SWITCH
 check m b = do
   a <- infer m
   _ <- unify a b ?? TyUnification
   pure ()
+
+-- TODO: convert to `fromScope`?
+-- instantiate1 :: Monad f => f a -> Scope n f a -> f a
+open1 :: Scope () (Tm Cid Int) Int -> Tm Cid Int Int
+open1 = instantiate1 (V 0) . ((+1) <$>)
 
 instantiateAbility :: AbilityI -> TcM' (UIdMap Cid [CommandDeclaration Cid Int])
 instantiateAbility (Ability _ uidmap) =

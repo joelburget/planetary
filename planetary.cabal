@@ -21,18 +21,20 @@ library
     -- support
     Planetary.Support.Parser
     Planetary.Support.Parser.QQ
-    Planetary.Support.Predefined
     Planetary.Support.UIds
     Planetary.Support.MakeTables
 
-    -- test
+    -- library
+    Planetary.Library.HaskellForeign
+    Planetary.Library.Syntax
+
+    -- test (export both "run everything" and more specific tests)
+    Tests
     Tests.Eval
     Tests.Parser
     Tests.Syntax
     Tests.Typecheck
 
-    -- load last so it'll be in scope (does it really work that way?)
-    Tests
   -- other-extensions:
   build-depends:
     base >=4.9 && <4.10,
@@ -56,6 +58,7 @@ library
     base16-bytestring == 0.1.*,
     ipld,
     binary-serialise-cbor,
+    syb,
 
     -- testing
     tasty == 0.11.*,

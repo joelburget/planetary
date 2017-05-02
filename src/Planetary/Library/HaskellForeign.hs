@@ -1,5 +1,5 @@
 {-# language TypeApplications #-}
-module Planetary.Support.Predefined where
+module Planetary.Library.HaskellForeign where
 
 import Control.Lens hiding ((??), op)
 import Control.Monad.Except
@@ -33,6 +33,7 @@ interfaceTable = uIdMapFromList
   , (boolOpsId, EffectInterface []
     [ CommandDeclaration [boolTy, boolTy] boolTy -- &&
     , CommandDeclaration [boolTy, boolTy] boolTy -- ||
+    , CommandDeclaration [boolTy]         boolTy -- not
     ])
   , (strOpsId, EffectInterface []
     [ CommandDeclaration [strTy, strTy] strTy -- concat
@@ -45,7 +46,7 @@ interfaceTable = uIdMapFromList
 foreignContinuations :: ForeignContinuations Int Int
 foreignContinuations = uIdMapFromList
   [ (intOpsId, [ liftBinaryOp @Int (+) , liftBinaryOp @Int (-) ])
-  , (boolOpsId, [ liftBinaryOp (&&) , liftBinaryOp (||) ])
+  , (boolOpsId, [ liftBinaryOp (&&) , liftBinaryOp (||), liftUnaryOp not ])
   , (strOpsId, [ liftBinaryOp @String (++) ])
   ]
 
@@ -70,6 +71,14 @@ liftBinaryOp op [ForeignDataTm uid1, ForeignDataTm uid2] = do
   i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
   ForeignDataTm <$> writeForeign i
 liftBinaryOp _ _ = throwError FailedForeignFun
+
+liftUnaryOp
+  :: IsIpld s
+  => (s -> s) -> (Spine Cid a b -> ForeignM a b (Tm Cid a b))
+liftUnaryOp op [ForeignDataTm uid] = do
+  i <- op <$> lookupForeign uid
+  ForeignDataTm <$> writeForeign i
+liftUnaryOp _ _ = throwError FailedForeignFun
 
 -- TODO: use QQ
 exampleDataTypes :: DataTypeTable Cid String

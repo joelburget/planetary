@@ -44,6 +44,13 @@ infixl 4 <$$>
 (<$$>) :: (Functor f, Functor g) => (a -> b) -> f (g a) -> f (g b)
 (<$$>) = fmap . fmap
 
+-- traverse2
+--   :: (Traversable s, Traversable t, Applicative f)
+--   => (a -> f b)
+--   -> s (t a)
+--   -> f (s (t b))
+-- traverse2 = traverse . traverse
+
 over2
   :: (Newtype n o, Newtype n' o')
   => (o -> n) -> (o -> o -> o') -> (n -> n -> n')
@@ -52,3 +59,8 @@ over2 _newtype f n1 n2 = pack (f (unpack n1) (unpack n2))
 maybeIf :: Bool -> Maybe a -> Maybe a
 maybeIf False _a = Nothing
 maybeIf True   a = a
+
+class Unifiable f where
+  -- TODO: we should give a way for solutions to escape this scope
+  -- (a (mapping) state monad)
+  unify :: Eq a => f a -> f a -> Maybe (f a)

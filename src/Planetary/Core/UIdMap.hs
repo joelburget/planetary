@@ -23,22 +23,11 @@ import Data.Hashable (Hashable)
 import Data.HashMap.Lazy (HashMap)
 import qualified Data.HashMap.Lazy as HashMap
 import GHC.Generics
+import Network.IPLD
 
 import Planetary.Util
 
-type IdMap f a =
-  ( Eq (f a)
-  , Show (f a)
-  , Functor f
-  , Foldable f
-  , Traversable f
-  , Monoid (f a)
-  , Typeable f
-  , Data (f a)
-  , Generic (f a)
-  )
-
-type IsUid uid = (Ord uid, Hashable uid)
+type IsUid uid = (Ord uid, IsIpld uid, Hashable uid)
 
 newtype UIdMap uid a = UIdMap (HashMap uid a)
   deriving (Eq, Show, Functor, Foldable, Traversable, Monoid, Typeable, Data,
@@ -56,11 +45,6 @@ instance IsUid uid => At (UIdMap uid a) where
 instance IsUid uid => Ixed (UIdMap uid a) where
   ix k f (UIdMap m) = UIdMap <$> ix k f m
 
-class Unifiable f where
-  -- TODO: we should give a way for solutions to escape this scope
-  -- (a (mapping) state monad)
-  unify :: Eq a => f a -> f a -> Maybe (f a)
-
 instance IsUid uid => Unifiable (UIdMap uid) where
   unify (UIdMap a) (UIdMap b) = maybeIf
     (HashMap.null (HashMap.difference a b))
@@ -69,6 +53,9 @@ instance IsUid uid => Unifiable (UIdMap uid) where
 uIdMapFromList :: IsUid uid => [(uid, a)] -> UIdMap uid a
 uIdMapFromList = UIdMap . HashMap.fromList
 
+uIdMapToList :: UIdMap uid a -> [(uid, a)]
+uIdMapToList (UIdMap hmap) = HashMap.toList hmap
+
 uidMapUnion :: IsUid uid => UIdMap uid a -> UIdMap uid a -> UIdMap uid a
 uidMapUnion = over2 UIdMap HashMap.union
 
@@ -76,15 +63,12 @@ instance (IsUid uid, Ord a) => Ord (UIdMap uid a) where
   compare m1 m2 = compare (toList m1) (toList m2)
 
 instance FunctorWithIndex uid (UIdMap uid) where
-  imap = undefined
-  -- TODO
-
 instance FoldableWithIndex uid (UIdMap uid) where
-  ifoldMap = undefined
-  -- TODO
 
 instance TraversableWithIndex uid (UIdMap uid) where
-  -- TODO
-  itraverse = undefined
-  itraversed = undefined
+  itraverse f (UIdMap t) = UIdMap <$> HashMap.traverseWithKey f t
 
+-- TODO: use HashMap instance when it exists
+instance (IsUid uid, IsIpld a) => IsIpld (UIdMap uid a) where
+  toIpld = toIpld . uIdMapToList
+  fromIpld = uIdMapFromList <$$> fromIpld

@@ -1,86 +1,135 @@
+{-# language DeriveDataTypeable #-}
 {-# language FlexibleInstances #-}
 {-# language GeneralizedNewtypeDeriving #-}
+{-# language LambdaCase #-}
 {-# language MultiParamTypeClasses #-}
 {-# language StandaloneDeriving #-}
 {-# language TypeSynonymInstances #-}
 module Planetary.Support.MakeTables where
 
 import Bound (closed)
-import Control.Lens ((&), ix, (.~), _1, _2)
+import Control.Lens ((&), ix, (.~), _1, _2, (^?))
 import Control.Monad.Except
+import Control.Monad.Reader
 import Control.Monad.State
+-- import Data.ByteString (ByteString)
+import Data.Data (Data, Typeable)
+import Data.Generics.Aliases (mkM)
+import Data.Generics.Schemes
+import Data.List (elemIndex)
 import Network.IPLD
 
 import Planetary.Core hiding (NotClosed)
-import Planetary.Util ((??))
+import Planetary.Util
 
 data TablingErr
   = UnresolvedUid
+  | VarLookup
   | NotClosed
   deriving Show
 
--- TODO: better naming!
-type DTT = DataTypeTable Cid Int
-type IT = InterfaceTable Cid Int
-type DTI = DataTypeInterface Cid Int
-type EI = EffectInterface Cid Int
-type S = UIdMap Cid (Either DTI EI)
+type TablingState =
+  UIdMap String (Either (DataTypeInterface Cid Int) (EffectInterface Cid Int))
 
 newtype TablingM a = TablingM
-  (ExceptT TablingErr (State S) a)
-  deriving (Functor, Applicative, Monad, MonadError TablingErr)
-deriving instance MonadState S TablingM
-
--- http://stackoverflow.com/questions/5434889/is-it-possible-to-use-syb-to-transform-the-type
-magic1 :: DataTypeInterface String b -> TablingM (DataTypeInterface Cid b)
-magic1 dti = undefined
-
-magic2 :: EffectInterface String b -> TablingM (EffectInterface Cid b)
-magic2 = undefined
-
-makeTables1
-  :: DataTypeInterface String String
-  -> TablingM (Cid, DTI)
-makeTables1 ddecl = do
-  ddecl' <- closed ddecl ?? NotClosed
-  ddecl'' <- magic1 ddecl'
-  let uid = cidOf ddecl''
-  pure (uid, ddecl'')
-
-makeTables2
-  :: EffectInterface String String
-  -> TablingM (Cid, EI)
-makeTables2 iface = do
-  iface' <- closed iface ?? NotClosed
-  iface'' <- magic2 iface'
-  let uid = cidOf iface''
-  pure (uid, iface'')
+  (ExceptT TablingErr
+  (ReaderT [String]
+  (State TablingState))
+  a)
+  deriving (Functor, Applicative, Monad, MonadError TablingErr, MonadReader [String])
+deriving instance MonadState TablingState TablingM
 
 -- For each declaration, in order:
 -- * Replace any names (in the uid position) to a previously defined name with
 --   the full uid
 -- * Close the term and type levels (convert String free vars to Int)
--- * Generate uid, save it
+-- * Generate uid, save it for future use
 makeTables
-  :: [Either (DataTypeInterface String String) (EffectInterface String String)]
-  -> Either TablingErr (DTT, IT)
+  :: [Either (String, DataTypeInterface String String)
+             (String, EffectInterface String String)
+     ]
+  -> Either TablingErr (DataTypeTable Cid Int, InterfaceTable Cid Int)
 makeTables xs =
   let TablingM action = makeTablesM xs
-  in evalState (runExceptT action) mempty
+  in evalState (runReaderT (runExceptT action) []) mempty
 
 makeTablesM
-  :: [Either (DataTypeInterface String String) (EffectInterface String String)]
-  -> TablingM (DTT, IT)
-makeTablesM (Left ddecl:xs) = do
-  (uid, ddeclI) <- makeTables1 ddecl
-  modify (& ix uid .~ Left ddeclI)
+  :: [Either (String, DataTypeInterface String String)
+             (String, EffectInterface String String)
+     ]
+  -> TablingM (DataTypeTable Cid Int, InterfaceTable Cid Int)
+makeTablesM (Left (name, ddecl):xs) = do
+  (cid, ddeclI) <- convertDti ddecl
+  modify (& ix name .~ Left ddeclI)
   xs' <- makeTablesM xs
   -- TODO: inconsistency with DataTypeTable not using DataTypeInterface
   -- `dataInterface` shouldn't be necessary
-  pure (xs' & _1 . ix uid .~ dataInterface ddeclI)
-makeTablesM (Right iface:xs) = do
-  (uid, ifaceI) <- makeTables2 iface
-  modify (& ix uid .~ Right ifaceI)
+  pure (xs' & _1 . ix cid .~ dataInterface ddeclI)
+makeTablesM (Right (name, iface):xs) = do
+  (cid, ifaceI) <- convertEi iface
+  modify (& ix name .~ Right ifaceI)
   xs' <- makeTablesM xs
-  pure (xs' & _2 . ix uid .~ ifaceI)
+  pure (xs' & _2 . ix cid .~ ifaceI)
 makeTablesM [] = pure (mempty, mempty)
+
+lookupVar :: String -> TablingM Int
+lookupVar var = do
+  vars <- ask
+  elemIndex var vars ?? VarLookup
+
+lookupUid :: String -> TablingM Cid
+lookupUid name = do
+  defns <- get
+  defn <- defns ^? ix name ?? UnresolvedUid
+  -- TODO: we're already calculating cids in makeTablesM -- remove duplication
+  let cid = case defn of
+        Left ddefn -> cidOf ddefn
+        Right edefn -> cidOf edefn
+  pure cid
+
+convertDti :: DataTypeInterface String String -> TablingM (Cid, DataTypeInterface Cid Int)
+convertDti (DataTypeInterface binders ctrs) = do
+  ctrs' <- traverse convertCtr ctrs
+  let dti = DataTypeInterface [{- XXX -}] ctrs'
+  pure (cidOf dti, dti)
+
+convertEi :: EffectInterface String String -> TablingM (Cid, EffectInterface Cid Int)
+convertEi (EffectInterface binders commands) = do
+  commands' <- traverse convertCmd commands
+  let ei = EffectInterface [{- XXX -}] commands'
+  pure (cidOf ei, ei)
+
+convertCtr :: ConstructorDecl String String -> TablingM (ConstructorDecl Cid Int)
+convertCtr (ConstructorDecl vtys) = ConstructorDecl <$> traverse convertValTy vtys
+
+convertValTy :: ValTy String String -> TablingM (ValTy Cid Int)
+convertValTy = \case
+  DataTy uid tyargs -> DataTy <$> lookupUid uid <*> traverse convertTyArg tyargs
+  SuspendedTy cty -> SuspendedTy <$> convertCompTy cty
+  VariableTy var -> VariableTy <$> lookupVar var
+
+convertTyArg :: TyArg String String -> TablingM (TyArg Cid Int)
+convertTyArg = \case
+  TyArgVal valTy -> TyArgVal <$> convertValTy valTy
+  TyArgAbility ability -> TyArgAbility <$> convertAbility ability
+
+convertCompTy :: CompTy String String -> TablingM (CompTy Cid Int)
+convertCompTy (CompTy dom (Peg ab codom)) = CompTy
+  <$> traverse convertValTy dom
+  <*> (Peg
+    <$> convertAbility ab
+    <*> convertValTy codom)
+
+convertAbility :: Ability String String -> TablingM (Ability Cid Int)
+convertAbility (Ability init umap) = do
+  umap' <- traverse
+    (\(key, tyArg) -> (,)
+      <$> lookupUid key
+      <*> traverse convertTyArg tyArg)
+    (uIdMapToList umap)
+  pure $ Ability init $ uIdMapFromList umap'
+
+convertCmd :: CommandDeclaration String String -> TablingM (CommandDeclaration Cid Int)
+convertCmd (CommandDeclaration dom codom) = CommandDeclaration
+  <$> traverse convertValTy dom
+  <*> convertValTy codom
