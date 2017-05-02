@@ -42,8 +42,6 @@ library
     base >=4.9 && <4.10,
     either == 4.4.*,
     mtl == 2.2.*,
-    hashable == 1.2.*,
-    vector >= 0.11,
     containers == 0.5.*,
     unordered-containers == 0.2.*,
     text == 1.2.*,
@@ -51,12 +49,7 @@ library
     parsers == 0.12.*,
     trifecta == 1.6.*,
     indentation-trifecta,
-    -- wreq,
-    -- bytestring,
-    -- aeson >= 1.1,
-    -- monad-gen,
     errors == 2.1.*,
-    -- scientific
     bound == 2,
     byteable >= 0.1 && < 1.0,
     cryptohash == 0.11.*,
@@ -69,7 +62,9 @@ library
     template-haskell == 2.11.*,
     syb == 0.6.*,
     base16-bytestring == 0.1.*,
+    -- multihash == 0.1.*,
     bifunctors == 5.4.*,
+    hashable == 1.2.*,
 
     -- testing
     tasty == 0.11.*,

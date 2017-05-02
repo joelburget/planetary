@@ -48,7 +48,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Hex
 import qualified Data.ByteString.Char8 as B8
 import Data.Data
-import Data.Hashable (Hashable(hashWithSalt))
+import Data.Hashable (Hashable(..))
 import Data.Word (Word8)
 import Control.Distributed.Process.Serializable (Serializable)
 import Crypto.Hash
