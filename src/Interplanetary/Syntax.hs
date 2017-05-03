@@ -119,7 +119,7 @@ instance Binary uid => Binary (ConstructorDecl uid Int)
 -- A collection of data constructor signatures (which can refer to bound type /
 -- effect variables).
 data DataTypeInterface uid a = DataTypeInterface
-  -- { dataTypeUId :: uid
+  -- { dataTypeUId :: UId
   -- we universally quantify over some number of type variables
   { dataBinders :: Vector (a, Kind)
   -- a collection of constructors taking some arguments
@@ -174,27 +174,27 @@ instance Binary uid => Binary (Adjustment uid Int)
 
 data Value uid a b
   -- use (inferred)
-  = Command uid Row
-  | ForeignFun uid Row -- TODO: Is ForeignFun just a Command?
+  = Command UId Row
+  | ForeignFun UId Row -- TODO: Is ForeignFun just a Command?
 
   -- construction (checked)
-  | DataConstructor uid Row (Vector (Tm uid a b))
+  | DataConstructor UId Row (Vector (Tm uid a b))
   | Lambda (Scope Int (Tm uid a) b)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-pattern CommandTm :: uid -> Row -> Tm uid a b
+pattern CommandTm :: UId -> Row -> Tm uid a b
 pattern CommandTm uid row = Value (Command uid row)
 
-pattern ForeignData :: uid -> Value uid a b
+pattern ForeignData :: UId -> Value uid a b
 pattern ForeignData uid = DataConstructor uid 0 []
 
-pattern ForeignDataTm :: uid -> Tm uid a b
+pattern ForeignDataTm :: UId -> Tm uid a b
 pattern ForeignDataTm uid = Value (ForeignData uid)
 
-pattern DataTm :: uid -> Row -> Vector (Tm uid a b) -> Tm uid a b
+pattern DataTm :: UId -> Row -> Vector (Tm uid a b) -> Tm uid a b
 pattern DataTm uid row vals = Value (DataConstructor uid row vals)
 
-pattern ForeignFunTm :: uid -> Row -> Tm uid a b
+pattern ForeignFunTm :: UId -> Row -> Tm uid a b
 pattern ForeignFunTm uid row = Value (ForeignFun uid row)
 
 data Continuation uid a b
@@ -227,10 +227,10 @@ data Tm uid a b
 pattern V :: b -> Tm uid a b
 pattern V name = Variable name
 
-pattern CommandV :: uid -> Row -> Tm uid a b
+pattern CommandV :: UId -> Row -> Tm uid a b
 pattern CommandV uId row = Value (Command uId row)
 
-pattern ConstructV :: uid -> Row -> Vector (Tm uid a b) -> Tm uid a b
+pattern ConstructV :: UId -> Row -> Vector (Tm uid a b) -> Tm uid a b
 pattern ConstructV uId row args = Value (DataConstructor uId row args)
 
 pattern LambdaV :: Scope Int (Tm uid a) b -> Tm uid a b

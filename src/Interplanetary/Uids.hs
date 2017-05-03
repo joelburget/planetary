@@ -48,7 +48,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Base16 as Hex
 import qualified Data.ByteString.Char8 as B8
 import Data.Data
-import Data.Hashable (Hashable(..))
+import Data.Hashable (Hashable(hashWithSalt))
 import Data.Word (Word8)
 import Control.Distributed.Process.Serializable (Serializable)
 import Crypto.Hash
@@ -68,7 +68,7 @@ import Crypto.Hash
 -- We need the content of the UId to be:
 -- * Something we can parse into (I don't know how to parse into a `Digest`,
 --   but can parse into something downstream of the digest).
--- * An instance of `Data` (not ByteString) (so we can quote it for TH)
+-- * An instance of `Data` (so we can quote it for TH)
 newtype UId = UId [Word8]
   deriving (Eq, Ord, Typeable, Data, Binary)
 

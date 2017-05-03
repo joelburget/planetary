@@ -142,38 +142,38 @@ unitTests = testGroup "typechecking"
       in checkTest "DATA (args)" tables emptyTypingEnv tm expectedTy
     ]
 
---     , testGroup "check case"
---       [ let abcdUid = parserOnlyMakeUid "abcd"
---             abcdTy = DataTy abcdUid []
---             abcdVal = DataTm abcdUid 0 []
---             otherUid = parserOnlyMakeUid "123424321432"
---             val = DataTm otherUid 1 [abcdVal, abcdVal]
---             Just tm = closed $ substitute "val" val $
---               [tmExp|
---                 case val of
---                   123424321432
---                     | x y z -> x
---                     | y z -> z
---               |]
---             -- Just (dataTys, _) = [declarations|
---             --     data =
---             --       |
---             --     data =
---             --       |
---             --   |]
---             tables = exampleTables & _1 .~ uIdMapFromList
---               [ (abcdUid, [[]])
---               , (otherUid,
---                 [ [abcdTy, abcdTy, abcdTy]
---                 , [abcdTy, abcdTy]
---                 ])
---               ]
---             expectedTy = abcdTy
---             env = TypingEnv
---               [
---               ]
---         in checkTest "CASE" tables env tm expectedTy
---       ]
+    , testGroup "check case"
+      [ let abcdUid = parserOnlyMakeUid "abcd"
+            abcdTy = DataTy abcdUid []
+            abcdVal = DataTm abcdUid 0 []
+            otherUid = parserOnlyMakeUid "123424321432"
+            val = DataTm otherUid 1 [abcdVal, abcdVal]
+            Just tm = closed $ substitute "val" val $
+              [tmExp|
+                case val of
+                  123424321432
+                    | x y z -> x
+                    | y z -> z
+              |]
+            -- Just (dataTys, _) = [declarations|
+            --     data =
+            --       |
+            --     data =
+            --       |
+            --   |]
+            tables = exampleTables & _1 .~ uIdMapFromList
+              [ (abcdUid, [[]])
+              , (otherUid,
+                [ [abcdTy, abcdTy, abcdTy]
+                , [abcdTy, abcdTy]
+                ])
+              ]
+            expectedTy = abcdTy
+            env = TypingEnv
+              [
+              ]
+        in checkTest "CASE" tables env tm expectedTy
+      ]
 
     , testGroup "check switch"
       [ let tm = V 0
@@ -184,27 +184,27 @@ unitTests = testGroup "typechecking"
         in checkTest "SWITCH" exampleTables env tm expectedTy
       ]
 
---     , let simpleTables = _
---       in testGroup "check handle"
---         [ let tm = [tmExp|
---                 handle (Abort) ([e | Abort]HaskellInt) (abort!) with
---                   Abort:
---                     | abort -> 1
---                   | k -> 2
---               |]
---               expectedTy = _
---           in checkTest "HANDLE (abort)" simpleTables env tm expectedTy
---         , let tm = [tmExp|
---                 handle (adj) (peg) x with
---                   Send:
---                     | send y ->
---                   Receive:
---                     | receive ->
---                   | ->
---               |]
---               expectedTy = _
---           in checkTest "HANDLE (multi)" simpleTables env tm expectedTy
---         ]
+    , let simpleTables = _
+      in testGroup "check handle"
+        [ let tm = [tmExp|
+                handle (Abort) ([e | Abort]HaskellInt) (abort!) with
+                  Abort:
+                    | abort -> 1
+                  | k -> 2
+              |]
+              expectedTy = _
+          in checkTest "HANDLE (abort)" simpleTables env tm expectedTy
+        , let tm = [tmExp|
+                handle (adj) (peg) x with
+                  Send:
+                    | send y ->
+                  Receive:
+                    | receive ->
+                  | ->
+              |]
+              expectedTy = _
+          in checkTest "HANDLE (multi)" simpleTables env tm expectedTy
+        ]
 
   ]
 

@@ -6,7 +6,7 @@
 module Interplanetary.MakeTables where
 
 import Bound (closed)
-import Control.Lens hiding ((??))
+import Control.Lens ((&), ix, (.~), _1, _2)
 import Control.Monad.Except
 import Control.Monad.State
 
@@ -31,8 +31,9 @@ newtype TablingM a = TablingM
   deriving (Functor, Applicative, Monad, MonadError TablingErr)
 deriving instance MonadState S TablingM
 
+-- http://stackoverflow.com/questions/5434889/is-it-possible-to-use-syb-to-transform-the-type
 magic1 :: DataTypeInterface String b -> TablingM (DataTypeInterface UId b)
-magic1 dti = transformMOn _ _ dti
+magic1 dti = undefined
 
 magic2 :: EffectInterface String b -> TablingM (EffectInterface UId b)
 magic2 = undefined
