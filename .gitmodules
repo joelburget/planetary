@@ -1,3 +1,0 @@
-[submodule "bound"]
-	path = bound
-	url = git@github.com:ekmett/bound.git
