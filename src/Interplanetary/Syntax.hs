@@ -19,14 +19,13 @@
 module Interplanetary.Syntax
   ( module Interplanetary.Syntax
   , module Interplanetary.UIdMap
-  , module Interplanetary.UIds
+  -- , module Interplanetary.UIds
   ) where
 
 import Bound
 import Control.Lens.Plated
 import Control.Lens.TH (makeLenses)
 import Control.Monad (ap)
-import Data.Binary (Binary(..))
 import Data.Data
 import Data.Data.Lens
 import Data.Foldable (toList)
@@ -34,10 +33,11 @@ import Data.Functor.Classes
 import Data.List (elemIndex)
 import Data.Monoid ((<>))
 import GHC.Generics
+import Network.IPLD hiding (Value, Row)
 
 import Interplanetary.Util
 import Interplanetary.UIdMap
-import Interplanetary.UIds
+-- import Interplanetary.UIds
 
 -- TODO:
 -- * Right now we use simple equality to check types but should implement
@@ -51,12 +51,6 @@ import Interplanetary.UIds
 
 type Row = Int
 
--- TODO: remove
-instance Binary (UIdMap uid (Vector (TyArg uid Int))) where
-  put = todo "put"
-  get = todo "get"
-  putList = todo "putList"
-
 -- Types
 
 data ValTy uid a
@@ -65,7 +59,6 @@ data ValTy uid a
   | VariableTy a
   deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary uid => Binary (ValTy uid Int)
 instance (IsUid uid, Data uid, Data a) => Plated (ValTy uid a) where
   plate = uniplate
 
@@ -74,7 +67,6 @@ data CompTy uid a = CompTy
   , compCodomain :: Peg uid a
   } deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary uid => Binary (CompTy uid Int)
 instance (IsUid uid, Data uid, Data a) => Plated (CompTy uid a) where
   plate = uniplate
 
@@ -83,7 +75,6 @@ data Peg uid a = Peg
   , pegVal :: ValTy uid a
   } deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary uid => Binary (Peg uid Int)
 instance (IsUid uid, Data uid, Data a) => Plated (Peg uid a) where
   plate = uniplate
 
@@ -92,12 +83,8 @@ data TyArg uid a
   | TyArgAbility (Ability uid Int)
   deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary uid => Binary (TyArg uid Int)
-
 data Kind = ValTy | EffTy
   deriving (Show, Eq, Ord, Typeable, Data, Generic)
-
-instance Binary Kind
 
 data Polytype uid a = Polytype
   -- Universally quantify over a bunch of variables
@@ -114,8 +101,6 @@ polytype binders body =
 data ConstructorDecl uid a = ConstructorDecl (Vector (ValTy uid a))
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary uid => Binary (ConstructorDecl uid Int)
-
 -- A collection of data constructor signatures (which can refer to bound type /
 -- effect variables).
 data DataTypeInterface uid a = DataTypeInterface
@@ -126,7 +111,9 @@ data DataTypeInterface uid a = DataTypeInterface
   , constructors :: Vector (ConstructorDecl uid a)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary uid => Binary (DataTypeInterface uid Int)
+instance IsIpld (DataTypeInterface Cid Int) where -- XXX
+instance IsIpld (EffectInterface Cid Int) where -- XXX
+
 instance (IsUid uid, Data uid, Data a) => Plated (DataTypeInterface uid a) where
   plate = todo "plate DataTypeInterface"
 
@@ -141,8 +128,6 @@ dataInterface (DataTypeInterface _ ctors) =
 data CommandDeclaration uid a = CommandDeclaration (Vector (ValTy uid a)) (ValTy uid a)
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary uid => Binary (CommandDeclaration uid Int)
-
 data EffectInterface uid a = EffectInterface
   -- we universally quantify some number of type variables
   { _interfaceBinders :: Vector (a, Kind)
@@ -150,51 +135,43 @@ data EffectInterface uid a = EffectInterface
   , _commands :: Vector (CommandDeclaration uid a)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary uid => Binary (EffectInterface uid Int)
-
 data InitiateAbility = OpenAbility | ClosedAbility
   deriving (Eq, Show, Ord, Typeable, Data, Generic)
-
-instance Binary InitiateAbility
 
 -- "For each UID, instantiate it with these args"
 data Ability uid a = Ability InitiateAbility (UIdMap uid (Vector (TyArg uid a)))
   deriving (Eq, Show, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
-
-instance Binary uid => Binary (Ability uid Int)
 
 -- An adjustment is a mapping from effect inferface id to the types it's
 -- applied to. IE a set of saturated interfaces.
 newtype Adjustment uid a = Adjustment (UIdMap uid (Vector (TyArg uid a)))
   deriving (Monoid, Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-instance Binary uid => Binary (Adjustment uid Int)
-
 -- Terms
 
 data Value uid a b
   -- use (inferred)
-  = Command UId Row
-  | ForeignFun UId Row -- TODO: Is ForeignFun just a Command?
+  = Command Cid Row
+  | ForeignFun Cid Row -- TODO: Is ForeignFun just a Command?
 
   -- construction (checked)
-  | DataConstructor UId Row (Vector (Tm uid a b))
+  | DataConstructor Cid Row (Vector (Tm uid a b))
   | Lambda (Scope Int (Tm uid a) b)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-pattern CommandTm :: UId -> Row -> Tm uid a b
+pattern CommandTm :: Cid -> Row -> Tm uid a b
 pattern CommandTm uid row = Value (Command uid row)
 
-pattern ForeignData :: UId -> Value uid a b
+pattern ForeignData :: Cid -> Value uid a b
 pattern ForeignData uid = DataConstructor uid 0 []
 
-pattern ForeignDataTm :: UId -> Tm uid a b
+pattern ForeignDataTm :: Cid -> Tm uid a b
 pattern ForeignDataTm uid = Value (ForeignData uid)
 
-pattern DataTm :: UId -> Row -> Vector (Tm uid a b) -> Tm uid a b
+pattern DataTm :: Cid -> Row -> Vector (Tm uid a b) -> Tm uid a b
 pattern DataTm uid row vals = Value (DataConstructor uid row vals)
 
-pattern ForeignFunTm :: UId -> Row -> Tm uid a b
+pattern ForeignFunTm :: Cid -> Row -> Tm uid a b
 pattern ForeignFunTm uid row = Value (ForeignFun uid row)
 
 data Continuation uid a b
@@ -227,10 +204,10 @@ data Tm uid a b
 pattern V :: b -> Tm uid a b
 pattern V name = Variable name
 
-pattern CommandV :: UId -> Row -> Tm uid a b
+pattern CommandV :: Cid -> Row -> Tm uid a b
 pattern CommandV uId row = Value (Command uId row)
 
-pattern ConstructV :: UId -> Row -> Vector (Tm uid a b) -> Tm uid a b
+pattern ConstructV :: Cid -> Row -> Vector (Tm uid a b) -> Tm uid a b
 pattern ConstructV uId row args = Value (DataConstructor uId row args)
 
 pattern LambdaV :: Scope Int (Tm uid a) b -> Tm uid a b
@@ -309,8 +286,8 @@ extendAbility
 extendAbility (Ability initAb uidMap) (Adjustment adj)
   = Ability initAb (uidMap `uidMapUnion` adj)
 
-type Executable1 f = f UId Int
-type Executable2 f = f UId Int Int
+type Executable1 f = f Cid Int
+type Executable2 f = f Cid Int Int
 
 type PolytypeI = Executable1 Polytype
 type ValTyI    = Executable1 ValTy
@@ -320,7 +297,7 @@ type UseI                = Executable2 Tm
 type ConstructionI       = Executable2 Tm
 type AdjustmentHandlersI = Executable2 AdjustmentHandlers
 type TmI                 = Executable2 Tm
-type SpineI              = Spine UId Int Int
+type SpineI              = Spine Cid Int Int
 type ValueI              = Executable2 Value
 
 type AdjustmentI = Executable1 Adjustment

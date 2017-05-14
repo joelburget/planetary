@@ -50,7 +50,6 @@ import qualified Data.ByteString.Char8 as B8
 import Data.Data
 import Data.Hashable (Hashable(hashWithSalt))
 import Data.Word (Word8)
-import Control.Distributed.Process.Serializable (Serializable)
 import Crypto.Hash
 
 -- newtype Merkle256 = Merkle256 (Crypto.Digest Crypto.SHA256)
@@ -69,59 +68,59 @@ import Crypto.Hash
 -- * Something we can parse into (I don't know how to parse into a `Digest`,
 --   but can parse into something downstream of the digest).
 -- * An instance of `Data` (so we can quote it for TH)
-newtype UId = UId [Word8]
-  deriving (Eq, Ord, Typeable, Data, Binary)
+-- newtype UId = UId [Word8]
+--   deriving (Eq, Ord, Typeable, Data, Binary)
 
-instance Show UId where
-  showsPrec d (UId w8s) = showParen (d > 10) $
-    showString "UId " . showString (B8.unpack (Hex.encode (BS.pack w8s)))
+-- instance Show UId where
+--   showsPrec d (UId w8s) = showParen (d > 10) $
+--     showString "UId " . showString (B8.unpack (Hex.encode (BS.pack w8s)))
 
-instance Hashable UId where
-  hashWithSalt salt (UId val) = hashWithSalt salt val
+-- instance Hashable UId where
+--   hashWithSalt salt (UId val) = hashWithSalt salt val
 
-type D = Digest SHA3_256
+-- type D = Digest SHA3_256
 
-mkUid :: Serializable a => a -> UId
-mkUid = UId . BS.unpack . toBytes @D . hashlazy . encode
+-- mkUid :: Serializable a => a -> UId
+-- mkUid = UId . BS.unpack . toBytes @D . hashlazy . encode
 
-parserOnlyMakeUid :: ByteString -> UId
-parserOnlyMakeUid = UId . BS.unpack
+-- parserOnlyMakeUid :: ByteString -> UId
+-- parserOnlyMakeUid = UId . BS.unpack
 
-generateUIds :: [UId]
-generateUIds = UId . BS.unpack . toBytes @D . hashFinalize <$>
-  iterate (`hashUpdate` "abcd") hashInit
+-- generateUIds :: [UId]
+-- generateUIds = UId . BS.unpack . toBytes @D . hashFinalize <$>
+--   iterate (`hashUpdate` "abcd") hashInit
 
-intId
-  : boolId
-  : strId
-  : intOpsId
-  : boolOpsId
-  : strOpsId
-  : concatStrsId
-  : orId
-  : andId
-  : unitId
-  : valueTyUid
-  : computationTyUid
-  : pegUid
-  : tyVarUid
-  : tyArgUid
-  : polyTyUid
-  : abilityUid
-  : adjustmentUid
-  : tyEnvUid
-  : useUid
-  : constructionUid
-  : spineUid
-  : uidUid
-  : voidUid
-  : unitUid
-  : idUid
-  : uidOpsId
-  : uidId
-  :_ = generateUIds
+-- intId
+--   : boolId
+--   : strId
+--   : intOpsId
+--   : boolOpsId
+--   : strOpsId
+--   : concatStrsId
+--   : orId
+--   : andId
+--   : unitId
+--   : valueTyUid
+--   : computationTyUid
+--   : pegUid
+--   : tyVarUid
+--   : tyArgUid
+--   : polyTyUid
+--   : abilityUid
+--   : adjustmentUid
+--   : tyEnvUid
+--   : useUid
+--   : constructionUid
+--   : spineUid
+--   : uidUid
+--   : voidUid
+--   : unitUid
+--   : idUid
+--   : uidOpsId
+--   : uidId
+--   :_ = generateUIds
 
-oneUid, twoUid, fourUid :: UId
-oneUid = mkUid @Int 1
-twoUid = mkUid @Int 2
-fourUid = mkUid @Int 4
+-- oneUid, twoUid, fourUid :: UId
+-- oneUid = mkUid @Int 1
+-- twoUid = mkUid @Int 2
+-- fourUid = mkUid @Int 4

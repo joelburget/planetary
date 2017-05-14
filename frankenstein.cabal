@@ -22,7 +22,7 @@ library
     Interplanetary.Predefined
     Interplanetary.Syntax
     Interplanetary.UIdMap
-    Interplanetary.UIds
+    -- Interplanetary.UIds
     Interplanetary.Typecheck
     Interplanetary.MakeTables
     Interplanetary.Util

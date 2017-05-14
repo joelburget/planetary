@@ -5,6 +5,8 @@ module Tests.Typecheck where
 
 import Bound (closed, substitute)
 import Control.Lens
+import Data.ByteString (ByteString)
+import Network.IPLD
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -14,39 +16,42 @@ import Interplanetary.Typecheck
 
 checkTest
   :: String
-  -> TypingTables UId Int
-  -> TypingEnv UId Int
+  -> TypingTables Cid Int
+  -> TypingEnv Cid Int
   -> TmI
-  -> ValTy UId Int
+  -> ValTy Cid Int
   -> TestTree
 checkTest name tables env tm ty = testCase name $
   runTcM tables env (check tm ty) @?= Right ()
 
 inferTest
   :: String
-  -> TypingTables UId Int
-  -> TypingEnv UId Int
+  -> TypingTables Cid Int
+  -> TypingEnv Cid Int
   -> TmI
-  -> Either TcErr (ValTy UId Int)
+  -> Either TcErr (ValTy Cid Int)
   -> TestTree
 inferTest name tables env tm expected = testCase name $
   runTcM tables env (infer tm) @?= expected
 
 -- TODO: use QQ
-exampleInterfaces :: InterfaceTable UId Int
+exampleInterfaces :: InterfaceTable Cid Int
 exampleInterfaces = uIdMapFromList []
 
-dataTypeTable :: DataTypeTable UId Int
+dataTypeTable :: DataTypeTable Cid Int
 dataTypeTable = mempty
 
-ambientAbility :: Ability UId Int
+ambientAbility :: Ability Cid Int
 ambientAbility = emptyAbility
 
-exampleTables :: TypingTables UId Int
+exampleTables :: TypingTables Cid Int
 exampleTables = (dataTypeTable, exampleInterfaces, ambientAbility)
 
-emptyTypingEnv :: TypingEnv UId Int
+emptyTypingEnv :: TypingEnv Cid Int
 emptyTypingEnv = TypingEnv []
+
+mockCid :: ByteString -> Cid
+mockCid = mkCid
 
 unitTests :: TestTree
 unitTests = testGroup "typechecking"
@@ -62,9 +67,9 @@ unitTests = testGroup "typechecking"
     ]
 
   , testGroup "infer command"
-    [ let domTy = DataTy (mkUid @String "domain") []
-          codomTy = DataTy (mkUid @String "codomain") []
-          cmdUid = mkUid @String "fire missiles"
+    [ let domTy = DataTy (mockCid "domain") []
+          codomTy = DataTy (mockCid "codomain") []
+          cmdUid = mockCid "fire missiles"
 
           -- TODO: this duplication between ambient and interfaces is so bad
           interfaces = uIdMapFromList
@@ -89,9 +94,9 @@ unitTests = testGroup "typechecking"
     ]
 
   , testGroup "infer app"
-    [ let dataUid = mkUid @String "dataUid"
-          v1Uid = mkUid @String "v1"
-          v2Uid = mkUid @String "v2"
+    [ let dataUid = mockCid "dataUid"
+          v1Uid = mockCid "v1"
+          v2Uid = mockCid "v2"
           tm1 = DataTm v1Uid 0 []
           tm2 = DataTm v2Uid 0 []
           ty1 = DataTy v1Uid []
@@ -112,22 +117,22 @@ unitTests = testGroup "typechecking"
     ]
 
   , testGroup "infer annotation" []
-    -- [ let ty = DataTy (mkUid @String "ty") []
+    -- [ let ty = DataTy (mockCid "ty") []
     --   inferTest "COERCE" exampleTables emptyTypingEnv (Annotation
     -- ]
 
   , testGroup "TODO: check lambda" []
 
   , testGroup "check data"
-    [ let v1Uid = mkUid @String "v1"
+    [ let v1Uid = mockCid "v1"
           tm1 = DataTm v1Uid 0 []
           ty1 = DataTy v1Uid []
           tables = exampleTables & _1 .~ uIdMapFromList
             [ (v1Uid, [[]]) ]
       in checkTest "DATA (simple)" tables emptyTypingEnv tm1 ty1
-    , let dataUid = mkUid @String "dataUid"
-          v1Uid = mkUid @String "v1"
-          v2Uid = mkUid @String "v2"
+    , let dataUid = mockCid "dataUid"
+          v1Uid = mockCid "v1"
+          v2Uid = mockCid "v2"
           tm1 = DataTm v1Uid 0 []
           tm2 = DataTm v2Uid 0 []
           ty1 = DataTy v1Uid []
@@ -142,69 +147,69 @@ unitTests = testGroup "typechecking"
       in checkTest "DATA (args)" tables emptyTypingEnv tm expectedTy
     ]
 
-    , testGroup "check case"
-      [ let abcdUid = parserOnlyMakeUid "abcd"
-            abcdTy = DataTy abcdUid []
-            abcdVal = DataTm abcdUid 0 []
-            otherUid = parserOnlyMakeUid "123424321432"
-            val = DataTm otherUid 1 [abcdVal, abcdVal]
-            Just tm = closed $ substitute "val" val $
-              [tmExp|
-                case val of
-                  123424321432
-                    | x y z -> x
-                    | y z -> z
-              |]
-            -- Just (dataTys, _) = [declarations|
-            --     data =
-            --       |
-            --     data =
-            --       |
-            --   |]
-            tables = exampleTables & _1 .~ uIdMapFromList
-              [ (abcdUid, [[]])
-              , (otherUid,
-                [ [abcdTy, abcdTy, abcdTy]
-                , [abcdTy, abcdTy]
-                ])
-              ]
-            expectedTy = abcdTy
-            env = TypingEnv
-              [
-              ]
-        in checkTest "CASE" tables env tm expectedTy
-      ]
+    -- , testGroup "check case"
+    --   [ let abcdUid = mockCid "abcd"
+    --         abcdTy = DataTy abcdUid []
+    --         abcdVal = DataTm abcdUid 0 []
+    --         otherUid = mockCid "123424321432"
+    --         val = DataTm otherUid 1 [abcdVal, abcdVal]
+    --         Just tm = closed $ substitute "val" val $
+    --           [tmExp|
+    --             case val of
+    --               123424321432
+    --                 | x y z -> x
+    --                 | y z -> z
+    --           |]
+    --         -- Just (dataTys, _) = [declarations|
+    --         --     data =
+    --         --       |
+    --         --     data =
+    --         --       |
+    --         --   |]
+    --         tables = exampleTables & _1 .~ uIdMapFromList
+    --           [ (abcdUid, [[]])
+    --           , (otherUid,
+    --             [ [abcdTy, abcdTy, abcdTy]
+    --             , [abcdTy, abcdTy]
+    --             ])
+    --           ]
+    --         expectedTy = abcdTy
+    --         env = TypingEnv
+    --           [
+    --           ]
+    --     in checkTest "CASE" tables env tm expectedTy
+    --   ]
 
     , testGroup "check switch"
       [ let tm = V 0
-            dataUid = mkUid @String "dataUid"
+            dataUid = mockCid "dataUid"
             dataTy = DataTy dataUid []
             expectedTy = dataTy
             env = TypingEnv [Left dataTy]
         in checkTest "SWITCH" exampleTables env tm expectedTy
       ]
 
-    , let simpleTables = _
-      in testGroup "check handle"
-        [ let tm = [tmExp|
-                handle (Abort) ([e | Abort]HaskellInt) (abort!) with
-                  Abort:
-                    | abort -> 1
-                  | k -> 2
-              |]
-              expectedTy = _
-          in checkTest "HANDLE (abort)" simpleTables env tm expectedTy
-        , let tm = [tmExp|
-                handle (adj) (peg) x with
-                  Send:
-                    | send y ->
-                  Receive:
-                    | receive ->
-                  | ->
-              |]
-              expectedTy = _
-          in checkTest "HANDLE (multi)" simpleTables env tm expectedTy
-        ]
+--     , let simpleTables = _
+--       in testGroup "check handle"
+--         [ let tm = [tmExp|
+--                 handle (Abort) ([e | Abort]HaskellInt) (abort!) with
+--                   Abort:
+--                     | abort -> 1
+--                   | k -> 2
+--               |]
+--               expectedTy = _
+--           in checkTest "HANDLE (abort)" simpleTables env tm expectedTy
+--         , let tm = [tmExp|
+--                 handle (adj) (peg) x with
+--                   Send:
+--                     | send y ->
+--                   Receive:
+--                     | receive ->
+--                   | ->
+--               |]
+--               expectedTy = _
+--           in checkTest "HANDLE (multi)" simpleTables env tm expectedTy
+--         ]
 
   ]
 

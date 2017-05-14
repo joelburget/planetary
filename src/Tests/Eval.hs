@@ -3,9 +3,8 @@
 module Tests.Eval where
 
 import Bound -- (closed, abstract)
-import Control.Distributed.Process.Serializable (Serializable)
-import Data.Dynamic
 import Data.List (elemIndex)
+import Network.IPLD as IPLD
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -24,11 +23,11 @@ stepTest
 stepTest name env tm expected = testCase name $
   runEvalM env (step tm) @?= expected
 
-mkForeign :: Serializable a => a -> (UId, Dynamic)
-mkForeign val = (mkUid val, toDyn val)
+mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
+mkForeign val = let val' = toIpld val in (valueCid val', val')
 
-mkForeignTm :: Serializable a => a -> TmI
-mkForeignTm = ForeignDataTm . mkUid
+mkForeignTm :: IsIpld a => a -> TmI
+mkForeignTm = ForeignDataTm . fst . mkForeign
 
 -- TODO: this is awfully kludgy:
 -- * uids are duplicated here and in Interplanetary.UIds

@@ -1,16 +1,29 @@
 {-# language TypeApplications #-}
 module Interplanetary.Predefined where
 
-import Control.Distributed.Process.Serializable (Serializable)
 import Control.Lens hiding ((??), op)
 import Control.Monad.Except
 import Control.Monad.State
-import Data.Dynamic
+import Network.IPLD as IPLD
 
 import Interplanetary.Eval
 import Interplanetary.Syntax
 import Interplanetary.Typecheck
 import Interplanetary.Util
+
+intId, boolId, strId, uidId, intOpsId, boolOpsId, strOpsId, uidOpsId, voidUid, unitUid, idUid, valueTyUid :: Cid
+intId = undefined -- XXX
+boolId = undefined -- XXX
+strId = undefined -- XXX
+uidId = undefined -- XXX
+intOpsId = undefined -- XXX
+boolOpsId = undefined -- XXX
+strOpsId = undefined -- XXX
+uidOpsId = undefined -- XXX
+voidUid = undefined -- XXX
+unitUid = undefined -- XXX
+idUid = undefined -- XXX
+valueTyUid = undefined -- XXX
 
 -- TODO: this is really a "haskell int"
 intTy :: ValTyI
@@ -26,7 +39,7 @@ uidTy :: ValTyI
 uidTy = DataTy uidId []
 
 -- TODO: some way to declare both implementation and type at the same time
-interfaceTable :: InterfaceTable UId Int
+interfaceTable :: InterfaceTable Cid Int
 interfaceTable = uIdMapFromList
   [ (intOpsId, EffectInterface []
     [ CommandDeclaration [intTy, intTy] intTy -- +
@@ -51,29 +64,30 @@ foreignContinuations = uIdMapFromList
   , (strOpsId, [ liftBinaryOp @String (++) ])
   ]
 
-lookupForeign :: Serializable a => UId -> ForeignM Int Int a
-lookupForeign uid = do
-  dyn <- gets (^? ix uid) >>= (?? IndexErr)
-  case fromDynamic dyn of
-    Nothing -> throwError FailedDynamicConversion
-    Just i -> pure i
+lookupForeign :: IsIpld a => Cid -> ForeignM Int Int a
+lookupForeign cid = do
+  val <- gets (^? ix cid) >>= (?? IndexErr)
+  case fromIpld val of
+    Nothing -> throwError FailedIpldConversion
+    Just i  -> pure i
 
-writeForeign :: Serializable a => a -> ForeignM Int Int UId
+writeForeign :: IsIpld a => a -> ForeignM Int Int Cid
 writeForeign a = do
-  let uid = mkUid a
-  modify (& ix uid .~ toDyn a)
-  pure uid
+  let val = toIpld a
+      cid = valueCid val
+  modify (& ix cid .~ val)
+  pure cid
 
 liftBinaryOp
-  :: Serializable s
-  => (s -> s -> s) -> (Spine UId a b -> ForeignM a b (Tm UId a b))
+  :: IsIpld s
+  => (s -> s -> s) -> (Spine Cid a b -> ForeignM a b (Tm Cid a b))
 liftBinaryOp op [ForeignDataTm uid1, ForeignDataTm uid2] = do
   i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
   ForeignDataTm <$> writeForeign i
 liftBinaryOp _ _ = throwError FailedForeignFun
 
 -- TODO: use QQ
-exampleDataTypes :: DataTypeTable UId String
+exampleDataTypes :: DataTypeTable Cid String
 exampleDataTypes = uIdMapFromList
   -- void has no constructor
   [ (voidUid, [])

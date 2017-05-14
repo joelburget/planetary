@@ -16,6 +16,7 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.HashMap.Lazy (intersectionWith)
 import Data.Monoid ((<>))
+import Network.IPLD hiding (Row)
 
 import Interplanetary.Syntax
 import Interplanetary.Util
@@ -62,11 +63,11 @@ newtype TcM uid a b = TcM
   deriving (Functor, Applicative, Monad, MonadError TcErr)
 deriving instance MonadState (TypingEnv uid a) (TcM uid a)
 deriving instance MonadReader (TypingTables uid a) (TcM uid a)
-type TcM' = TcM UId Int
+type TcM' = TcM Cid Int
 
 runTcM
-  :: TypingTables UId Int
-  -> TypingEnv UId Int
+  :: TypingTables Cid Int
+  -> TypingEnv Cid Int
   -> TcM' a
   -> Either TcErr a
 runTcM tables env (TcM action) = runReader
@@ -149,7 +150,7 @@ check m b = do
   _ <- unify a b ?? TyUnification
   pure ()
 
-instantiateAbility :: AbilityI -> TcM' (UIdMap UId [CommandDeclaration UId Int])
+instantiateAbility :: AbilityI -> TcM' (UIdMap Cid [CommandDeclaration Cid Int])
 instantiateAbility (Ability _ uidmap) = do
   iforM uidmap $ \uid tyArgs -> lookupCommands uid
     -- iforM cmds $ \row (CommandDeclaration as b) ->
@@ -161,9 +162,9 @@ instantiateWithEnv = todo "instantiateWithEnv"
 
 uidZip
   :: MonadError TcErr m
-  => UIdMap UId [a]
-  -> UIdMap UId [b]
-  -> m (UIdMap UId [(a, b)])
+  => UIdMap Cid [a]
+  -> UIdMap Cid [b]
+  -> m (UIdMap Cid [(a, b)])
 uidZip (UIdMap as) (UIdMap bs) = UIdMap <$>
   sequence (intersectionWith (strictZip ZipLengthMismatch) as bs)
 
@@ -176,19 +177,19 @@ withValTypes tys = withState'
 -- TODO: these next two functions seem the same?
 withValTypes'
   :: [ValTyI]
-  -> Scope Int (Tm UId Int) Int
+  -> Scope Int (Tm Cid Int) Int
   -> (TmI -> TcM' a)
   -> TcM' a
 withValTypes' tys scope cb =
   let body = instantiate V scope
   in withValTypes tys (cb body)
 
-openWithTypes :: [ValTyI] -> Scope Int (Tm UId Int) Int -> TcM' TmI
+openWithTypes :: [ValTyI] -> Scope Int (Tm Cid Int) Int -> TcM' TmI
 openWithTypes tys scope = withValTypes tys $
   pure $ instantiate V scope
 
 openAdjustmentHandler
-  :: Scope (Maybe Int) (Tm UId Int) Int
+  :: Scope (Maybe Int) (Tm Cid Int) Int
   -> [ValTyI]
   -> CompTyI
   -> (TmI -> TcM' a)
@@ -210,17 +211,17 @@ withPolyty pty = withState'
 --
 -- Question: should this be parametrized by type parameters / abilities? IE do
 -- we allow GADTs?
-lookupDataType :: UId -> TcM' (Vector (Vector ValTyI))
+lookupDataType :: Cid -> TcM' (Vector (Vector ValTyI))
 lookupDataType uid = asks (^? _1 . ix uid) >>= (?? FailedDataTypeLookup)
 
-lookupConstructorTy :: UId -> Row -> TcM' [ValTyI]
+lookupConstructorTy :: Cid -> Row -> TcM' [ValTyI]
 lookupConstructorTy uid row
   = asks (^? _1 . ix uid . ix row) >>= (?? FailedConstructorLookup)
 
-lookupCommands :: UId -> TcM' [CommandDeclaration UId Int]
+lookupCommands :: Cid -> TcM' [CommandDeclaration Cid Int]
 lookupCommands uid = asks (^? _2 . ix uid . commands) >>= (?? LookupCommands)
 
-lookupCommandTy :: UId -> Row -> TcM' (CommandDeclaration UId Int)
+lookupCommandTy :: Cid -> Row -> TcM' (CommandDeclaration Cid Int)
 lookupCommandTy uid row
   = asks (^? _2 . ix uid . commands . ix row) >>= (?? LookupCommandTy)
 

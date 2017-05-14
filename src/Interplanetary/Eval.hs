@@ -7,7 +7,7 @@ import Control.Lens hiding ((??))
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.Dynamic
+import Network.IPLD as IPLD hiding (Row)
 
 import Interplanetary.Syntax
 import Interplanetary.Util
@@ -18,12 +18,12 @@ data Err
   | InvariantViolation
   | Halt
   | FailedForeignFun
-  | FailedDynamicConversion
+  | FailedIpldConversion
   deriving (Eq, Show)
 
 type ForeignContinuations a b =
-  UIdMap UId [Spine UId a b -> ForeignM a b (Tm UId a b)]
-type ForeignStore a b = UIdMap UId Dynamic
+  UIdMap Cid [Spine Cid a b -> ForeignM a b (Tm Cid a b)]
+type ForeignStore a b = UIdMap Cid IPLD.Value
 
 type ForeignM a b c = ExceptT Err (State (ForeignStore a b)) c
 
@@ -70,7 +70,7 @@ step InstantiatePolyVar{} = halt
 step Annotation{}         = halt
 
 handleCommand
-  :: UId
+  :: Cid
   -> Row
   -> SpineI
   -> TmI
@@ -89,7 +89,7 @@ handleCommand uid row spine val (AdjustmentHandlers (UIdMap handlers)) = do
 
   pure (instantiate inst handler)
 
-handleForeignFun :: ForeignStore Int Int -> UId -> Row -> Spine UId Int Int -> EvalM TmI
+handleForeignFun :: ForeignStore Int Int -> Cid -> Row -> Spine Cid Int Int -> EvalM TmI
 handleForeignFun store uid row spine = do
   cont <- asks (^? _1 . ix uid . ix row) >>= (?? FailedForeignFun)
   cont spine `runForeignM` store
