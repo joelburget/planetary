@@ -13,7 +13,7 @@ runTests :: IO ()
 runTests = defaultMain tests
 
 tests :: TestTree
-tests = testGroup "frankenstein"
+tests = testGroup "planetary"
   [ Eval.unitTests
   -- , Meta.unitTests
   , Parser.unitTests

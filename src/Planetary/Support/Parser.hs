@@ -55,9 +55,9 @@ instance DeltaParsing m => TokenParsing (CoreParser Token m) where
 
 type MonadicParsing m = (TokenParsing m, IndentationParsing m, Monad m)
 
-frankensteinStyle :: MonadicParsing m => IdentifierStyle m
-frankensteinStyle = IdentifierStyle {
-    _styleName = "Frankenstein"
+planetaryStyle :: MonadicParsing m => IdentifierStyle m
+planetaryStyle = IdentifierStyle {
+    _styleName = "Planetary"
   , _styleStart = satisfy (\c -> isAlpha c || c == '_')
   , _styleLetter = satisfy (\c -> isAlphaNum c || c == '_' || c == '\'')
   , _styleReserved = HashSet.fromList
@@ -82,10 +82,10 @@ assign = symbol "="
 bang = symbol "!"
 
 reserved :: MonadicParsing m => String -> m ()
-reserved = Tok.reserve frankensteinStyle
+reserved = Tok.reserve planetaryStyle
 
 identifier :: MonadicParsing m => m String
-identifier = Tok.ident frankensteinStyle
+identifier = Tok.ident planetaryStyle
   <?> "identifier"
 
 parseUid :: MonadicParsing m => m String

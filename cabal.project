@@ -1,4 +1,4 @@
 packages:
-  ./frankenstein.cabal
+  ./planetary.cabal
   ../ipld/ipld.cabal
   ../binary-serialise-cbor/binary-serialise-cbor.cabal

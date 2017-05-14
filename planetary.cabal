@@ -1,4 +1,4 @@
-name:                frankenstein
+name:                planetary
 version:             0.1.0.0
 -- synopsis:
 -- description:
@@ -69,12 +69,12 @@ library
     -Wall
     -fwarn-tabs
 
-executable frankenstein
+executable planetary
   main-is          : Main.hs
   hs-source-dirs   : app
   build-depends    :
     base,
-    frankenstein,
+    planetary,
     lens,
     aeson,
     unordered-containers,
@@ -95,5 +95,5 @@ test-suite test
   type             : exitcode-stdio-1.0
   hs-source-dirs   : tests
   main-is          : test.hs
-  build-depends    : base, frankenstein, tasty, tasty-hunit
+  build-depends    : base, planetary, tasty, tasty-hunit
   default-language : Haskell2010
