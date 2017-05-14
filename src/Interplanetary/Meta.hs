@@ -1,7 +1,5 @@
 {-# language OverloadedStrings #-}
 {-# language PatternSynonyms #-}
-{-# language ViewPatterns #-}
-{-# language LambdaCase #-}
 module Interplanetary.Meta where
 
 -- import qualified Data.ByteString as B

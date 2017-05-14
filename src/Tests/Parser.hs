@@ -2,7 +2,6 @@
 {-# language PackageImports #-}
 {-# language PatternSynonyms #-}
 {-# language RecordWildCards #-}
-{-# language TypeApplications #-}
 module Tests.Parser where
 
 import Test.Tasty
@@ -74,17 +73,17 @@ unitTests = testGroup "parsing"
       ]
 
   -- also test effect ty, multiple instances
-  , parserTest "1 X" parseInterfaceInstance $ (oneUid', [TyArgVal (VTy"X")])
+  , parserTest "1 X" parseInterfaceInstance (oneUid', [TyArgVal (VTy"X")])
 
-  , parserTest "1 [0]" parseInterfaceInstance $ (oneUid', [
+  , parserTest "1 [0]" parseInterfaceInstance (oneUid', [
     TyArgAbility (Ability ClosedAbility mempty)
     ])
 
-  , parserTest "1 []" parseInterfaceInstance $ (oneUid', [
+  , parserTest "1 []" parseInterfaceInstance (oneUid', [
     TyArgAbility (Ability OpenAbility mempty)
     ])
 
-  , parserTest "1" parseInterfaceInstance $ (oneUid', [])
+  , parserTest "1" parseInterfaceInstance (oneUid', [])
 
   , parserTest "0" parseAbilityBody closedAbility
   , parserTest "0|1" parseAbilityBody $
@@ -149,7 +148,7 @@ unitTests = testGroup "parsing"
           ]
         compDomain = [VTy"X", SuspendedTy (CompTy [VTy"X"] (Peg emptyAbility (VTy"Y")))]
         compCodomain = Peg emptyAbility (VTy"Y")
-        polyVal = SuspendedTy (CompTy {..})
+        polyVal = SuspendedTy CompTy {..}
         polyBinders = [("X", ValTy), ("Y", ValTy)]
         pty = polytype polyBinders polyVal
         result = let_ "on" pty

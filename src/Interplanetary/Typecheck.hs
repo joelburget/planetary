@@ -151,7 +151,7 @@ check m b = do
   pure ()
 
 instantiateAbility :: AbilityI -> TcM' (UIdMap Cid [CommandDeclaration Cid Int])
-instantiateAbility (Ability _ uidmap) = do
+instantiateAbility (Ability _ uidmap) =
   iforM uidmap $ \uid tyArgs -> lookupCommands uid
     -- iforM cmds $ \row (CommandDeclaration as b) ->
     --   -- TODO should we be unifying the args and as? what's wrong here?
@@ -226,7 +226,7 @@ lookupCommandTy uid row
   = asks (^? _2 . ix uid . commands . ix row) >>= (?? LookupCommandTy)
 
 withAbility :: AbilityI -> TcM' b -> TcM' b
-withAbility ability action = local (& _3 .~ ability) action
+withAbility ability = local (& _3 .~ ability)
 
 getAmbient :: TcM' AbilityI
 getAmbient = asks (^?! _3)

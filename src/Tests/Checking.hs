@@ -6,7 +6,6 @@ module Tests.Checking where
 -- import Test.Tasty.HUnit
 
 -- import Interplanetary.Syntax
--- import Interplanetary.Examples
 
 -- idTm :: Construction''
 -- idTm = Lambda 1 (ConstructUse (Variable 0))

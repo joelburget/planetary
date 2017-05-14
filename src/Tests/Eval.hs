@@ -78,7 +78,7 @@ unitTests =
            (Right four)
          , stepTest "2 - 1" simpleEnv
            (Cut (Application [two, one]) sub)
-           (Right (one))
+           (Right one)
          , stepTest "\"hello \" <> \"world\"" simpleEnv
            (Cut (Application [hello, world]) cat)
            (Right helloWorld)

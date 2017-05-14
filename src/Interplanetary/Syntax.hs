@@ -25,7 +25,7 @@ module Interplanetary.Syntax
 import Bound
 import Control.Lens.Plated
 import Control.Lens.TH (makeLenses)
-import Control.Monad (ap)
+import Control.Monad (ap, zipWithM)
 import Data.Data
 import Data.Data.Lens
 import Data.Foldable (toList)
@@ -98,7 +98,7 @@ polytype binders body =
   let (names, kinds) = unzip binders
   in Polytype kinds (abstract (`elemIndex` names) body)
 
-data ConstructorDecl uid a = ConstructorDecl (Vector (ValTy uid a))
+newtype ConstructorDecl uid a = ConstructorDecl (Vector (ValTy uid a))
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 -- A collection of data constructor signatures (which can refer to bound type /
@@ -338,7 +338,7 @@ unifyValTys
   -> Maybe (Vector (ValTy uid a))
 unifyValTys vals1 vals2 = maybeIf
   (length vals1 == length vals2)
-  (sequence $ zipWith unify vals1 vals2)
+  (zipWithM unify vals1 vals2)
 
 instance IsUid uid => Ord1 (CompTy uid) where
   liftCompare cmp (CompTy vt1 p1) (CompTy vt2 p2) =
@@ -365,7 +365,7 @@ unifyTyArgs
   -> Maybe (Vector (TyArg uid a))
 unifyTyArgs args1 args2 = maybeIf
   (length args1 == length args2)
-  (sequence $ zipWith unify args1 args2)
+  (zipWithM unify args1 args2)
 
 instance IsUid uid => Ord1 (TyArg uid) where
   liftCompare cmp (TyArgVal valTy1) (TyArgVal valTy2)
@@ -463,7 +463,7 @@ instance (IsUid uid, Eq e) => Eq1 (Continuation uid e) where
       liftEq (liftEq eq) spine1 spine2
     (Case uid1 rows1, Case uid2 rows2) ->
       uid1 == uid2 &&
-      (liftEq (liftEq eq)) (toList rows1) (toList rows2)
+      liftEq (liftEq eq) (toList rows1) (toList rows2)
     (Handle adj1 peg1 handlers1 body1, Handle adj2 peg2 handlers2 body2) ->
       adj1 == adj2 &&
       peg1 == peg2 &&
@@ -482,7 +482,7 @@ instance (IsUid uid, Ord o) => Ord1 (Value uid o) where
       compare uid1 uid2 <> compare row1 row2
     (DataConstructor uid1 row1 app1, DataConstructor uid2 row2 app2) ->
       compare uid1 uid2 <> compare row1 row2 <> liftCompare (liftCompare cmp) app1 app2
-    (Lambda body1, Lambda body2) -> (liftCompare cmp) body1 body2
+    (Lambda body1, Lambda body2) -> liftCompare cmp body1 body2
     (ForeignFun uid1 row1, ForeignFun uid2 row2) ->
       compare uid1 uid2 <> compare row1 row2
     (x, y) -> compare (ordering x) (ordering y)
@@ -504,9 +504,9 @@ instance (IsUid uid, Ord o) => Ord1 (Continuation uid o) where
       compare adj1 adj2 <>
       compare peg1 peg2 <>
       liftCompare cmp handlers1 handlers2 <>
-      (liftCompare cmp) body1 body2
+      liftCompare cmp body1 body2
     (Let pty1 body1, Let pty2 body2) ->
-      compare pty1 pty2 <> (liftCompare cmp) body1 body2
+      compare pty1 pty2 <> liftCompare cmp body1 body2
     -- (Letrec binders1 body1, Letrec binders2 body2) ->
     --   liftCompare bindersCmp binders1 binders2 <>
     --   liftCompare cmp body1 body2

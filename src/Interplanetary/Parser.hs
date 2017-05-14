@@ -11,6 +11,7 @@ module Interplanetary.Parser where
 import Control.Applicative
 import Control.Lens (unsnoc)
 import Data.Functor (($>))
+import Data.Maybe (fromMaybe)
 
 -- TODO: be suspicious of `try`, see where it can be removed
 -- http://blog.ezyang.com/2014/05/parsec-try-a-or-b-considered-harmful/
@@ -129,9 +130,7 @@ parseTyVar = (,EffTy) <$> brackets parseEffectVar
 parseEffectVar :: MonadicParsing m => m String
 parseEffectVar = do
   mx <- optional identifier
-  return $ case mx of
-    Nothing -> "0"
-    Just x -> x
+  return $ fromMaybe "0" mx
 
 -- 0 | 0|Interfaces | e|Interfaces | Interfaces
 -- TODO: change to comma?
@@ -155,7 +154,7 @@ parseAbility :: MonadicParsing m => m (Ability String String)
 parseAbility = do
   mxs <- optional $ brackets parseAbilityBody
   traceShowM mxs
-  return $ maybe emptyAbility id mxs
+  return $ fromMaybe emptyAbility mxs
 
 liftClosed :: (Traversable f, Alternative m) => f String -> m (f Int)
 liftClosed tm = case closed tm of
@@ -285,7 +284,7 @@ parseHandle = do
         kVar <- arr
         _ <- arr
         rhs <- parseTm
-        pure $ (vars, kVar, rhs)
+        pure (vars, kVar, rhs)
 
       pure (uid, rows)
 
@@ -325,7 +324,7 @@ parseAdjustment :: MonadicParsing m => m (Adjustment String String)
 parseAdjustment = (do
   -- TODO: re parseUid: also parse name?
   let adjItem = (,) <$> parseUid <*> many parseTyArg
-  rows <- adjItem `sepBy1` (symbol "+")
+  rows <- adjItem `sepBy1` symbol "+"
   pure $ Adjustment $ uIdMapFromList rows
   ) <?> "Adjustment"
 
