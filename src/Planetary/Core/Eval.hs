@@ -1,6 +1,6 @@
 {-# language FlexibleContexts #-}
 {-# language LambdaCase #-}
-module Interplanetary.Eval where
+module Planetary.Core.Eval where
 
 import Bound
 import Control.Lens hiding ((??))
@@ -9,8 +9,8 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Network.IPLD as IPLD hiding (Row)
 
-import Interplanetary.Syntax
-import Interplanetary.Util
+import Planetary.Core.Syntax
+import Planetary.Util
 
 data Err
   = RowBound

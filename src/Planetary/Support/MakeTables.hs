@@ -3,7 +3,7 @@
 {-# language MultiParamTypeClasses #-}
 {-# language StandaloneDeriving #-}
 {-# language TypeSynonymInstances #-}
-module Interplanetary.MakeTables where
+module Planetary.Support.MakeTables where
 
 import Bound (closed)
 import Control.Lens ((&), ix, (.~), _1, _2)
@@ -11,9 +11,9 @@ import Control.Monad.Except
 import Control.Monad.State
 import Network.IPLD
 
-import Interplanetary.Syntax
-import Interplanetary.Typecheck hiding (NotClosed)
-import Interplanetary.Util ((??))
+import Planetary.Core.Syntax
+import Planetary.Core.Typecheck hiding (NotClosed)
+import Planetary.Util ((??))
 
 data TablingErr
   = UnresolvedUid

@@ -1,4 +1,4 @@
-module Interplanetary.Parser.QQ where
+module Planetary.Support.Parser.QQ where
 
 import Data.Char (isSpace)
 import Data.List (sort)
@@ -6,9 +6,9 @@ import Data.Maybe (listToMaybe)
 import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Quote
 
-import Interplanetary.MakeTables
-import Interplanetary.Parser
-import Interplanetary.Syntax
+import Planetary.Support.MakeTables
+import Planetary.Support.Parser
+import Planetary.Core.Syntax
 
 -- TODO:
 -- * data / interface declaration quoter

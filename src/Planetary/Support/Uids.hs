@@ -2,7 +2,7 @@
 {-# language OverloadedStrings #-}
 {-# language TypeApplications #-}
 -- Intentionally don't export any easy way to construct uids
-module Interplanetary.UIds
+module Planetary.Support.UIds
   ( intId
   , boolId
   , strId

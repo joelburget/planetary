@@ -6,7 +6,7 @@
 {-# language StandaloneDeriving #-}
 {-# language TypeOperators #-}
 {-# language TypeFamilies #-}
-module Interplanetary.Typecheck where
+module Planetary.Core.Typecheck where
 
 import Bound
 import Control.Lens hiding ((??), from, to)
@@ -18,8 +18,8 @@ import Data.HashMap.Lazy (intersectionWith)
 import Data.Monoid ((<>))
 import Network.IPLD hiding (Row)
 
-import Interplanetary.Syntax
-import Interplanetary.Util
+import Planetary.Core.Syntax
+import Planetary.Util
 
 data TcErr
   = DataUIdMismatch

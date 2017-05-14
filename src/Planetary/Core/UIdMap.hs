@@ -8,7 +8,7 @@
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language MultiParamTypeClasses #-}
 {-# language TypeFamilies #-}
-module Interplanetary.UIdMap where
+module Planetary.Core.UIdMap where
 
 import Control.Lens (
   FunctorWithIndex(..),
@@ -24,7 +24,7 @@ import Data.HashMap.Lazy (HashMap)
 import qualified Data.HashMap.Lazy as HashMap
 import GHC.Generics
 
-import Interplanetary.Util
+import Planetary.Util
 
 type IdMap f a =
   ( Eq (f a)

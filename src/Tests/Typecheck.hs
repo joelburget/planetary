@@ -10,9 +10,9 @@ import Network.IPLD
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Interplanetary.Parser.QQ
-import Interplanetary.Syntax
-import Interplanetary.Typecheck
+import Planetary.Core.Syntax
+import Planetary.Core.Typecheck
+import Planetary.Support.Parser.QQ
 
 checkTest
   :: String

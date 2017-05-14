@@ -8,12 +8,12 @@ import Network.IPLD as IPLD
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Interplanetary.Eval
-import Interplanetary.Parser.QQ
-import Interplanetary.Predefined
-import Interplanetary.Syntax
-import Interplanetary.UIds
-import Interplanetary.Util
+import Planetary.Core.Eval
+import Planetary.Core.Syntax
+import Planetary.Support.Parser.QQ
+import Planetary.Support.Predefined
+import Planetary.Support.UIds
+import Planetary.Util
 
 stepTest
   :: String

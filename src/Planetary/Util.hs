@@ -1,5 +1,5 @@
 {-# language Rank2Types #-}
-module Interplanetary.Util where
+module Planetary.Util where
 
 import Control.Monad.State.Strict
 import Control.Monad.Except

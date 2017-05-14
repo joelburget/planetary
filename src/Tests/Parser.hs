@@ -10,8 +10,8 @@ import Text.Trifecta hiding (expected)
 import "indentation-trifecta" Text.Trifecta.Indentation
 import Bound
 
-import Interplanetary.Syntax
-import Interplanetary.Parser
+import Planetary.Core.Syntax
+import Planetary.Support.Parser
 
 -- "(\\x -> x : Unit -> [e]Unit)"
 -- "(\\x -> x : Unit -> [o]Unit)"

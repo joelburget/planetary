@@ -16,9 +16,9 @@
 {-# language TemplateHaskell #-}
 {-# language TupleSections #-}
 {-# language TypeFamilies #-}
-module Interplanetary.Syntax
-  ( module Interplanetary.Syntax
-  , module Interplanetary.UIdMap
+module Planetary.Core.Syntax
+  ( module Planetary.Core.Syntax
+  , module Planetary.Core.UIdMap
   ) where
 
 import Bound
@@ -34,8 +34,8 @@ import Data.Monoid ((<>))
 import GHC.Generics
 import Network.IPLD hiding (Value, Row)
 
-import Interplanetary.Util
-import Interplanetary.UIdMap
+import Planetary.Core.UIdMap
+import Planetary.Util
 
 -- TODO:
 -- * Right now we use simple equality to check types but should implement

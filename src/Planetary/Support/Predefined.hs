@@ -1,16 +1,16 @@
 {-# language TypeApplications #-}
-module Interplanetary.Predefined where
+module Planetary.Support.Predefined where
 
 import Control.Lens hiding ((??), op)
 import Control.Monad.Except
 import Control.Monad.State
 import Network.IPLD as IPLD
 
-import Interplanetary.Eval
-import Interplanetary.Syntax
-import Interplanetary.Typecheck
-import Interplanetary.UIds
-import Interplanetary.Util
+import Planetary.Core.Eval
+import Planetary.Core.Syntax
+import Planetary.Core.Typecheck
+import Planetary.Support.UIds
+import Planetary.Util
 
 -- TODO: this is really a "haskell int"
 intTy :: ValTyI

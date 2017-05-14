@@ -6,7 +6,7 @@
 {-# language StandaloneDeriving #-}
 {-# language TupleSections #-}
 -- A simple Core Frank parser based on the frankjnr implementation
-module Interplanetary.Parser where
+module Planetary.Support.Parser where
 
 import Control.Applicative
 import Control.Lens (unsnoc)
@@ -26,8 +26,8 @@ import qualified Text.Parser.Token.Highlight as Hi
 import qualified Data.HashSet as HashSet
 import Bound
 
-import Interplanetary.Syntax
-import Interplanetary.Util
+import Planetary.Core.Syntax
+import Planetary.Util
 
 import Debug.Trace
 

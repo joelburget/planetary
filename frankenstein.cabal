@@ -14,26 +14,27 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:
-    Interplanetary.Eval
-    Interplanetary.Meta
-    Interplanetary.Parser
-    Interplanetary.Parser.QQ
-    Interplanetary.Predefined
-    Interplanetary.Syntax
-    Interplanetary.UIdMap
-    Interplanetary.UIds
-    Interplanetary.Typecheck
-    Interplanetary.MakeTables
-    Interplanetary.Util
+    -- core
+    Planetary.Util
+    Planetary.Core.Syntax
+    Planetary.Core.Eval
+    Planetary.Core.Typecheck
+    Planetary.Core.UIdMap
 
-    -- Interplanetary.StrNat
+    -- support
+    Planetary.Support.Parser
+    Planetary.Support.Parser.QQ
+    Planetary.Support.Predefined
+    Planetary.Support.UIds
+    Planetary.Support.MakeTables
 
+    -- test
     Tests.Eval
     Tests.Parser
     Tests.Syntax
     Tests.Typecheck
 
-    -- load last so it'll be in scope
+    -- load last so it'll be in scope (does it really work that way?)
     Tests
   -- other-extensions:
   build-depends:
