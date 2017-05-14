@@ -9,21 +9,8 @@ import Network.IPLD as IPLD
 import Interplanetary.Eval
 import Interplanetary.Syntax
 import Interplanetary.Typecheck
+import Interplanetary.UIds
 import Interplanetary.Util
-
-intId, boolId, strId, uidId, intOpsId, boolOpsId, strOpsId, uidOpsId, voidUid, unitUid, idUid, valueTyUid :: Cid
-intId = undefined -- XXX
-boolId = undefined -- XXX
-strId = undefined -- XXX
-uidId = undefined -- XXX
-intOpsId = undefined -- XXX
-boolOpsId = undefined -- XXX
-strOpsId = undefined -- XXX
-uidOpsId = undefined -- XXX
-voidUid = undefined -- XXX
-unitUid = undefined -- XXX
-idUid = undefined -- XXX
-valueTyUid = undefined -- XXX
 
 -- TODO: this is really a "haskell int"
 intTy :: ValTyI

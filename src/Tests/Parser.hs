@@ -17,10 +17,6 @@ import Interplanetary.Parser
 -- "(\\x -> x : Unit -> [o]Unit)"
 -- "unit : Unit"
 
--- TODO: Should both this and `oneUid` exist?
-oneUid' :: String
-oneUid' = "1"
-
 parserTest
   :: (Eq a, Show a)
   => String
@@ -53,7 +49,7 @@ unitTests = testGroup "parsing"
   , parserTest "123" parseUid "123"
 
   , parserTest "1 X" parseDataTy $
-    DataTy oneUid' [TyArgVal (VTy"X")]
+    DataTy "1" [TyArgVal (VTy"X")]
 
   -- also test with args
   -- Bool
@@ -73,28 +69,28 @@ unitTests = testGroup "parsing"
       ]
 
   -- also test effect ty, multiple instances
-  , parserTest "1 X" parseInterfaceInstance (oneUid', [TyArgVal (VTy"X")])
+  , parserTest "1 X" parseInterfaceInstance ("1", [TyArgVal (VTy"X")])
 
-  , parserTest "1 [0]" parseInterfaceInstance (oneUid', [
+  , parserTest "1 [0]" parseInterfaceInstance ("1", [
     TyArgAbility (Ability ClosedAbility mempty)
     ])
 
-  , parserTest "1 []" parseInterfaceInstance (oneUid', [
+  , parserTest "1 []" parseInterfaceInstance ("1", [
     TyArgAbility (Ability OpenAbility mempty)
     ])
 
-  , parserTest "1" parseInterfaceInstance (oneUid', [])
+  , parserTest "1" parseInterfaceInstance ("1", [])
 
   , parserTest "0" parseAbilityBody closedAbility
   , parserTest "0|1" parseAbilityBody $
-    Ability ClosedAbility (uIdMapFromList [(oneUid', [])])
+    Ability ClosedAbility (uIdMapFromList [("1", [])])
   , parserTest "e" parseAbilityBody emptyAbility
   , parserTest "e|1" parseAbilityBody $
-    Ability OpenAbility (uIdMapFromList [(oneUid', [])])
+    Ability OpenAbility (uIdMapFromList [("1", [])])
 
   -- TODO: parseAbility
   , parserTest "[0|1]" parseAbility $
-    Ability ClosedAbility (uIdMapFromList [(oneUid', [])])
+    Ability ClosedAbility (uIdMapFromList [("1", [])])
 
   , parserTest "[]" parseAbility emptyAbility
   , parserTest "[0]" parseAbility closedAbility
@@ -102,7 +98,7 @@ unitTests = testGroup "parsing"
   , parserTest "[] X" parsePeg $ Peg emptyAbility (VTy"X")
   , parserTest "[]X" parsePeg $ Peg emptyAbility (VTy"X")
   , parserTest "[] 1 X" parsePeg $
-    Peg emptyAbility (DataTy oneUid' [TyArgVal (VTy"X")])
+    Peg emptyAbility (DataTy "1" [TyArgVal (VTy"X")])
 
   , parserTest "X" parseCompTy $ CompTy [] (Peg emptyAbility (VTy"X"))
   , parserTest "X -> X" parseCompTy $

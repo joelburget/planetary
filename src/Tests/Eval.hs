@@ -12,6 +12,7 @@ import Interplanetary.Eval
 import Interplanetary.Parser.QQ
 import Interplanetary.Predefined
 import Interplanetary.Syntax
+import Interplanetary.UIds
 import Interplanetary.Util
 
 stepTest

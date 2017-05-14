@@ -19,7 +19,6 @@
 module Interplanetary.Syntax
   ( module Interplanetary.Syntax
   , module Interplanetary.UIdMap
-  -- , module Interplanetary.UIds
   ) where
 
 import Bound
@@ -37,7 +36,6 @@ import Network.IPLD hiding (Value, Row)
 
 import Interplanetary.Util
 import Interplanetary.UIdMap
--- import Interplanetary.UIds
 
 -- TODO:
 -- * Right now we use simple equality to check types but should implement
@@ -104,7 +102,6 @@ newtype ConstructorDecl uid a = ConstructorDecl (Vector (ValTy uid a))
 -- A collection of data constructor signatures (which can refer to bound type /
 -- effect variables).
 data DataTypeInterface uid a = DataTypeInterface
-  -- { dataTypeUId :: UId
   -- we universally quantify over some number of type variables
   { dataBinders :: Vector (a, Kind)
   -- a collection of constructors taking some arguments
