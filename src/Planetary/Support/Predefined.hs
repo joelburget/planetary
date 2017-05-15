@@ -6,9 +6,7 @@ import Control.Monad.Except
 import Control.Monad.State
 import Network.IPLD as IPLD
 
-import Planetary.Core.Eval
-import Planetary.Core.Syntax
-import Planetary.Core.Typecheck
+import Planetary.Core
 import Planetary.Support.UIds
 import Planetary.Util
 

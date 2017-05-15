@@ -8,8 +8,7 @@ import Network.IPLD as IPLD
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Planetary.Core.Eval
-import Planetary.Core.Syntax
+import Planetary.Core
 import Planetary.Support.Parser.QQ
 import Planetary.Support.Predefined
 import Planetary.Support.UIds

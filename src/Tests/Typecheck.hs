@@ -10,8 +10,7 @@ import Network.IPLD
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Planetary.Core.Syntax
-import Planetary.Core.Typecheck
+import Planetary.Core
 import Planetary.Support.Parser.QQ
 
 checkTest

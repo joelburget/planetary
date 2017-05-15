@@ -5,7 +5,7 @@ import Network.IPLD
 import Test.Tasty
 import Test.Tasty.HUnit
 
-import Planetary.Core.Syntax
+import Planetary.Core
 
 -- unitTy :: forall a. ValTy Cid a
 -- unitTy = DataTy unitId []

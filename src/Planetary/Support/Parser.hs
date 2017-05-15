@@ -26,7 +26,7 @@ import qualified Text.Parser.Token.Highlight as Hi
 import qualified Data.HashSet as HashSet
 import Bound
 
-import Planetary.Core.Syntax
+import Planetary.Core
 import Planetary.Util
 
 import Debug.Trace

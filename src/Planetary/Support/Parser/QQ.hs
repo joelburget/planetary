@@ -6,9 +6,9 @@ import Data.Maybe (listToMaybe)
 import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Quote
 
+import Planetary.Core
 import Planetary.Support.MakeTables
 import Planetary.Support.Parser
-import Planetary.Core.Syntax
 
 -- TODO:
 -- * data / interface declaration quoter

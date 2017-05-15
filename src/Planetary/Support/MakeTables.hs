@@ -11,8 +11,7 @@ import Control.Monad.Except
 import Control.Monad.State
 import Network.IPLD
 
-import Planetary.Core.Syntax
-import Planetary.Core.Typecheck hiding (NotClosed)
+import Planetary.Core hiding (NotClosed)
 import Planetary.Util ((??))
 
 data TablingErr

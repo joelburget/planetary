@@ -16,10 +16,7 @@ library
   exposed-modules:
     -- core
     Planetary.Util
-    Planetary.Core.Syntax
-    Planetary.Core.Eval
-    Planetary.Core.Typecheck
-    Planetary.Core.UIdMap
+    Planetary.Core
 
     -- support
     Planetary.Support.Parser
