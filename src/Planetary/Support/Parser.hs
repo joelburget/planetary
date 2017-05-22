@@ -218,14 +218,6 @@ parseDataOrInterfaceDecls = some
   (Left <$> parseDataDecl <|> Right <$> parseInterfaceDecl)
   <?> "Data or Interface Decls"
 
-parseApplication :: MonadicParsing m => m Use
-parseApplication =
-  let parser = do
-        fun <- Variable <$> identifier -- TODO: not sure this line is right
-        spine <- choice [some parseTmNoApp, bang $> []]
-        pure $ Cut (Application spine) fun
-  in parser <?> "Application"
-
 parseValue :: MonadicParsing m => m Value'
 parseValue = choice
   -- [ parseDataConstructor
@@ -256,6 +248,7 @@ parseHandle = do
   peg <- parens parsePeg
   target <- parseTm
   _ <- reserved "with"
+
   (handlers, fallthrough) <- localIndentation Gt $ do
     -- parse handlers
     -- TODO: many vs some?
@@ -267,7 +260,7 @@ parseHandle = do
         _ <- bar
         vars <- many identifier
         _ <- arr
-        kVar <- arr
+        kVar <- identifier
         _ <- arr
         rhs <- parseTm
         pure (vars, kVar, rhs)
@@ -290,11 +283,21 @@ parseHandle = do
 parseTm :: MonadicParsing m => m Tm'
 parseTm = (do
   tms <- some parseTmNoApp
-  case tms of
-    []       -> empty
-    [tm]     -> pure tm
-    tm:spine -> pure (Cut (Application spine) tm)
+  hasBang <- (bang $> True) <|> pure False
+  case (tms, hasBang) of
+    ([],           _) -> empty
+    ([tm],      True) -> pure (Cut (Application []) tm)
+    ([tm],     False) -> pure tm
+    (tm:spine, False) -> pure (Cut (Application spine) tm)
   ) <?> "Tm"
+
+parseApplication :: MonadicParsing m => m Use
+parseApplication =
+  let parser = do
+        fun <- Variable <$> identifier -- TODO: not sure this line is right
+        spine <- choice [some parseTmNoApp, bang $> []]
+        pure $ Cut (Application spine) fun
+  in parser <?> "Application"
 
 parseTmNoApp :: MonadicParsing m => m Tm'
 parseTmNoApp

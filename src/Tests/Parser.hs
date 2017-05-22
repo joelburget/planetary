@@ -185,10 +185,13 @@ unitTests = testGroup "parsing"
           [ "handle (i + Receive X) ([e | Abort] Y) y! with"
           , "  receive:"
           , "    | -> r -> abort!"
-          , "    | y    -> y"
+          , "  | y    -> y"
           ]
         target = Cut (Application []) (V"y")
-        adj = Adjustment (uIdMapFromList [("Receive", [TyArgVal (VariableTy"X")])])
+        adj = Adjustment (uIdMapFromList
+          [ ("i", [])
+          , ("Receive", [TyArgVal (VariableTy"X")])
+          ])
         peg = Peg (Ability OpenAbility (uIdMapFromList [("Abort", [])])) (VariableTy "Y")
         handlers =
           [ ("receive", [([], "r", Cut (Application []) (V"abort"))])
