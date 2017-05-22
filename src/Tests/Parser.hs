@@ -32,7 +32,7 @@ unitTests :: TestTree
 unitTests = testGroup "parsing"
   [ parserTest "X" identifier "X"
 
-  , parserTest "X" parseValTy' (VTy"X")
+  , parserTest "X" parseValTyNoAp (VTy"X")
 
   , parserTest "X | X Y" parseConstructors
     [ ConstructorDecl [VTy"X"]
@@ -53,41 +53,41 @@ unitTests = testGroup "parsing"
 
   -- also test with args
   -- Bool
-  , parserTest "data Bool = | " parseDataDecl $
+  , parserTest "data Bool = | " parseDataDecl
     ("Bool", DataTypeInterface []
       [ ConstructorDecl []
       , ConstructorDecl []
       ])
 
   -- TODO: also test with effect parameter
-  , parserTest "data Either X Y = X | Y" parseDataDecl $
+  , parserTest "data Either X Y = X | Y" parseDataDecl
     ("Either", DataTypeInterface [("X", ValTy), ("Y", ValTy)]
       [ ConstructorDecl [VTy"X"]
       , ConstructorDecl [VTy"Y"]
       ])
 
   -- also test effect ty, multiple instances
-  , parserTest "1 X" parseInterfaceInstance ("1", [TyArgVal (VTy"X")])
+  , parserTest "d:1 X" parseInterfaceInstance ("1", [TyArgVal (VTy"X")])
 
-  , parserTest "1 [0]" parseInterfaceInstance ("1", [
+  , parserTest "d:1 [0]" parseInterfaceInstance ("1", [
     TyArgAbility (Ability ClosedAbility mempty)
     ])
 
-  , parserTest "1 []" parseInterfaceInstance ("1", [
+  , parserTest "d:1 []" parseInterfaceInstance ("1", [
     TyArgAbility (Ability OpenAbility mempty)
     ])
 
-  , parserTest "1" parseInterfaceInstance ("1", [])
+  , parserTest "d:1" parseInterfaceInstance ("1", [])
 
   , parserTest "0" parseAbilityBody closedAbility
-  , parserTest "0|1" parseAbilityBody $
+  , parserTest "0|d:1" parseAbilityBody $
     Ability ClosedAbility (uIdMapFromList [("1", [])])
   , parserTest "e" parseAbilityBody emptyAbility
-  , parserTest "e|1" parseAbilityBody $
+  , parserTest "e|d:1" parseAbilityBody $
     Ability OpenAbility (uIdMapFromList [("1", [])])
 
   -- TODO: parseAbility
-  , parserTest "[0|1]" parseAbility $
+  , parserTest "[0|d:1]" parseAbility $
     Ability ClosedAbility (uIdMapFromList [("1", [])])
 
   , parserTest "[]" parseAbility emptyAbility
@@ -113,7 +113,7 @@ unitTests = testGroup "parsing"
 
   , parserTest "X -> X" parseCommandDecl $ CommandDeclaration [VTy"X"] (VTy"X")
 
-  , parserTest "interface Iface X Y = X -> Y | Y -> X" parseInterfaceDecl $
+  , parserTest "interface Iface X Y = X -> Y | Y -> X" parseInterfaceDecl
     ("Iface", EffectInterface [("X", ValTy), ("Y", ValTy)]
       [ CommandDeclaration [VTy"X"] (VTy"Y")
       , CommandDeclaration [VTy"Y"] (VTy"X")
@@ -182,15 +182,14 @@ unitTests = testGroup "parsing"
     in parserTest defn parseInterfaceDecl expected
 
   , let defn = unlines
-          [ "handle (i + Receive X) ([e | Abort] Y) y! with"
+          [ "handle (d:Receive X) ([e | d:Abort] Y) y! with"
           , "  receive:"
           , "    | -> r -> abort!"
           , "  | y    -> y"
           ]
         target = Cut (Application []) (V"y")
         adj = Adjustment (uIdMapFromList
-          [ ("i", [])
-          , ("Receive", [TyArgVal (VariableTy"X")])
+          [ ("Receive", [TyArgVal (VariableTy"X")])
           ])
         peg = Peg (Ability OpenAbility (uIdMapFromList [("Abort", [])])) (VariableTy "Y")
         handlers =

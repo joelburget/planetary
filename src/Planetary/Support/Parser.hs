@@ -30,6 +30,8 @@ import Bound
 import Planetary.Core
 import Planetary.Util
 
+import Debug.Trace
+
 type Tm' = Tm String String String
 type Construction = Tm'
 type Use = Tm'
@@ -57,7 +59,7 @@ type MonadicParsing m = (TokenParsing m, IndentationParsing m, Monad m)
 planetaryStyle :: MonadicParsing m => IdentifierStyle m
 planetaryStyle = IdentifierStyle {
     _styleName = "Planetary"
-  , _styleStart = satisfy (\c -> isAlpha c || c == '_')
+  , _styleStart = satisfy (\c -> isAlphaNum c || c == '_' || c == '$')
   , _styleLetter = satisfy (\c -> isAlphaNum c || c == '_' || c == '\'')
   , _styleReserved = HashSet.fromList
     [ "data"
@@ -87,23 +89,25 @@ identifier :: MonadicParsing m => m String
 identifier = Tok.ident planetaryStyle
   <?> "identifier"
 
-parseUid :: MonadicParsing m => m String
 -- TODO: get an exact count of digits
-parseUid = token (some alphaNum)
+parseUid :: MonadicParsing m => m String
+parseUid = identifier
+  -- (('$':) <$> (string "$" *> identifier) <|>
+  --  (string "d" *> symbol "%" *> some alphaNum))
   <?> "uid"
 
 parseValTy :: MonadicParsing m => m (ValTy String String)
-parseValTy = try parseDataTy <|> parseValTy' -- TODO: bad use of try
+parseValTy = parseDataTy <|> parseValTyNoAp
   <?> "Val Ty"
 
-parseValTy' :: MonadicParsing m => m (ValTy String String)
-parseValTy' = parens parseValTy
+parseValTyNoAp :: MonadicParsing m => m (ValTy String String)
+parseValTyNoAp = parens parseValTy
           <|> SuspendedTy <$> braces parseCompTy
-          <|> VariableTy <$> identifier
+          <|> VariableTy  <$> identifier
           <?> "Val Ty (not data)"
 
 parseTyArg :: MonadicParsing m => m (TyArg String String)
-parseTyArg = TyArgVal <$> parseValTy'
+parseTyArg = TyArgVal     <$> parseValTyNoAp
          <|> TyArgAbility <$> brackets parseAbilityBody
          <?> "Ty Arg"
 
@@ -111,14 +115,14 @@ parseConstructors :: MonadicParsing m => m (Vector (ConstructorDecl String Strin
 parseConstructors = sepBy parseConstructor bar <?> "Constructors"
 
 parseConstructor :: MonadicParsing m => m (ConstructorDecl String String)
-parseConstructor = ConstructorDecl <$> many parseValTy' <?> "Constructor"
+parseConstructor = ConstructorDecl <$> many parseValTyNoAp <?> "Constructor"
 
 -- Parse a potential datatype. Note it may actually be a type variable.
 parseDataTy :: MonadicParsing m => m (ValTy String String)
 parseDataTy = DataTy
   -- Since a nice surface syntax is not a primary concern we can add tokens to
   -- disambiguate and make our job here easier.
-  <$> (string "d" *> colon *> parseUid)
+  <$> (string "d" >> colon >> parseUid)
   <*> many parseTyArg
   -- <*> localIndentation Gt (many parseTyArg)
   <?> "Data Ty"
@@ -171,7 +175,9 @@ parseCompTy = CompTy
   <?> "Comp Ty"
 
 parseInterfaceInstance :: MonadicParsing m => m (String, [TyArg String String])
-parseInterfaceInstance = (,) <$> parseUid <*> many parseTyArg
+parseInterfaceInstance = (,)
+  <$> (string "d" >> colon >> parseUid )
+  <*> many parseTyArg
   <?> "Interface Instance"
 
 parseInterfaceInstances :: MonadicParsing m => m [(String, [TyArg String String])]
@@ -251,7 +257,6 @@ parseHandle = do
 
   (handlers, fallthrough) <- localIndentation Gt $ do
     -- parse handlers
-    -- TODO: many vs some?
     handlers <- many $ absoluteIndentation $ do
       uid <- parseUid
       _ <- colon
@@ -278,7 +283,7 @@ parseHandle = do
     pure (uIdMapFromList handlers, fallthrough)
 
   let cont = handle adj peg handlers fallthrough
-  pure (Cut {cont, target})
+  pure Cut {cont, target}
 
 parseTm :: MonadicParsing m => m Tm'
 parseTm = (do
@@ -311,8 +316,7 @@ parseTmNoApp
 
 parseAdjustment :: MonadicParsing m => m (Adjustment String String)
 parseAdjustment = (do
-  -- TODO: re parseUid: also parse name?
-  let adjItem = (,) <$> parseUid <*> many parseTyArg
+  let adjItem = (,) <$> (string "d" >> colon >> parseUid) <*> many parseTyArg
   rows <- adjItem `sepBy1` symbol "+"
   pure $ Adjustment $ uIdMapFromList rows
   ) <?> "Adjustment"
@@ -363,16 +367,16 @@ parseLet =
 --         return $ letrec names binderVals body
 --   in parser <?> "Letrec"
 
-parseDecl :: MonadicParsing m => m (Construction, ValTy String String)
+parseDecl :: MonadicParsing m => m (String, Construction, ValTy String String)
 parseDecl =
   let parser = do
-        -- name <- identifier
+        name <- identifier
         _ <- colon
         ty <- parseValTy -- differs from source `parseSigType`
         construction <- localIndentation Gt $ do
           _ <- assign
           parseTm
-        pure (construction, ty)
+        pure (name, construction, ty)
   in parser <?> "declaration"
 
 evalCharIndentationParserT
@@ -393,7 +397,7 @@ runParse ev p input
 
 --runCharParse = runParse evalCharIndentationParserT
 runTokenParse :: CoreParser Token Parser b -> String -> Either String b
-runTokenParse p = runParse evalTokenIndentationParserT p
+runTokenParse = runParse evalTokenIndentationParserT
 
 -- runTokenLocParse :: CoreParser Token Parser b -> String -> Either String b
 -- runTokenLocParse p =

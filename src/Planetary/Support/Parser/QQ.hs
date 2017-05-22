@@ -1,6 +1,7 @@
 module Planetary.Support.Parser.QQ where
 
 import Data.Char (isSpace)
+import Data.Generics.Aliases
 import Data.List (sort)
 import Data.Maybe (listToMaybe)
 import qualified Language.Haskell.TH as TH
@@ -11,10 +12,7 @@ import Planetary.Support.MakeTables
 import Planetary.Support.Parser
 
 -- TODO:
--- * data / interface declaration quoter
 -- * type quoter
--- * antiquotation
---   - we'd have to extend the syntax :/
 -- * location info
 
 tmExp :: QuasiQuoter
@@ -51,13 +49,10 @@ quoteTmExp str = do
   -- tm <- parseTm pos str'
   case runTokenParse parseTm str' of
     Left err -> fail ("failed to parse tm: " ++ err)
-    -- Just tm -> dataToExpQ (const Nothing `extQ` antiTmExp) tm
-    Right parsedTm -> dataToExpQ (const Nothing) parsedTm
+    Right parsedTm -> dataToExpQ (const Nothing `extQ` antiTmExp) parsedTm
 
-antiTmExp :: TmI -> Maybe (TH.Q TH.Exp)
--- antiTmExp  (AntiIntTm v)  = Just $ TH.appE  (TH.conE (TH.mkName "IntTm"))
---                                             (TH.varE (TH.mkName v))
--- antiTmExp  (AntiTm v)     = Just $ TH.varE  (TH.mkName v)
+antiTmExp :: Tm' -> Maybe (TH.Q TH.Exp)
+antiTmExp  (V ('$':name)) = Just $ pure $ TH.VarE $ TH.mkName name
 antiTmExp  _              = Nothing
 
 

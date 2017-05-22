@@ -25,6 +25,8 @@ import Control.Monad (ap, zipWithM)
 import Data.Data
 import Data.Foldable (toList)
 import Data.Functor.Classes
+import Data.Hashable (Hashable)
+import qualified Data.HashMap.Strict as HashMap
 import Data.List (elemIndex)
 import Data.Monoid ((<>))
 import GHC.Generics
@@ -138,21 +140,6 @@ data Value uid a b
   | Lambda (Scope Int (Tm uid a) b)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-pattern CommandTm :: Cid -> Row -> Tm uid a b
-pattern CommandTm uid row = Value (Command uid row)
-
-pattern ForeignData :: Cid -> Value uid a b
-pattern ForeignData uid = DataConstructor uid 0 []
-
-pattern ForeignDataTm :: Cid -> Tm uid a b
-pattern ForeignDataTm uid = Value (ForeignData uid)
-
-pattern DataTm :: Cid -> Row -> Vector (Tm uid a b) -> Tm uid a b
-pattern DataTm uid row vals = Value (DataConstructor uid row vals)
-
-pattern ForeignFunTm :: Cid -> Row -> Tm uid a b
-pattern ForeignFunTm uid row = Value (ForeignFun uid row)
-
 data Continuation uid a b
   -- use (inferred)
   = Application (Spine uid a b)
@@ -180,6 +167,33 @@ data Tm uid a b
   | Cut { cont :: Continuation uid a b, target :: Tm uid a b }
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
+-- type? newtype?
+type Spine uid a b = Vector (Tm uid a b)
+
+-- Adjustment handlers are a mapping from effect interface id to the handlers
+-- for each of that interface's constructors.
+--
+-- Encode each constructor argument (x_c) as a `Just Int` and the continuation
+-- (z_c) as `Nothing`.
+newtype AdjustmentHandlers uid a b = AdjustmentHandlers
+  (UIdMap uid (Vector (Scope (Maybe Int) (Tm uid a) b)))
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
+
+pattern CommandTm :: Cid -> Row -> Tm uid a b
+pattern CommandTm uid row = Value (Command uid row)
+
+pattern ForeignData :: Cid -> Value uid a b
+pattern ForeignData uid = DataConstructor uid 0 []
+
+pattern ForeignDataTm :: Cid -> Tm uid a b
+pattern ForeignDataTm uid = Value (ForeignData uid)
+
+pattern DataTm :: Cid -> Row -> Vector (Tm uid a b) -> Tm uid a b
+pattern DataTm uid row vals = Value (DataConstructor uid row vals)
+
+pattern ForeignFunTm :: Cid -> Row -> Tm uid a b
+pattern ForeignFunTm uid row = Value (ForeignFun uid row)
+
 pattern V :: b -> Tm uid a b
 pattern V name = Variable name
 
@@ -192,18 +206,6 @@ pattern ConstructV uId row args = Value (DataConstructor uId row args)
 pattern LambdaV :: Scope Int (Tm uid a) b -> Tm uid a b
 pattern LambdaV scope = Value (Lambda scope)
 
-
--- type? newtype?
-type Spine uid a b = Vector (Tm uid a b)
-
--- Adjustment handlers are a mapping from effect interface id to the handlers
--- for each of that interface's constructors.
---
--- Encode each constructor argument (x_c) as a `Just Int` and the continuation
--- (z_c) as `Nothing`.
-newtype AdjustmentHandlers uid a b = AdjustmentHandlers
-  (UIdMap uid (Vector (Scope (Maybe Int) (Tm uid a) b)))
-  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 -- patterns
 -- TODO: make these bidirectional
@@ -289,6 +291,21 @@ type ContinuationI       = Executable2 Continuation
 
 type AdjustmentI = Executable1 Adjustment
 type AbilityI    = Executable1 Ability
+
+-- utils:
+
+-- | abstract 0 variables
+abstract0 :: Monad f => f a -> Scope b f a
+abstract0 = abstract (error "abstract0")
+
+closeVar :: Eq a => (a, b) -> Tm uid c a -> Maybe (Tm uid c b)
+closeVar (a, b) = instantiate1 (V b) <$$> closed . abstract1 a
+
+closeVars :: (Eq a, Hashable a) => [(a, b)] -> Tm uid c a -> Maybe (Tm uid c b)
+closeVars vars =
+  let mapping = HashMap.fromList vars
+      abstractor k = HashMap.lookup k mapping
+  in instantiate V <$$> closed . abstract abstractor
 
 
 -- Instance Hell:

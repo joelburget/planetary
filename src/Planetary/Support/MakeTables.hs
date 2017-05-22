@@ -1,4 +1,3 @@
-{-# language DeriveDataTypeable #-}
 {-# language FlexibleInstances #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language LambdaCase #-}
@@ -22,9 +21,11 @@ import Network.IPLD
 import Planetary.Core hiding (NotClosed)
 import Planetary.Util
 
+import Debug.Trace
+
 data TablingErr
-  = UnresolvedUid
-  | VarLookup
+  = UnresolvedUid String
+  | VarLookup String
   | NotClosed
   deriving Show
 
@@ -62,6 +63,8 @@ makeTablesM (Left (name, ddecl):xs) = do
   (cid, ddeclI) <- convertDti ddecl
   modify (& ix name .~ Left ddeclI)
   xs' <- makeTablesM xs
+  traceM "making data table"
+  traceShowM xs'
   -- TODO: inconsistency with DataTypeTable not using DataTypeInterface
   -- `dataInterface` shouldn't be necessary
   pure (xs' & _1 . ix cid .~ dataInterface ddeclI)
@@ -69,31 +72,41 @@ makeTablesM (Right (name, iface):xs) = do
   (cid, ifaceI) <- convertEi iface
   modify (& ix name .~ Right ifaceI)
   xs' <- makeTablesM xs
+  traceM "making interface table"
   pure (xs' & _2 . ix cid .~ ifaceI)
 makeTablesM [] = pure (mempty, mempty)
 
 lookupVar :: String -> TablingM Int
 lookupVar var = do
   vars <- ask
-  elemIndex var vars ?? VarLookup
+  traceShowM vars
+  elemIndex var vars ?? VarLookup var
 
 lookupUid :: String -> TablingM Cid
 lookupUid name = do
   defns <- get
-  defn <- defns ^? ix name ?? UnresolvedUid
+  defn <- defns ^? ix name ?? UnresolvedUid name
   -- TODO: we're already calculating cids in makeTablesM -- remove duplication
   let cid = case defn of
         Left ddefn -> cidOf ddefn
         Right edefn -> cidOf edefn
   pure cid
 
-convertDti :: DataTypeInterface String String -> TablingM (Cid, DataTypeInterface Cid Int)
+--
+
+convertDti
+  :: DataTypeInterface String String
+  -> TablingM (Cid, DataTypeInterface Cid Int)
 convertDti (DataTypeInterface binders ctrs) = do
+  -- let closures = imap (\i (name, _) -> (name, i)) binders
+  -- ctrs' <- XXXwithpushedvars traverse convertCtr ctrs
   ctrs' <- traverse convertCtr ctrs
   let dti = DataTypeInterface [{- XXX -}] ctrs'
   pure (cidOf dti, dti)
 
-convertEi :: EffectInterface String String -> TablingM (Cid, EffectInterface Cid Int)
+convertEi
+  :: EffectInterface String String
+  -> TablingM (Cid, EffectInterface Cid Int)
 convertEi (EffectInterface binders commands) = do
   commands' <- traverse convertCmd commands
   let ei = EffectInterface [{- XXX -}] commands'

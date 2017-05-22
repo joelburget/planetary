@@ -10,8 +10,16 @@ import Planetary.Support.Parser.QQ
 --   * need list / vector predefined
 --   * mutual recursion :(
 
+-- TODO: vector
+
 -- dataTypeTable :: DataTypeTable Cid Int
 -- interfaceTable :: InterfaceTable Cid Int
--- (dataTypeTable, interfaceTable) = [declarations|
--- ValTy = data =
+-- ( dataTypeTable :: DataTypeTable Cid Int,
+--   interfaceTable :: InterfaceTable Cid Int) = [declarations|
+-- data Vector x =
+
+-- data ValTy uid a x =
+--   | uid (d:Vector x)
+--   | x
+--   | a
 -- |]
