@@ -22,25 +22,25 @@ data Err
   | IndexErr
   | InvariantViolation
   | Halt
-  | FailedForeignFun
+  | FailedHandlerLookup
   | FailedIpldConversion
   deriving (Eq, Show)
 
 type ForeignContinuations a b =
   UIdMap Cid [Spine Cid a b -> ForeignM a b (Tm Cid a b)]
-type ForeignStore a b = UIdMap Cid IPLD.Value
+type HandlerStore a b = UIdMap Cid IPLD.Value
 
-type ForeignM a b c = ExceptT Err (State (ForeignStore a b)) c
+-- type ForeignM a b c = ExceptT Err (State (HandlerStore a b)) c
 
 -- TODO: do this without casing?
-runForeignM :: ForeignM Int Int a -> ForeignStore Int Int -> EvalM a
+runForeignM :: ForeignM Int Int a -> HandlerStore Int Int -> EvalM a
 runForeignM action store = case runExceptT action `evalState` store  of
   Left err -> throwError err
   Right a -> pure a
 
 type CI = ContinuationI
 
-type EvalEnv = (ForeignContinuations Int Int, ForeignStore Int Int)
+type EvalEnv = (ForeignContinuations Int Int, HandlerStore Int Int)
 type EvalM = ExceptT Err (StateT (Stack CI) (Reader EvalEnv))
 
 runEvalM :: EvalEnv -> Stack CI -> EvalM TmI -> (Either Err TmI, Stack CI)
@@ -71,7 +71,7 @@ stepCut (Case _uid1 rows) (DataConstructor _uid2 rowNum args) = do
   pure (instantiate (args !!) row)
 stepCut (Application spine) (ForeignFun fUid row) = do
   store <- asks (^. _2)
-  handleForeignFun store fUid row spine
+  runHandler store fUid row spine
 stepCut (Handle _adj _peg handlers fallthrough) target = case target of
   Command uid row
     -> handleCommand uid row [] (Value target) handlers
@@ -102,8 +102,8 @@ handleCommand uid row spine val (AdjustmentHandlers (UIdMap handlers)) = do
 
   pure (instantiate inst handler)
 
-handleForeignFun
-  :: ForeignStore Int Int -> Cid -> Row -> Spine Cid Int Int -> EvalM TmI
-handleForeignFun store uid row spine = do
-  cont <- asks (^? _1 . ix uid . ix row) >>= (?? FailedForeignFun)
+runHandler
+  :: HandlerStore Int Int -> Cid -> Row -> Spine Cid Int Int -> EvalM TmI
+runHandler store uid row spine = do
+  cont <- asks (^? _1 . ix uid . ix row) >>= (?? FailedHandlerLookup)
   cont spine `runForeignM` store
