@@ -3,7 +3,7 @@
 {-# language TypeApplications #-}
 module Tests.Typecheck where
 
-import Bound (closed, substitute)
+import Bound (closed)
 import Control.Lens
 import Data.ByteString (ByteString)
 import Network.IPLD
@@ -89,7 +89,7 @@ unitTests = testGroup "typechecking"
           expected = Right $
             SuspendedTy $ CompTy [domTy] $ Peg ambient codomTy
 
-      in inferTest "COMMAND" tables emptyTypingEnv (CommandTm cmdUid 0) expected
+      in inferTest "COMMAND" tables emptyTypingEnv (CommandV cmdUid 0 []) expected
     ]
 
   , testGroup "infer app"
@@ -152,10 +152,10 @@ unitTests = testGroup "typechecking"
     --         abcdVal = DataTm abcdUid 0 []
     --         otherUid = mockCid "123424321432"
     --         val = DataTm otherUid 1 [abcdVal, abcdVal]
-    --         Just tm = closed $ substitute "val" val $
+    --         tm = -- closed $ substitute "val" val $
     --           [tmExp|
-    --             case val of
-    --               123424321432
+    --             case $val of
+    --               123424321432:
     --                 | x y z -> x
     --                 | y z -> z
     --           |]
@@ -188,27 +188,32 @@ unitTests = testGroup "typechecking"
         in checkTest "SWITCH" exampleTables env tm expectedTy
       ]
 
---     , let simpleTables = _
---       in testGroup "check handle"
---         [ let tm = [tmExp|
---                 handle (Abort) ([e | Abort]HaskellInt) (abort!) with
---                   Abort:
---                     | abort -> 1
---                   | k -> 2
---               |]
---               expectedTy = _
---           in checkTest "HANDLE (abort)" simpleTables env tm expectedTy
---         , let tm = [tmExp|
---                 handle (adj) (peg) x with
---                   Send:
---                     | send y ->
---                   Receive:
---                     | receive ->
---                   | ->
---               |]
---               expectedTy = _
---           in checkTest "HANDLE (multi)" simpleTables env tm expectedTy
---         ]
+    , let
+          -- simpleTables = _
+      in testGroup "check handle"
+        [ let _tm = [tmExp|
+                handle (<Abort>) ([e | <Abort>]HaskellInt) (abort!) with
+                  Abort:
+                    | -> abort -> 1
+                  | k -> 2
+              |]
+          in testCase "HANDLE (abort)" (pure ())
+             -- checkTest "HANDLE (abort)" exampleTables env tm' expectedTy
+
+        , let _tm = [tmExp|
+                handle (<Send X> + <Receive Y>) (peg) x with
+                  Send:
+                    -- TODO: Should we switch to the original syntax?
+                    -- <send y -> s>
+                    | y -> send -> 1
+                  Receive:
+                    -- <receive -> r>
+                    | -> receive -> 2
+                  | k -> 3
+              |]
+          in testCase "HANDLE (multi)" (pure ())
+             -- checkTest "HANDLE (multi)" simpleTables env tm expectedTy
+        ]
 
   ]
 

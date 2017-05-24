@@ -15,33 +15,39 @@ import Planetary.Core.Syntax
 import Planetary.Core.UIdMap
 import Planetary.Util
 
-import Debug.Trace
-
 data Err
   = RowBound
   | IndexErr
-  | InvariantViolation
   | Halt
   | FailedHandlerLookup
   | FailedIpldConversion
+  | FailedForeignFun
+  | CantCut CI TmI
   deriving (Eq, Show)
+
+type CI = ContinuationI
 
 type ForeignContinuations a b =
   UIdMap Cid [Spine Cid a b -> ForeignM a b (Tm Cid a b)]
 type HandlerStore a b = UIdMap Cid IPLD.Value
+type EvalEnv = (ForeignContinuations Int Int, HandlerStore Int Int)
 
--- type ForeignM a b c = ExceptT Err (State (HandlerStore a b)) c
+type ForeignM a b c = ExceptT Err (State (HandlerStore a b)) c
+
+-- Maintain a stack of continuations to resume as we evaluate the current
+-- target to a value
+type EvalM = ExceptT Err (StateT (Stack CI) (Reader EvalEnv))
 
 -- TODO: do this without casing?
-runForeignM :: ForeignM Int Int a -> HandlerStore Int Int -> EvalM a
-runForeignM action store = case runExceptT action `evalState` store  of
-  Left err -> throwError err
-  Right a -> pure a
-
-type CI = ContinuationI
-
-type EvalEnv = (ForeignContinuations Int Int, HandlerStore Int Int)
-type EvalM = ExceptT Err (StateT (Stack CI) (Reader EvalEnv))
+-- TODO: bring back runForeignM
+runHandler :: Cid -> Row -> Spine Cid Int Int -> EvalM TmI
+runHandler cid row spine = do
+  cont <- asks (^? _1 . ix cid . ix row) >>= (?? FailedHandlerLookup)
+  store <- asks (^. _2)
+  let action = cont spine
+  case runExceptT action `evalState` store of
+    Left err -> throwError err
+    Right a -> pure a
 
 runEvalM :: EvalEnv -> Stack CI -> EvalM TmI -> (Either Err TmI, Stack CI)
 runEvalM env stack action = runReader (runStateT (runExceptT action) stack) env
@@ -51,59 +57,56 @@ halt = throwError Halt
 
 step :: TmI -> EvalM TmI
 step v@(Value _) = pure v -- ?
-step Cut {cont, target} =
-  case target of
-    Value v -> stepCut cont v
-    _other -> do
-      modify (cont:)
-      pure target
+step Cut {cont, target} = stepCut cont target
+  -- case target of
+  --   Value v -> stepCut cont v
+  --   _other -> do
+  --     modify (cont:)
+  --     pure target
 step Variable{}           = halt
 step InstantiatePolyVar{} = halt
 step Annotation{}         = halt
 
-stepCut :: CI -> ValueI -> EvalM TmI
-stepCut (Application spine) (Lambda scope)
+stepCut :: CI -> TmI -> EvalM TmI
+stepCut (Application spine) (LambdaV scope)
   -- TODO: safe
   = pure $ instantiate (spine !!) scope
-stepCut (Case _uid1 rows) (DataConstructor _uid2 rowNum args) = do
+stepCut (Case _uid1 rows) (DataConstructorV _uid2 rowNum args) = do
   row <- rows ^? ix rowNum ?? IndexErr
   -- TODO: maybe we need to evaluate the args to a value first
   pure (instantiate (args !!) row)
-stepCut (Application spine) (ForeignFun fUid row) = do
-  store <- asks (^. _2)
-  runHandler store fUid row spine
-stepCut (Handle _adj _peg handlers fallthrough) target = case target of
-  Command uid row
-    -> handleCommand uid row [] (Value target) handlers
-  _target -> pure $ instantiate1 (Value target) fallthrough
-  -- Cut (Application spine) (Value (Command uid row))
-  --   -> handleCommand uid row spine target handlers
-  -- _ -> throwError InvariantViolation
-stepCut (Let _polyty body) rhs = pure $ instantiate1 (Value rhs) body
-stepCut x y = traceShowM (x, y) >> throwError InvariantViolation
+stepCut (Application spine) (ForeignFunTm fUid row) = do
+  runHandler fUid row spine
+stepCut (Handle _adj _peg handlers _) (CommandV cid row spine) =
+  handleCommand cid row spine handlers
+stepCut (Handle _adj _peg _handlers handleValue) v@Value{} =
+  pure $ instantiate1 v handleValue
+
+stepCut (Let _polyty body) rhs@Value{} = pure $ instantiate1 rhs body
+stepCut cont target = throwError (CantCut cont target)
+
+-- withHandlers :: AdjustmentHandlersI -> Scope () (Tm Cid Int) Int -> EvalM a -> EvalM a
+-- withHandlers (AdjustmentHandlers handlers) handleValue action $ do
 
 handleCommand
   :: Cid
   -> Row
   -> SpineI
-  -> TmI
+  -- -> TmI
   -> AdjustmentHandlersI
   -> EvalM TmI
-handleCommand uid row spine val (AdjustmentHandlers (UIdMap handlers)) = do
+handleCommand uid row spine (AdjustmentHandlers (UIdMap handlers)) = do
   -- look up n_c (handler)
   -- TODO this should actually just fall through not error
   handlers' <- handlers  ^? ix uid ?? IndexErr
   handler   <- handlers' ^? ix row ?? IndexErr
 
-  let inst = \case
-        -- XXX really not sure this is right
-        Nothing -> Value (Lambda (abstract Just val))
+  let instantiator = \case
+        Nothing -> LambdaV (todo "command instantiator")
         Just i -> spine !! i
+  -- \case
+  --       -- XXX really not sure this is right
+  --       Nothing -> Value (Lambda (abstract Just val))
+  --       Just i -> spine !! i
 
-  pure (instantiate inst handler)
-
-runHandler
-  :: HandlerStore Int Int -> Cid -> Row -> Spine Cid Int Int -> EvalM TmI
-runHandler store uid row spine = do
-  cont <- asks (^? _1 . ix uid . ix row) >>= (?? FailedHandlerLookup)
-  cont spine `runForeignM` store
+  pure (instantiate instantiator handler)

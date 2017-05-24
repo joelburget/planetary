@@ -137,8 +137,8 @@ unitTests =
          in stepTest "let x = false in let y = not x in not y"
               simpleEnv 3 tm (Right false)
 
-       , let
-         in stepTest ""
+       -- , let
+       --   in stepTest ""
        ]
 
 runEvalTests :: IO ()

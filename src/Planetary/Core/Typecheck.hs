@@ -88,7 +88,8 @@ infer = \case
     -- p <- lookupPolyVarTy v
     -- pure $ instantiate (polyVarInstantiator tys) p
   -- COMMAND
-  Value (Command uid row) -> do
+  -- XXX
+  Value (Command uid row spine) -> do
     CommandDeclaration from to <- lookupCommandTy uid row
     ambient <- getAmbient
     pure $ SuspendedTy (CompTy from (Peg ambient to))
@@ -139,13 +140,13 @@ check (Cut (Handle adj peg (AdjustmentHandlers handlers) fallthrough) val) ty = 
     openAdjustmentHandler handler as (CompTy [b] (Peg ambient valTy)) $ \tm ->
       check tm ty
   withValTypes [valTy] $
-    let fallthrough' = open1 fallthrough
+    let fallthrough' = succOpen fallthrough
     in check fallthrough' ty
 -- LET
 check (Cut (Let pty body) val) ty = do
   valTy <- instantiateWithEnv pty
   check val valTy
-  withPolyty pty $ check (open1 body) ty
+  withPolyty pty $ check (succOpen body) ty
 -- SWITCH
 check m b = do
   a <- infer m
@@ -153,9 +154,9 @@ check m b = do
   pure ()
 
 -- TODO: convert to `fromScope`?
--- instantiate1 :: Monad f => f a -> Scope n f a -> f a
-open1 :: Scope () (Tm Cid Int) Int -> Tm Cid Int Int
-open1 = instantiate1 (V 0) . ((+1) <$>)
+-- TODO: is the succ necessary?
+succOpen :: Scope () (Tm Cid Int) Int -> Tm Cid Int Int
+succOpen = (succ <$>) . instantiate1 (V 0)
 
 instantiateAbility :: AbilityI -> TcM' (UIdMap Cid [CommandDeclaration Cid Int])
 instantiateAbility (Ability _ uidmap) =

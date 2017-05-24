@@ -27,6 +27,7 @@ library
     Planetary.Support.MakeTables
 
     -- library
+    Planetary.Library.Frank
     Planetary.Library.HaskellForeign
     Planetary.Library.Syntax
 
@@ -61,6 +62,7 @@ library
     ipld,
     binary-serialise-cbor,
     syb,
+    monad-gen == 0.3.*,
 
     -- testing
     tasty == 0.11.*,

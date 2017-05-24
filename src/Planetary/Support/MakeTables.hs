@@ -2,26 +2,27 @@
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language LambdaCase #-}
 {-# language MultiParamTypeClasses #-}
+{-# language MultiWayIf #-}
+{-# language NamedFieldPuns #-}
 {-# language StandaloneDeriving #-}
+{-# language TypeApplications #-}
 {-# language TypeSynonymInstances #-}
+{-# language TupleSections #-}
 module Planetary.Support.MakeTables where
 
-import Bound (closed)
-import Control.Lens ((&), ix, (.~), _1, _2, (^?))
+import Bound
+import Control.Lens ((&), ix, at, (?~), _1, _2, _3, _4, (^?), (%~))
+import Control.Lens.Indexed (imap)
 import Control.Monad.Except
+import Control.Monad.Gen
 import Control.Monad.Reader
 import Control.Monad.State
--- import Data.ByteString (ByteString)
-import Data.Data (Data, Typeable)
-import Data.Generics.Aliases (mkM)
-import Data.Generics.Schemes
 import Data.List (elemIndex)
-import Network.IPLD
+import Data.Word (Word32)
+import Network.IPLD hiding (Value)
 
 import Planetary.Core hiding (NotClosed)
 import Planetary.Util
-
-import Debug.Trace
 
 data TablingErr
   = UnresolvedUid String
@@ -29,120 +30,266 @@ data TablingErr
   | NotClosed
   deriving Show
 
-type TablingState =
-  UIdMap String (Either (DataTypeInterface Cid Int) (EffectInterface Cid Int))
+type TablingState = UIdMap String Cid
+
+-- big enough?
+newtype Unique = Unique Word32
+  deriving (Enum, Eq, Show)
+type LevelIx = Int
+
+type FreeV = (Unique, LevelIx)
+
+type PartiallyConverted f = f String String FreeV
+type FullyConverted     f = f Cid    Int    FreeV
 
 newtype TablingM a = TablingM
   (ExceptT TablingErr
   (ReaderT [String]
-  (State TablingState))
+  (StateT TablingState
+  (Gen Unique)))
   a)
-  deriving (Functor, Applicative, Monad, MonadError TablingErr, MonadReader [String])
+  deriving ( Functor
+           , Applicative
+           , Monad
+           , MonadError TablingErr
+           , MonadReader [String]
+           , MonadGen Unique
+           )
 deriving instance MonadState TablingState TablingM
 
 -- For each declaration, in order:
+-- * Close the term and type levels (convert String free vars to Int)
+--   (there should be no free variables!)
 -- * Replace any names (in the uid position) to a previously defined name with
 --   the full uid
--- * Close the term and type levels (convert String free vars to Int)
 -- * Generate uid, save it for future use
-makeTables
-  :: [Either (String, DataTypeInterface String String)
-             (String, EffectInterface String String)
-     ]
-  -> Either TablingErr (DataTypeTable Cid Int, InterfaceTable Cid Int)
+--
+-- Term conversions can spawn child type conversions (at the places where terms
+-- hold types).
+makeTables :: [DeclS]
+  -> Either TablingErr
+     ( DataTypeTable Cid Int
+     , InterfaceTable Cid Int
+     , [(String, Cid)]
+     , [Executable2 TermDecl]
+     )
 makeTables xs =
   let TablingM action = makeTablesM xs
-  in evalState (runReaderT (runExceptT action) []) mempty
+  in runGen (evalStateT (runReaderT (runExceptT action) []) mempty)
 
 makeTablesM
-  :: [Either (String, DataTypeInterface String String)
-             (String, EffectInterface String String)
-     ]
-  -> TablingM (DataTypeTable Cid Int, InterfaceTable Cid Int)
-makeTablesM (Left (name, ddecl):xs) = do
+  :: [DeclS]
+  -> TablingM
+       ( DataTypeTable Cid Int
+       , InterfaceTable Cid Int
+       , [(String, Cid)]
+       , [Executable2 TermDecl]
+       )
+makeTablesM (DataDecl_ (DataDecl name ddecl):xs) = do
   (cid, ddeclI) <- convertDti ddecl
-  modify (& ix name .~ Left ddeclI)
+  modify (& at name ?~ cid)
   xs' <- makeTablesM xs
-  traceM "making data table"
-  traceShowM xs'
   -- TODO: inconsistency with DataTypeTable not using DataTypeInterface
   -- `dataInterface` shouldn't be necessary
-  pure (xs' & _1 . ix cid .~ dataInterface ddeclI)
-makeTablesM (Right (name, iface):xs) = do
+  pure $ xs' & _1 . at cid ?~ dataInterface ddeclI
+             & _3 %~ ((name, cid):)
+makeTablesM (InterfaceDecl_ (InterfaceDecl name iface):xs) = do
   (cid, ifaceI) <- convertEi iface
-  modify (& ix name .~ Right ifaceI)
+  modify (& at name ?~ cid)
   xs' <- makeTablesM xs
-  traceM "making interface table"
-  pure (xs' & _2 . ix cid .~ ifaceI)
-makeTablesM [] = pure (mempty, mempty)
+  pure $ xs' & _2 . at cid ?~ ifaceI
+             & _3 %~ ((name, cid):)
+makeTablesM (TermDecl_ (TermDecl name recTm):xs) = do
+  xs' <- makeTablesM xs
+  Just recTm' <- pure (closed recTm)
+  recTm'' <- convertTm recTm'
+  Just recTm''' <- pure (closed recTm'')
+  pure (xs' & _4 %~ ((TermDecl name recTm'''):))
+makeTablesM [] = pure (mempty, mempty, [], [])
 
 lookupVar :: String -> TablingM Int
 lookupVar var = do
   vars <- ask
-  traceShowM vars
   elemIndex var vars ?? VarLookup var
 
 lookupUid :: String -> TablingM Cid
 lookupUid name = do
   defns <- get
-  defn <- defns ^? ix name ?? UnresolvedUid name
-  -- TODO: we're already calculating cids in makeTablesM -- remove duplication
-  let cid = case defn of
-        Left ddefn -> cidOf ddefn
-        Right edefn -> cidOf edefn
-  pure cid
+  defns ^? ix name ?? UnresolvedUid name
+
+withPushedVars :: [String] -> TablingM a -> TablingM a
+withPushedVars names = local (names ++)
 
 --
 
 convertDti
   :: DataTypeInterface String String
-  -> TablingM (Cid, DataTypeInterface Cid Int)
+  -> TablingM (Cid, Executable1 DataTypeInterface)
 convertDti (DataTypeInterface binders ctrs) = do
-  -- let closures = imap (\i (name, _) -> (name, i)) binders
-  -- ctrs' <- XXXwithpushedvars traverse convertCtr ctrs
-  ctrs' <- traverse convertCtr ctrs
-  let dti = DataTypeInterface [{- XXX -}] ctrs'
+  let varNames = map fst binders
+      binders' = imap (\i (_, kind) -> (i, kind)) binders
+  ctrs' <- withPushedVars varNames $ traverse convertCtr ctrs
+  let dti = DataTypeInterface binders' ctrs'
   pure (cidOf dti, dti)
 
 convertEi
   :: EffectInterface String String
-  -> TablingM (Cid, EffectInterface Cid Int)
-convertEi (EffectInterface binders commands) = do
-  commands' <- traverse convertCmd commands
-  let ei = EffectInterface [{- XXX -}] commands'
+  -> TablingM (Cid, Executable1 EffectInterface)
+convertEi (EffectInterface binders cmds) = do
+  let varNames = map fst binders
+      binders' = imap (\i (_, kind) -> (i, kind)) binders
+  cmds' <- withPushedVars varNames $ traverse convertCmd cmds
+  let ei = EffectInterface binders' cmds'
   pure (cidOf ei, ei)
 
-convertCtr :: ConstructorDecl String String -> TablingM (ConstructorDecl Cid Int)
-convertCtr (ConstructorDecl vtys) = ConstructorDecl <$> traverse convertValTy vtys
+convertCtr
+  :: ConstructorDecl String String -> TablingM (Executable1 ConstructorDecl)
+convertCtr (ConstructorDecl vtys)
+  = ConstructorDecl <$> traverse convertValTy vtys
 
-convertValTy :: ValTy String String -> TablingM (ValTy Cid Int)
+convertValTy :: ValTy String String -> TablingM (Executable1 ValTy)
 convertValTy = \case
-  DataTy uid tyargs -> DataTy <$> lookupUid uid <*> traverse convertTyArg tyargs
-  SuspendedTy cty -> SuspendedTy <$> convertCompTy cty
-  VariableTy var -> VariableTy <$> lookupVar var
+  DataTy uid tyargs -> DataTy
+    <$> lookupUid uid
+    <*> traverse convertTyArg tyargs
+  SuspendedTy cty   -> SuspendedTy <$> convertCompTy cty
+  VariableTy var    -> VariableTy  <$> lookupVar var
 
-convertTyArg :: TyArg String String -> TablingM (TyArg Cid Int)
+convertTyArg :: TyArg String String -> TablingM (Executable1 TyArg)
 convertTyArg = \case
   TyArgVal valTy -> TyArgVal <$> convertValTy valTy
   TyArgAbility ability -> TyArgAbility <$> convertAbility ability
 
-convertCompTy :: CompTy String String -> TablingM (CompTy Cid Int)
+convertCompTy :: CompTy String String -> TablingM (Executable1 CompTy)
 convertCompTy (CompTy dom (Peg ab codom)) = CompTy
   <$> traverse convertValTy dom
   <*> (Peg
     <$> convertAbility ab
     <*> convertValTy codom)
 
-convertAbility :: Ability String String -> TablingM (Ability Cid Int)
-convertAbility (Ability init umap) = do
-  umap' <- traverse
-    (\(key, tyArg) -> (,)
-      <$> lookupUid key
-      <*> traverse convertTyArg tyArg)
-    (uIdMapToList umap)
-  pure $ Ability init $ uIdMapFromList umap'
+convertAbility :: Ability String String -> TablingM (Executable1 Ability)
+convertAbility (Ability initAb umap)
+  = Ability initAb <$> convertUidMap convertTyArg umap
 
-convertCmd :: CommandDeclaration String String -> TablingM (CommandDeclaration Cid Int)
+convertCmd
+  :: CommandDeclaration String String
+  -> TablingM (Executable1 CommandDeclaration)
 convertCmd (CommandDeclaration dom codom) = CommandDeclaration
   <$> traverse convertValTy dom
   <*> convertValTy codom
+
+convertTm :: PartiallyConverted Tm -> TablingM (FullyConverted Tm)
+convertTm = \case
+  Variable v -> pure (Variable v)
+  InstantiatePolyVar tyVar tyArgs -> InstantiatePolyVar tyVar
+    <$> mapM convertTyArg tyArgs
+  Annotation val valTy -> Annotation
+    <$> convertValue val
+    <*> convertValTy valTy
+  Value val -> Value <$> convertValue val
+  Cut { cont, target } -> Cut <$> convertContinuation cont <*> convertTm target
+  Letrec defns body ->
+        -- we have to be careful here -- the variables the polytype binds also
+        -- scope over the term
+    let convertPolyty (pty, val) = do
+          let names = case pty of
+                Polytype binders _body -> fst <$> binders
+          pty' <- withPushedVars names (convertPolytype pty)
+          val' <- withPushedVars names (convertValue val)
+          pure (pty', val')
+    in Letrec <$> mapM convertPolyty defns <*> convertIntScope body
+
+convertValue :: PartiallyConverted Value -> TablingM (FullyConverted Value)
+convertValue = \case
+  Command cid row spine -> Command
+    <$> lookupUid cid
+    <*> pure row
+    <*> mapM convertTm spine
+  ForeignFun cid row -> ForeignFun <$> lookupUid cid <*> pure row
+  DataConstructor cid row spine -> DataConstructor
+    <$> lookupUid cid
+    <*> pure row
+    <*> mapM convertTm spine
+  Lambda scope -> Lambda <$> convertIntScope scope
+
+convertAdjustment :: Adjustment' -> TablingM AdjustmentI
+convertAdjustment (Adjustment umap)
+  = Adjustment <$> convertUidMap convertTyArg umap
+
+convertUidMap
+  :: (a -> TablingM b) -> UIdMap String [a] -> TablingM (UIdMap Cid [b])
+convertUidMap f umap = do
+  umap' <- traverse
+    (\(key, tyArg) -> (,)
+      <$> lookupUid key
+      <*> traverse f tyArg)
+    (uIdMapToList umap)
+  pure (uIdMapFromList umap')
+
+convertHandlers
+  :: PartiallyConverted AdjustmentHandlers
+  -> TablingM (FullyConverted AdjustmentHandlers)
+convertHandlers (AdjustmentHandlers handlers) =
+  AdjustmentHandlers <$> convertUidMap convertMaybeScope handlers
+
+-- Note: this function expects its binding variables to already be pushed. See
+-- `convertTm`
+convertPolytype :: Polytype' -> TablingM PolytypeI
+convertPolytype (Polytype binders scope) = do
+  let newBinders = imap (,) (snd <$> binders)
+      names = fst <$> binders
+      ty = instantiate (VariableTy . (names !!)) scope
+  convertedTy <- convertValTy ty
+  pure $ Polytype newBinders (abstract Just convertedTy)
+
+convertContinuation
+  :: PartiallyConverted Continuation
+  -> TablingM (FullyConverted Continuation)
+convertContinuation = \case
+  Application spine -> Application <$> mapM convertTm spine
+  Case cid handlers -> Case <$> lookupUid cid <*> mapM convertIntScope handlers
+  Handle adj (Peg ab codom) handlers scope -> Handle
+    <$> convertAdjustment adj
+    <*> (Peg <$> convertAbility ab <*> convertValTy codom)
+    <*> convertHandlers handlers
+    <*> convertUnitScope scope
+  Let polyty scope ->
+    Let <$> convertPolytype polyty <*> convertUnitScope scope
+
+convertMaybeScope
+  :: Scope (Maybe Int) (Tm String String) FreeV
+  -> TablingM (Scope (Maybe Int) (Tm Cid Int) FreeV)
+convertMaybeScope scope = do
+  unique <- gen
+  let makeFree = Variable . (unique,) . \case
+        Nothing -> 0
+        Just i  -> succ i
+      tm = instantiate makeFree scope
+  convertedTm <- convertTm tm
+  let closer (unique', i) = if
+        | unique' /= unique -> Nothing
+        | i == 0            -> Just Nothing
+        | otherwise         -> Just (Just (pred i))
+  pure (abstract closer convertedTm)
+
+convertIntScope
+  :: Scope Int (Tm String String) FreeV
+  -> TablingM (Scope Int (Tm Cid Int) FreeV)
+convertIntScope scope = do
+  unique <- gen
+  let tm = instantiate (Variable . (unique,)) scope
+  convertedTm <- convertTm tm
+  let closer = (\(unique', i) -> if
+        | unique' /= unique -> Nothing
+        | otherwise         -> Just i)
+  pure (abstract closer convertedTm)
+
+convertUnitScope
+  :: Scope () (Tm String String) FreeV
+  -> TablingM (Scope () (Tm Cid Int) FreeV)
+convertUnitScope scope = do
+  unique <- gen
+  let free = Variable (unique, 0)
+      tm = instantiate1 free scope
+  convertedTm <- convertTm tm
+  pure (abstract1 (unique, 0) convertedTm)

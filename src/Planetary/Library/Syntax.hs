@@ -1,4 +1,5 @@
 {-# language QuasiQuotes #-}
+{-# language ScopedTypeVariables #-}
 module Planetary.Library.Syntax where
 
 import Network.IPLD
@@ -6,20 +7,20 @@ import Network.IPLD
 import Planetary.Core
 import Planetary.Support.Parser.QQ
 
--- Problems:
+-- Problems: (TODO)
 --   * need list / vector predefined
 --   * mutual recursion :(
 
--- TODO: vector
+dataTypeTable :: DataTypeTable Cid Int
+interfaceTable :: InterfaceTable Cid Int
+( dataTypeTable :: DataTypeTable Cid Int,
+  interfaceTable :: InterfaceTable Cid Int,
+  _,
+  _) = [declarations|
+data Vector x = -- TODO
 
--- dataTypeTable :: DataTypeTable Cid Int
--- interfaceTable :: InterfaceTable Cid Int
--- ( dataTypeTable :: DataTypeTable Cid Int,
---   interfaceTable :: InterfaceTable Cid Int) = [declarations|
--- data Vector x =
-
--- data ValTy uid a x =
---   | uid (d:Vector x)
---   | x
---   | a
--- |]
+data ValTy uid a x =
+  | uid <Vector x>
+  | x
+  | a
+|]
