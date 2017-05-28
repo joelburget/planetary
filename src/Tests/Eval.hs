@@ -4,6 +4,7 @@
 module Tests.Eval where
 
 import Prelude hiding (not)
+import Data.Text (Text)
 import Network.IPLD as IPLD
 import Test.Tasty
 import Test.Tasty.HUnit
@@ -42,9 +43,9 @@ simpleEnv =
     [ mkForeign @Int 1
     , mkForeign @Int 2
     , mkForeign @Int 4
-    , mkForeign @String "hello "
-    , mkForeign @String "world"
-    , mkForeign @String "hello world"
+    , mkForeign @Text "hello "
+    , mkForeign @Text "world"
+    , mkForeign @Text "hello world"
     ]
   )
 
@@ -58,9 +59,9 @@ unitTests =
       two = mkForeignTm @Int 2
       four = mkForeignTm @Int 4
 
-      hello = mkForeignTm @String "hello "
-      world = mkForeignTm @String "world"
-      helloWorld = mkForeignTm @String "hello world"
+      hello = mkForeignTm @Text "hello "
+      world = mkForeignTm @Text "world"
+      helloWorld = mkForeignTm @Text "hello world"
 
       add = CommandV intOpsId 0
       sub = CommandV intOpsId 1
