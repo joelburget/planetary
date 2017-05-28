@@ -3,6 +3,7 @@
 {-# language FlexibleInstances #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language NamedFieldPuns #-}
+{-# language OverloadedStrings #-}
 {-# language PackageImports #-}
 {-# language StandaloneDeriving #-}
 {-# language TupleSections #-}
@@ -267,10 +268,16 @@ parseLet =
 
 parseValue :: MonadicParsing m => m Value'
 parseValue = choice
-  -- [ parseDataConstructor
+  [ parseDataConstructor
   -- parseCommand
-  [ parseLambda
+  , parseLambda
   ]
+
+parseDataConstructor :: MonadicParsing m => m Value'
+parseDataConstructor = angles $ DataConstructor
+  <$> parseUid <* dot
+  <*> (fromIntegral <$> natural)
+  <*> many parseTm
 
 parseCase :: MonadicParsing m => m Tm'
 parseCase = do

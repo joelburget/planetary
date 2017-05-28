@@ -1,4 +1,5 @@
 {-# language PatternSynonyms #-}
+{-# language Rank2Types #-}
 {-# language ViewPatterns #-}
 module Planetary.Core.Syntax.Patterns
   ( pattern PolytypeP

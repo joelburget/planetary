@@ -1,3 +1,4 @@
+{-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
 module Tests.Eval where
