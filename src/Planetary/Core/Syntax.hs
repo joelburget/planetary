@@ -28,6 +28,7 @@ import Data.Functor.Classes
 import Data.Hashable (Hashable)
 import qualified Data.HashMap.Strict as HashMap
 import Data.Monoid ((<>))
+import Data.Text (Text)
 import GHC.Generics
 import Network.IPLD hiding (Value, Row)
 
@@ -130,7 +131,7 @@ data Value uid a b
 
   -- construction (checked)
   | DataConstructor uid Row (Vector (Tm uid a b))
-  | Lambda (Vector String) (Scope Int (Tm uid a) b)
+  | Lambda (Vector Text) (Scope Int (Tm uid a) b)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 data Continuation uid a b
@@ -138,13 +139,13 @@ data Continuation uid a b
   = Application (Spine uid a b)
 
   -- construction (checked)
-  | Case uid (Vector (Vector String, Scope Int (Tm uid a) b))
+  | Case uid (Vector (Vector Text, Scope Int (Tm uid a) b))
   | Handle
       (Adjustment uid a)
       (Peg uid a)
       (AdjustmentHandlers uid a b)
       (Scope () (Tm uid a) b)
-  | Let (Polytype uid a) String (Scope () (Tm uid a) b)
+  | Let (Polytype uid a) Text (Scope () (Tm uid a) b)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 data Tm uid a b
@@ -177,21 +178,21 @@ data Decl uid a b
   | TermDecl_      (TermDecl uid a b)
   deriving (Eq, Ord, Show, Typeable, Data, Generic)
 
-data DataDecl uid a = DataDecl String (DataTypeInterface uid a)
+data DataDecl uid a = DataDecl Text (DataTypeInterface uid a)
   deriving (Eq, Ord, Show, Typeable, Data, Generic)
 
-data InterfaceDecl uid a = InterfaceDecl String (EffectInterface uid a)
+data InterfaceDecl uid a = InterfaceDecl Text (EffectInterface uid a)
   deriving (Eq, Ord, Show, Typeable, Data, Generic)
 
 data TermDecl uid a b = TermDecl
-  String           -- ^ the term's name
-  (Tm uid a b)     -- ^ body
+  Text         -- ^ the term's name
+  (Tm uid a b) -- ^ body
   deriving (Eq, Ord, Show, Typeable, Data, Generic)
 
-type DeclS          = Decl          String String String
-type DataDeclS      = DataDecl      String String
-type InterfaceDeclS = InterfaceDecl String String
-type TermDeclS      = TermDecl      String String String
+type DeclS          = Decl          Text Text Text
+type DataDeclS      = DataDecl      Text Text
+type InterfaceDeclS = InterfaceDecl Text Text
+type TermDeclS      = TermDecl      Text Text Text
 
 -- simple abilities
 
@@ -230,20 +231,24 @@ type ConstructionI       = TmI
 
 -- raw
 
-type Raw1 f = f String String
-type Raw2 f = f String String String
+type Raw1 f = f Text Text
+type Raw2 f = f Text Text Text
 
-type Ability'    = Raw1 Ability
-type Adjustment' = Raw1 Adjustment
-type CompTy'     = Raw1 CompTy
-type Polytype'   = Raw1 Polytype
-type ValTy'      = Raw1 ValTy
+type Ability'            = Raw1 Ability
+type Adjustment'         = Raw1 Adjustment
+type CommandDeclaration' = Raw1 CommandDeclaration
+type CompTy'             = Raw1 CompTy
+type ConstructorDecl'    = Raw1 ConstructorDecl
+type Peg'                = Raw1 Peg
+type Polytype'           = Raw1 Polytype
+type TyArg'              = Raw1 TyArg
+type ValTy'              = Raw1 ValTy
 
 type Tm'                 = Raw2 Tm
 type Value'              = Raw2 Value
 type Continuation'       = Raw2 Continuation
 type AdjustmentHandlers' = Raw2 AdjustmentHandlers
-type Spine'              = Spine String String String
+type Spine'              = Spine Text Text Text
 type Construction        = Tm'
 type Use                 = Tm'
 type Cont'               = Continuation'
@@ -679,7 +684,7 @@ instance (Show uid, Show a) => Show1 (Continuation uid a) where
         showString "Let"
       . showsPrec 11 pty
       . showSpace
-      . showString name
+      . shows name
       . showSpace
       . liftShowsPrec s sl 11 body
 

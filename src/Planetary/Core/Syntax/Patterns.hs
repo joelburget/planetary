@@ -23,6 +23,7 @@ module Planetary.Core.Syntax.Patterns
 
 import Bound
 import Data.List (elemIndex)
+import Data.Text (Text)
 
 import Planetary.Core.Syntax
 import Planetary.Core.UIdMap
@@ -46,7 +47,7 @@ pattern CommandV uid row spine = Value (Command uid row spine)
 pattern ConstructV :: uid -> Row -> Vector (Tm uid a b) -> Tm uid a b
 pattern ConstructV uId row args = Value (DataConstructor uId row args)
 
-pattern LambdaV :: Vector String -> Scope Int (Tm uid a) b -> Tm uid a b
+pattern LambdaV :: Vector Text -> Scope Int (Tm uid a) b -> Tm uid a b
 pattern LambdaV binderNames scope = Value (Lambda binderNames scope)
 
 pattern DataConstructorV :: uid -> Row -> Vector (Tm uid a b) -> Tm uid a b
@@ -73,30 +74,30 @@ pattern PolytypeP :: Eq a => Vector (a, Kind) -> ValTy uid a -> Polytype uid a
 pattern PolytypeP binders body <- (unPolytype -> (binders, body)) where
   PolytypeP binders body = polytype binders body
 
-lam :: Vector String -> Tm uid a String -> Value uid a String
+lam :: Vector Text -> Tm uid a Text -> Value uid a Text
 lam vars body = Lambda vars (abstract (`elemIndex` vars) body)
 
-unlam :: Value uid a String -> (Vector String, Tm uid a String)
+unlam :: Value uid a Text -> (Vector Text, Tm uid a Text)
 unlam (Lambda binderNames scope) =
   let variables = V <$> binderNames
   in (binderNames, instantiate (variables !!) scope)
 
-pattern Lam :: Vector String -> Tm uid a String -> Value uid a String
+pattern Lam :: Vector Text -> Tm uid a Text -> Value uid a Text
 pattern Lam names tm <- (unlam -> (names, tm)) where
   Lam vars body = lam vars body
 
 case_
   :: IsUid uid
   => uid
-  -> Vector (Vector String, Tm uid a String)
-  -> Continuation uid a String
+  -> Vector (Vector Text, Tm uid a Text)
+  -> Continuation uid a Text
 case_ uid tms =
   let f (vars, tm) = (vars, abstract (`elemIndex` vars) tm)
   in Case uid (f <$> tms)
 
 uncase
-  :: Continuation uid a String
-  -> (uid, Vector (Vector String, Tm uid a String))
+  :: Continuation uid a Text
+  -> (uid, Vector (Vector Text, Tm uid a Text))
 uncase (Case uid tms) =
   -- let tms' = (\(vars, tm) -> (vars, let vars' = V <$> vars in instantiate (vars' !!) tm)) <$> tms
   let f (vars, tm) = (vars, let vars' = V <$> vars in instantiate (vars' !!) tm)
@@ -105,8 +106,8 @@ uncase (Case uid tms) =
 pattern CaseP
   :: IsUid uid
   => uid
-  -> Vector (Vector String, Tm uid a String)
-  -> Continuation uid a String
+  -> Vector (Vector Text, Tm uid a Text)
+  -> Continuation uid a Text
 pattern CaseP uid tms <- (uncase -> (uid, tms)) where
   CaseP vars body = case_ vars body
 
@@ -129,11 +130,11 @@ handle adj peg handlers (bodyVar, body) =
   in Handle adj peg handlers' body'
 
 let_
-  :: String
+  :: Text
   -> Polytype uid a
-  -> Tm uid a String
-  -> Tm uid a String
-  -> Tm uid a String
+  -> Tm uid a Text
+  -> Tm uid a Text
+  -> Tm uid a Text
 let_ name pty rhs body = Cut
   -- Dragons: `rhs` and `body` are in the opposite positions of what you'd
   -- expect because body is the continuation and rhs is the term / value we're

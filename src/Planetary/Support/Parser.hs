@@ -6,8 +6,7 @@
 {-# language PackageImports #-}
 {-# language StandaloneDeriving #-}
 {-# language TupleSections #-}
-{-# language TypeApplications #-}
--- A simple Core Frank parser based on the frankjnr implementation
+-- A simple Core Frank parser
 module Planetary.Support.Parser where
 
 import Control.Applicative
@@ -16,6 +15,8 @@ import Data.ByteString (ByteString)
 import Data.Functor (($>))
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
+import Data.Text (Text)
+import Data.Text.Encoding (encodeUtf8)
 
 -- TODO: be suspicious of `try`, see where it can be removed
 -- http://blog.ezyang.com/2014/05/parsec-try-a-or-b-considered-harmful/
@@ -71,59 +72,59 @@ planetaryStyle = IdentifierStyle {
   , _styleHighlight = Hi.Identifier
   , _styleReservedHighlight = Hi.ReservedIdentifier }
 
-arr, bar, assign, bang :: MonadicParsing m => m String
-arr    = symbol "->"
-bar    = symbol "|"
-assign = symbol "="
-bang   = symbol "!"
+arr, bar, assign, bang :: MonadicParsing m => m Text
+arr    = textSymbol "->"
+bar    = textSymbol "|"
+assign = textSymbol "="
+bang   = textSymbol "!"
 
 parens :: MonadicParsing m => m a -> m a
 parens = Tok.parens . localIndentation Any
 
-reserved :: MonadicParsing m => String -> m ()
-reserved = Tok.reserve planetaryStyle
+reserved :: MonadicParsing m => Text -> m ()
+reserved = Tok.reserveText planetaryStyle
 
-identifier :: MonadicParsing m => m String
+identifier :: MonadicParsing m => m Text
 identifier = Tok.ident planetaryStyle
   <?> "identifier"
 
 -- TODO: get an exact count of digits
-parseUid :: MonadicParsing m => m String
+parseUid :: MonadicParsing m => m Text
 parseUid = identifier
   -- (('$':) <$> (string "$" *> identifier) <|>
-  --  (string "d" *> symbol "%" *> some alphaNum))
+  --  (string "d" *> textSymbol "%" *> some alphaNum))
   <?> "uid"
 
-parseValTy :: MonadicParsing m => m (ValTy String String)
+parseValTy :: MonadicParsing m => m ValTy'
 parseValTy = parseDataTy <|> parseValTyNoAp
   <?> "Val Ty"
 
-parseValTyNoAp :: MonadicParsing m => m (ValTy String String)
+parseValTyNoAp :: MonadicParsing m => m ValTy'
 parseValTyNoAp = parens parseValTy
           <|> SuspendedTy <$> braces parseCompTy
           <|> VariableTy  <$> identifier
           <?> "Val Ty (not data)"
 
-parseTyArg :: MonadicParsing m => m (TyArg String String)
+parseTyArg :: MonadicParsing m => m TyArg'
 parseTyArg = TyArgVal     <$> parseValTyNoAp
          <|> TyArgAbility <$> brackets parseAbilityBody
          <?> "Ty Arg"
 
-parseConstructors :: MonadicParsing m => m (Vector (ConstructorDecl String String))
+parseConstructors :: MonadicParsing m => m (Vector ConstructorDecl')
 parseConstructors = sepBy parseConstructor bar <?> "Constructors"
 
-parseConstructor :: MonadicParsing m => m (ConstructorDecl String String)
+parseConstructor :: MonadicParsing m => m ConstructorDecl'
 parseConstructor = ConstructorDecl <$> many parseValTyNoAp <?> "Constructor"
 
 -- Parse a potential datatype. Note it may actually be a type variable.
-parseDataTy :: MonadicParsing m => m (ValTy String String)
+parseDataTy :: MonadicParsing m => m ValTy'
 parseDataTy = angles $ DataTy
   <$> parseUid
   <*> many parseTyArg
   -- <*> localIndentation Gt (many parseTyArg)
   <?> "Data Ty"
 
-parseTyVar :: MonadicParsing m => m (String, Kind)
+parseTyVar :: MonadicParsing m => m (Text, Kind)
 parseTyVar = (,EffTy) <$> brackets identifier
          <|> (,ValTy) <$> identifier
          <?> "Ty Var"
@@ -131,47 +132,47 @@ parseTyVar = (,EffTy) <$> brackets identifier
 -- 0 | 0|Interfaces | e|Interfaces | Interfaces
 -- TODO: change to comma?
 -- TODO: allow explicit e? `[e]`
-parseAbilityBody :: MonadicParsing m => m (Ability String String)
+parseAbilityBody :: MonadicParsing m => m Ability'
 parseAbilityBody =
   let closedAb = do
-        _ <- symbol "0"
+        _ <- textSymbol "0"
         instances <- option [] (bar *> parseInterfaceInstances)
-        return $ Ability ClosedAbility (uIdMapFromList @String instances)
+        return $ Ability ClosedAbility (uIdMapFromList instances)
       varAb = do
         var <- option "e" (try identifier)
         instances <- option [] (bar *> parseInterfaceInstances)
-        return $ Ability OpenAbility (uIdMapFromList @String instances)
+        return $ Ability OpenAbility (uIdMapFromList instances)
   in closedAb <|> varAb <?> "Ability Body"
 
-parseAbility :: MonadicParsing m => m (Ability String String)
+parseAbility :: MonadicParsing m => m Ability'
 parseAbility = do
   mxs <- optional $ brackets parseAbilityBody
   return $ fromMaybe emptyAbility mxs
 
--- liftClosed :: (Traversable f, Alternative m) => f String -> m (f Int)
+-- liftClosed :: (Traversable f, Alternative m) => f Text -> m (f Int)
 -- liftClosed tm = case closed tm of
 --   Nothing -> empty
 --   Just tm' -> pure tm'
 
-parsePeg :: MonadicParsing m => m (Peg String String)
+parsePeg :: MonadicParsing m => m Peg'
 parsePeg = Peg
   <$> parseAbility
   <*> parseValTy
   <?> "Peg"
 
-parseCompTy :: MonadicParsing m => m (CompTy String String)
+parseCompTy :: MonadicParsing m => m CompTy'
 parseCompTy = CompTy
   <$> many (try (parseValTy <* arr)) -- TODO: bad use of try
   <*> parsePeg
   <?> "Comp Ty"
 
-parseInterfaceInstance :: MonadicParsing m => m (String, [TyArg String String])
+parseInterfaceInstance :: MonadicParsing m => m (Text, [TyArg'])
 parseInterfaceInstance = angles $ (,)
   <$> parseUid
   <*> many parseTyArg
   <?> "Interface Instance"
 
-parseInterfaceInstances :: MonadicParsing m => m [(String, [TyArg String String])]
+parseInterfaceInstances :: MonadicParsing m => m [(Text, [TyArg'])]
 parseInterfaceInstances = sepBy parseInterfaceInstance comma
   <?> "Interface Instances"
 
@@ -187,13 +188,13 @@ parseDataDecl = do
 -- only value arguments and result type
 parseCommandType
   :: MonadicParsing m
-  => m (Vector (ValTy String String), ValTy String String)
+  => m (Vector ValTy', ValTy')
 parseCommandType = do
   vs <- sepBy1 parseValTy arr
   maybe empty pure (unsnoc vs)
   -- maybe empty pure . unsnoc =<< sepBy1 parseValTy arr
 
-parseCommandDecl :: MonadicParsing m => m (CommandDeclaration String String)
+parseCommandDecl :: MonadicParsing m => m CommandDeclaration'
 parseCommandDecl = uncurry CommandDeclaration <$> parseCommandType
   <?> "Command Decl"
 
@@ -320,7 +321,7 @@ parseHandle = do
       rhs <- parseTm
       pure (var, rhs)
 
-    pure (uIdMapFromList @String effectHandlers, valueHandler)
+    pure (uIdMapFromList effectHandlers, valueHandler)
 
   let cont = handle adj peg effectHandlers valueHandler
   pure Cut {cont, target}
@@ -357,19 +358,19 @@ parseTmNoApp = choice
   , Variable <$> identifier
   ] <?> "Tm (no app)"
 
-parseAdjustment :: MonadicParsing m => m (Adjustment String String)
+parseAdjustment :: MonadicParsing m => m Adjustment'
 parseAdjustment = (do
   -- Same as parseInterfaceInstance
   let adjItem = angles $ (,) <$> parseUid <*> many parseTyArg
-  rows <- adjItem `sepBy1` symbol "+"
-  pure $ Adjustment $ uIdMapFromList @String rows
+  rows <- adjItem `sepBy1` textSymbol "+"
+  pure $ Adjustment $ uIdMapFromList rows
   ) <?> "Adjustment"
 
 -- parseContinuation
 
 parseLambda :: MonadicParsing m => m Value'
 parseLambda = Lam
-  <$> (symbol "\\" *> some identifier) <*> (arr *> parseTm)
+  <$> (textSymbol "\\" *> some identifier) <*> (arr *> parseTm)
   <?> "Lambda"
 
 evalCharIndentationParserT
@@ -389,15 +390,15 @@ lowLevelRunParse
   :: (t -> IndentationState -> Parser b)
   -> t
   -> ParseLocation
-  -> String
+  -> Text
   -> Either String b
 lowLevelRunParse ev p (ParseLocation filename row col) input
  = let indA = ev p $ mkIndentationState 0 infIndentation True Ge
        delta = Directed filename row col 0 0
-   in case parseString indA delta input of
+   in case parseByteString indA delta (encodeUtf8 input) of
         Failure (ErrInfo errDoc _deltas) -> Left (show errDoc)
         Success t -> Right t
 
 runTokenParse
-  :: CoreParser Token Parser b -> ParseLocation -> String -> Either String b
+  :: CoreParser Token Parser b -> ParseLocation -> Text -> Either String b
 runTokenParse = lowLevelRunParse evalTokenIndentationParserT

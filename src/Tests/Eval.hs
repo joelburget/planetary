@@ -118,7 +118,7 @@ unitTests =
            ]
        , let ty = PolytypeP [] (DataTy boolId [])
              -- TODO: remove shadowing
-             Just tm = closeVar ("x" :: String, 0) $ let_ "x" ty false (V"x")
+             Just tm = closeVar ("x", 0) $ let_ "x" ty false (V"x")
          in stepTest "let x = false in x" simpleEnv 1 tm (Right false)
 
        , let
@@ -128,7 +128,7 @@ unitTests =
              --     let y: forall. $boolId = $not x in
              --       $not y
              -- |]
-             Just tm = closeVar ("x" :: String, 0) $
+             Just tm = closeVar ("x", 0) $
                   let_ "x" ty false $
                     let_ "y" ty (Cut not (V"x")) $
                       Cut not (V"y")

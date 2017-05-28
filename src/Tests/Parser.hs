@@ -5,6 +5,8 @@
 {-# language RecordWildCards #-}
 module Tests.Parser where
 
+import Data.Text (Text)
+import qualified Data.Text as T
 import Test.Tasty
 import Test.Tasty.HUnit
 import Text.Trifecta hiding (expected)
@@ -19,11 +21,11 @@ import Planetary.Support.Parser
 
 parserTest
   :: (Eq a, Show a)
-  => String
+  => Text
   -> CoreParser Token Parser a
   -> a
   -> TestTree
-parserTest input parser expected = testCase input $
+parserTest input parser expected = testCase (T.unpack input) $
   case runTokenParse parser testLocation input of
     Right actual -> expected @=? actual
     Left errMsg -> assertFailure errMsg
@@ -127,7 +129,7 @@ unitTests = testGroup "parsing"
   , parserTest "let Z: forall. X = W in Z" parseLet $
     let_ "Z" (PolytypeP [] (VTy"X")) (V"W") (V"Z")
 
-  , let defn = unlines
+  , let defn = T.unlines
           [ "let on : forall X Y. {X -> {X -> []Y} -> []Y} ="
           , "    \\x f -> f x in on n (\\x -> body)"
           ]
@@ -151,7 +153,7 @@ unitTests = testGroup "parsing"
         expected = Value (Lam ["x", "f"] (Cut (Application [V"x"]) (V"f")))
     in parserTest defn parseTm expected
 
-  , let defn = unlines
+  , let defn = T.unlines
           [ "case x of"
           , "  e829515d5:"
           , "    | -> y"
@@ -182,7 +184,7 @@ unitTests = testGroup "parsing"
           ]))
     in parserTest defn parseInterfaceDecl expected
 
-  , let defn = unlines
+  , let defn = T.unlines
           [ "handle (<Receive X>) ([e | <Abort>] Y) y! with"
           , "  Receive:"
           , "    | -> r -> abort!"
@@ -204,7 +206,7 @@ unitTests = testGroup "parsing"
   , parserTest "X" parseTyVar ("X", ValTy)
   , parserTest "[e]" parseTyVar ("e", EffTy)
 
-  -- , let defn = unlines
+  -- , let defn = T.unlines
   --         [
   --         ]
   --   in parserTest defn parseLetrec expected
@@ -212,7 +214,7 @@ unitTests = testGroup "parsing"
   -- TODO:
   -- * parseValue
 
-  -- , let defn = unlines
+  -- , let defn = T.unlines
   --         [ "catch : <Abort>X -> {X} -> X"
   --         , "  = \\x -> "
   --         -- , "x               _ = x"

@@ -18,6 +18,7 @@ import Control.Monad.Gen
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.List (elemIndex)
+import Data.Text (Text)
 import Data.Word (Word32)
 import Network.IPLD hiding (Value)
 
@@ -25,12 +26,12 @@ import Planetary.Core hiding (NotClosed)
 import Planetary.Util
 
 data TablingErr
-  = UnresolvedUid String
-  | VarLookup String
+  = UnresolvedUid Text
+  | VarLookup Text
   | NotClosed
   deriving Show
 
-type TablingState = UIdMap String Cid
+type TablingState = UIdMap Text Cid
 
 -- big enough?
 newtype Unique = Unique Word32
@@ -39,12 +40,12 @@ type LevelIx = Int
 
 type FreeV = (Unique, LevelIx)
 
-type PartiallyConverted f = f String String FreeV
-type FullyConverted     f = f Cid    Int    FreeV
+type PartiallyConverted f = f Text Text FreeV
+type FullyConverted     f = f Cid  Int  FreeV
 
 newtype TablingM a = TablingM
   (ExceptT TablingErr
-  (ReaderT [String]
+  (ReaderT [Text]
   (StateT TablingState
   (Gen Unique)))
   a)
@@ -52,13 +53,13 @@ newtype TablingM a = TablingM
            , Applicative
            , Monad
            , MonadError TablingErr
-           , MonadReader [String]
+           , MonadReader [Text]
            , MonadGen Unique
            )
 deriving instance MonadState TablingState TablingM
 
 -- For each declaration, in order:
--- * Close the term and type levels (convert String free vars to Int)
+-- * Close the term and type levels (convert Text free vars to Int)
 --   (there should be no free variables!)
 -- * Replace any names (in the uid position) to a previously defined name with
 --   the full uid
@@ -70,7 +71,7 @@ makeTables :: [DeclS]
   -> Either TablingErr
      ( DataTypeTable Cid Int
      , InterfaceTable Cid Int
-     , [(String, Cid)]
+     , [(Text, Cid)]
      , [Executable2 TermDecl]
      )
 makeTables xs =
@@ -82,7 +83,7 @@ makeTablesM
   -> TablingM
        ( DataTypeTable Cid Int
        , InterfaceTable Cid Int
-       , [(String, Cid)]
+       , [(Text, Cid)]
        , [Executable2 TermDecl]
        )
 makeTablesM (DataDecl_ (DataDecl name ddecl):xs) = do
@@ -107,23 +108,23 @@ makeTablesM (TermDecl_ (TermDecl name recTm):xs) = do
   pure (xs' & _4 %~ ((TermDecl name recTm'''):))
 makeTablesM [] = pure (mempty, mempty, [], [])
 
-lookupVar :: String -> TablingM Int
+lookupVar :: Text -> TablingM Int
 lookupVar var = do
   vars <- ask
   elemIndex var vars ?? VarLookup var
 
-lookupUid :: String -> TablingM Cid
+lookupUid :: Text -> TablingM Cid
 lookupUid name = do
   defns <- get
   defns ^? ix name ?? UnresolvedUid name
 
-withPushedVars :: [String] -> TablingM a -> TablingM a
+withPushedVars :: [Text] -> TablingM a -> TablingM a
 withPushedVars names = local (names ++)
 
 --
 
 convertDti
-  :: DataTypeInterface String String
+  :: DataTypeInterface Text Text
   -> TablingM (Cid, Executable1 DataTypeInterface)
 convertDti (DataTypeInterface binders ctrs) = do
   let varNames = map fst binders
@@ -133,7 +134,7 @@ convertDti (DataTypeInterface binders ctrs) = do
   pure (cidOf dti, dti)
 
 convertEi
-  :: EffectInterface String String
+  :: EffectInterface Text Text
   -> TablingM (Cid, Executable1 EffectInterface)
 convertEi (EffectInterface binders cmds) = do
   let varNames = map fst binders
@@ -143,11 +144,11 @@ convertEi (EffectInterface binders cmds) = do
   pure (cidOf ei, ei)
 
 convertCtr
-  :: ConstructorDecl String String -> TablingM (Executable1 ConstructorDecl)
+  :: ConstructorDecl Text Text -> TablingM (Executable1 ConstructorDecl)
 convertCtr (ConstructorDecl vtys)
   = ConstructorDecl <$> traverse convertValTy vtys
 
-convertValTy :: ValTy String String -> TablingM (Executable1 ValTy)
+convertValTy :: ValTy Text Text -> TablingM (Executable1 ValTy)
 convertValTy = \case
   DataTy uid tyargs -> DataTy
     <$> lookupUid uid
@@ -155,24 +156,24 @@ convertValTy = \case
   SuspendedTy cty   -> SuspendedTy <$> convertCompTy cty
   VariableTy var    -> VariableTy  <$> lookupVar var
 
-convertTyArg :: TyArg String String -> TablingM (Executable1 TyArg)
+convertTyArg :: TyArg Text Text -> TablingM (Executable1 TyArg)
 convertTyArg = \case
   TyArgVal valTy -> TyArgVal <$> convertValTy valTy
   TyArgAbility ability -> TyArgAbility <$> convertAbility ability
 
-convertCompTy :: CompTy String String -> TablingM (Executable1 CompTy)
+convertCompTy :: CompTy Text Text -> TablingM (Executable1 CompTy)
 convertCompTy (CompTy dom (Peg ab codom)) = CompTy
   <$> traverse convertValTy dom
   <*> (Peg
     <$> convertAbility ab
     <*> convertValTy codom)
 
-convertAbility :: Ability String String -> TablingM (Executable1 Ability)
+convertAbility :: Ability Text Text -> TablingM (Executable1 Ability)
 convertAbility (Ability initAb umap)
   = Ability initAb <$> convertUidMap convertTyArg umap
 
 convertCmd
-  :: CommandDeclaration String String
+  :: CommandDeclaration Text Text
   -> TablingM (Executable1 CommandDeclaration)
 convertCmd (CommandDeclaration dom codom) = CommandDeclaration
   <$> traverse convertValTy dom
@@ -216,7 +217,7 @@ convertAdjustment (Adjustment umap)
   = Adjustment <$> convertUidMap convertTyArg umap
 
 convertUidMap
-  :: (a -> TablingM b) -> UIdMap String [a] -> TablingM (UIdMap Cid [b])
+  :: (a -> TablingM b) -> UIdMap Text [a] -> TablingM (UIdMap Cid [b])
 convertUidMap f umap = do
   umap' <- traverse
     (\(key, tyArg) -> (,)
@@ -258,7 +259,7 @@ convertContinuation = \case
     Let <$> convertPolytype polyty <*> pure name <*> convertUnitScope scope
 
 convertMaybeScope
-  :: Scope (Maybe Int) (Tm String String) FreeV
+  :: Scope (Maybe Int) (Tm Text Text) FreeV
   -> TablingM (Scope (Maybe Int) (Tm Cid Int) FreeV)
 convertMaybeScope scope = do
   unique <- gen
@@ -274,7 +275,7 @@ convertMaybeScope scope = do
   pure (abstract closer convertedTm)
 
 convertIntScope
-  :: Scope Int (Tm String String) FreeV
+  :: Scope Int (Tm Text Text) FreeV
   -> TablingM (Scope Int (Tm Cid Int) FreeV)
 convertIntScope scope = do
   unique <- gen
@@ -286,7 +287,7 @@ convertIntScope scope = do
   pure (abstract closer convertedTm)
 
 convertUnitScope
-  :: Scope () (Tm String String) FreeV
+  :: Scope () (Tm Text Text) FreeV
   -> TablingM (Scope () (Tm Cid Int) FreeV)
 convertUnitScope scope = do
   unique <- gen

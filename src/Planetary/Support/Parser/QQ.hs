@@ -1,5 +1,6 @@
 {-# language LambdaCase #-}
 {-# language TemplateHaskellQuotes #-}
+{-# language ViewPatterns #-}
 module Planetary.Support.Parser.QQ where
 
 import Control.Arrow ((>>>))
@@ -10,6 +11,8 @@ import qualified Data.ByteString.Char8 as B8
 import Data.Char (isSpace)
 import Data.Generics.Aliases
 import Data.Maybe (fromMaybe)
+import Data.Text (Text)
+import qualified Data.Text as T
 import Language.Haskell.TH
   (ExpQ, DecsQ, Exp(..), Lit(..), appE, varE, litE, mkName)
 import qualified Language.Haskell.TH as TH
@@ -44,19 +47,21 @@ quoteTmExp str = do
   loc <- TH.location
   let str' = normalizeQQInput str
       pos = parseLocation loc
-  case runTokenParse parseTm pos str' of
+  case runTokenParse parseTm pos (T.pack str') of
     Left err -> fail ("failed to parse tm: " ++ err)
     Right parsedTm -> dataToExpQ
-      (const Nothing `extQ` antiTmExp `extQ` handleByteString)
+      (const Nothing `extQ` antiTmExp `extQ` handleByteString `extQ` handleText)
       parsedTm
 
 antiTmExp :: Tm' -> Maybe ExpQ
-antiTmExp  (V ('$':name)) = Just $ pure $ VarE $ mkName name
-antiTmExp  _              = Nothing
+antiTmExp  (V (T.unpack -> '$':name)) = Just $ pure $ VarE $ mkName name
+antiTmExp  _                          = Nothing
 
 antiTyExp :: ValTy' -> Maybe ExpQ
-antiTyExp  (VariableTy ('$':name)) = Just $ pure $ VarE $ mkName name
-antiTyExp  _                       = Nothing
+antiTyExp  (VariableTy (T.unpack -> '$':name))
+  = Just $ pure $ VarE $ mkName name
+antiTyExp  _
+  = Nothing
 
 declarations :: QuasiQuoter
 declarations = QuasiQuoter
@@ -72,12 +77,12 @@ quoteDeclarations str = do
   loc <- TH.location
   let str' = normalizeQQInput str
       pos = parseLocation loc
-  case runTokenParse parseDecls pos str' of
+  case runTokenParse parseDecls pos (T.pack str') of
     Left err -> fail ("failed to parse declarations: " ++ err)
     Right decls -> case makeTables decls of
       Left err -> fail ("failed to make tables: " ++ show err)
       Right tables -> dataToExpQ
-        (const Nothing `extQ` antiTmExp `extQ` handleByteString)
+        (const Nothing `extQ` antiTmExp `extQ` handleByteString `extQ` handleText)
         tables
 
 quoteDeclarationsDec :: String -> DecsQ
@@ -85,7 +90,7 @@ quoteDeclarationsDec str = do
   loc <- TH.location
   let str' = normalizeQQInput str
       pos = parseLocation loc
-  case runTokenParse parseDecls pos str' of
+  case runTokenParse parseDecls pos (T.pack str') of
     Left err -> fail ("failed to parse declarations: " ++ err)
     Right decls -> case makeTables decls of
       Left err -> fail ("failed to make tables: " ++ show err)
@@ -99,10 +104,10 @@ quoteDeclarationsDec str = do
         -- mapM thDataDecl dataTables
         -- mapM thInterfaceDecl interfaceTables
 
-thCid :: (String, Cid) -> DecsQ
+thCid :: (Text, Cid) -> DecsQ
 thCid (name, cid) = do
-  cid' <- dataToExpQ (const Nothing `extQ` handleByteString) cid
-  let name' = mkName ("cid" ++ name)
+  cid' <- dataToExpQ (const Nothing `extQ` handleByteString `extQ` handleText) cid
+  let name' = mkName ("cid" ++ T.unpack name)
 
   pure
     [ SigD name' (ConT ''Cid)
@@ -112,14 +117,14 @@ thCid (name, cid) = do
 thTmDecl :: Executable2 TermDecl -> DecsQ
 thTmDecl (TermDecl name tm) = do
   tm' <- dataToExpQ
-    (const Nothing `extQ` antiTmExp `extQ` handleByteString)
+    (const Nothing `extQ` antiTmExp `extQ` handleByteString `extQ` handleText)
     tm
-  let tmName = mkName name
+  let tmName = mkName (T.unpack name)
 
   -- TODO: antiTyExp requires ValTy' but we have a ValTyI
   -- ty' <- dataToExpQ
-  --   -- (const Nothing `extQ` antiTyExp `extQ` handleByteString)
-  --   (const Nothing `extQ` handleByteString)
+  --   -- (const Nothing `extQ` antiTyExp `extQ` handleByteString `extQ` handleText)
+  --   (const Nothing `extQ` handleByteString `extQ` handleText)
   --   ty
   -- let tyName = mkName (name ++ "Ty")
 
@@ -133,9 +138,15 @@ thTmDecl (TermDecl name tm) = do
 -- https://stackoverflow.com/questions/12788181/data-text-text-and-quasiquoting
 handleByteString :: ByteString -> Maybe ExpQ
 handleByteString x =
-    -- convert the ByteString to a string literal
-    -- and wrap it with B8.pack
-    Just $ appE (varE 'B8.pack) $ litE $ StringL $ B8.unpack x
+  -- convert the ByteString to a string literal
+  -- and wrap it with B8.pack
+  Just $ appE (varE 'B8.pack) $ litE $ StringL $ B8.unpack x
+
+handleText :: Text -> Maybe ExpQ
+handleText x =
+  -- convert the text to a string literal
+  -- and wrap it with T.pack
+  Just $ appE (varE 'T.pack) $ litE $ StringL $ T.unpack x
 
 -- Adapted from https://github.com/nikita-volkov/neat-interpolation/blob/master/library/NeatInterpolation/String.hs:
 
