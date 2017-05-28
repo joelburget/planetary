@@ -11,7 +11,7 @@
 module Planetary.Support.MakeTables where
 
 import Bound
-import Control.Lens ((&), ix, at, (?~), _1, _2, _3, _4, (^?), (%~))
+import Control.Lens ((&), ix, at, (?~), _1, _2, _3, _4, (^?), (%~), mapMOf)
 import Control.Lens.Indexed (imap)
 import Control.Monad.Except
 import Control.Monad.Gen
@@ -209,7 +209,7 @@ convertValue = \case
     <$> lookupUid cid
     <*> pure row
     <*> mapM convertTm spine
-  Lambda scope -> Lambda <$> convertIntScope scope
+  Lambda binderName scope -> Lambda binderName <$> convertIntScope scope
 
 convertAdjustment :: Adjustment' -> TablingM AdjustmentI
 convertAdjustment (Adjustment umap)
@@ -246,14 +246,16 @@ convertContinuation
   -> TablingM (FullyConverted Continuation)
 convertContinuation = \case
   Application spine -> Application <$> mapM convertTm spine
-  Case cid handlers -> Case <$> lookupUid cid <*> mapM convertIntScope handlers
+  Case cid handlers -> Case
+    <$> lookupUid cid
+    <*> mapMOf (traverse._2) convertIntScope handlers
   Handle adj (Peg ab codom) handlers scope -> Handle
     <$> convertAdjustment adj
     <*> (Peg <$> convertAbility ab <*> convertValTy codom)
     <*> convertHandlers handlers
     <*> convertUnitScope scope
-  Let polyty scope ->
-    Let <$> convertPolytype polyty <*> convertUnitScope scope
+  Let polyty name scope ->
+    Let <$> convertPolytype polyty <*> pure name <*> convertUnitScope scope
 
 convertMaybeScope
   :: Scope (Maybe Int) (Tm String String) FreeV

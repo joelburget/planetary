@@ -101,7 +101,7 @@ unitTests = testGroup "typechecking"
           ty1 = DataTy v1Uid []
           ty2 = DataTy v2Uid []
           app = Application [tm1, tm2]
-          Just f = closed $ lam @String ["x", "y"] $
+          Just f = closed $ Lam ["x", "y"] $
             DataTm dataUid 0 [V"x", V"y"]
           resultTy = DataTy dataUid [TyArgVal ty1, TyArgVal ty2]
           annF = Annotation f $ SuspendedTy $

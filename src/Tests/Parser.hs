@@ -125,7 +125,7 @@ unitTests = testGroup "parsing"
       Cut (Application [V"Z", V"Z"]) (V"Z")
 
   , parserTest "let Z: forall. X = W in Z" parseLet $
-    let_ "Z" (polytype [] (VTy"X")) (V"W") (V"Z")
+    let_ "Z" (PolytypeP [] (VTy"X")) (V"W") (V"Z")
 
   , let defn = unlines
           [ "let on : forall X Y. {X -> {X -> []Y} -> []Y} ="
@@ -135,20 +135,20 @@ unitTests = testGroup "parsing"
         compCodomain = Peg emptyAbility (VTy"Y")
         polyVal = SuspendedTy CompTy {..}
         polyBinders = [("X", ValTy), ("Y", ValTy)]
-        pty = polytype polyBinders polyVal
+        pty = PolytypeP polyBinders polyVal
         expected = let_ "on" pty
-          (Value $ lam ["x", "f"] (Cut (Application [V"x"]) (V"f")))
-          (Cut (Application [V"n", Value $ lam ["x"] (V"body")]) (V"on"))
+          (Value $ Lam ["x", "f"] (Cut (Application [V"x"]) (V"f")))
+          (Cut (Application [V"n", Value $ Lam ["x"] (V"body")]) (V"on"))
     in parserTest defn parseLet expected
 
   , let defn = "on n (\\x -> body)"
         expected = Cut
-          (Application [V"n", Value (lam ["x"] (V"body"))])
+          (Application [V"n", Value (Lam ["x"] (V"body"))])
           (V"on")
     in parserTest defn parseTm expected
 
   , let defn = "\\x f -> f x"
-        expected = Value (lam ["x", "f"] (Cut (Application [V"x"]) (V"f")))
+        expected = Value (Lam ["x", "f"] (Cut (Application [V"x"]) (V"f")))
     in parserTest defn parseTm expected
 
   , let defn = unlines
@@ -157,7 +157,7 @@ unitTests = testGroup "parsing"
           , "    | -> y"
           , "    | a b c -> z"
           ]
-        cont = case_ "e829515d5"
+        cont = CaseP "e829515d5"
           [ ([], Variable "y")
           , (["a", "b", "c"], Variable "z")
           ]

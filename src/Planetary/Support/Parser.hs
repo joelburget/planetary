@@ -247,7 +247,7 @@ parsePolyty = do
   args <- many parseTyVar
   _ <- dot
   result <- parseValTy
-  pure (polytype args result)
+  pure (PolytypeP args result)
 
 parseLet :: MonadicParsing m => m Construction
 parseLet =
@@ -286,7 +286,7 @@ parseCase = do
       rhs <- parseTm
       pure (vars, rhs)
     pure (uid, branches)
-  pure $ Cut (case_ uid branches) m
+  pure $ Cut (CaseP uid branches) m
 
 parseHandle :: MonadicParsing m => m Tm'
 parseHandle = do
@@ -368,7 +368,7 @@ parseAdjustment = (do
 -- parseContinuation
 
 parseLambda :: MonadicParsing m => m Value'
-parseLambda = lam
+parseLambda = Lam
   <$> (symbol "\\" *> some identifier) <*> (arr *> parseTm)
   <?> "Lambda"
 

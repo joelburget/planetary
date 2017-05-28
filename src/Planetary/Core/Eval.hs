@@ -12,6 +12,7 @@ import Network.IPLD hiding (Row, Value)
 import qualified Network.IPLD as IPLD
 
 import Planetary.Core.Syntax
+import Planetary.Core.Syntax.Patterns
 import Planetary.Core.UIdMap
 import Planetary.Util
 
@@ -74,17 +75,17 @@ step Annotation{}         = halt
 step Letrec{} = todo "step letrec"
 
 stepCut :: CI -> TmI -> EvalM TmI
-stepCut (Application spine) (LambdaV scope)
+stepCut (Application spine) (LambdaV _names scope)
   -- TODO: safe
   = pure $ instantiate (spine !!) scope
 stepCut (Case _uid1 rows) (DataConstructorV _uid2 rowNum args) = do
-  row <- rows ^? ix rowNum ?? IndexErr
+  (_, row) <- rows ^? ix rowNum ?? IndexErr
   -- TODO: maybe we need to evaluate the args to a value first
   pure (instantiate (args !!) row)
 stepCut (Handle _adj _peg _handlers handleValue) v@Value{} =
   pure $ instantiate1 v handleValue
 
-stepCut (Let _polyty body) rhs@Value{} = pure $ instantiate1 rhs body
+stepCut (Let _polyty _name body) rhs@Value{} = pure $ instantiate1 rhs body
 stepCut cont target = throwError (CantCut cont target)
 
 -- withHandlers :: AdjustmentHandlersI -> Scope () (Tm Cid Int) Int -> EvalM a -> EvalM a
@@ -104,7 +105,7 @@ handleCommand uid row spine (AdjustmentHandlers (UIdMap handlers)) = do
   handler   <- handlers' ^? ix row ?? IndexErr
 
   let instantiator = \case
-        Nothing -> LambdaV (todo "command instantiator")
+        Nothing -> LambdaV (todo "XXX") (todo "command instantiator")
         Just i -> spine !! i
   -- \case
   --       -- XXX really not sure this is right

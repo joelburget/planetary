@@ -19,6 +19,7 @@ library
     -- core
     Planetary.Util
     Planetary.Core
+    Planetary.Core.Syntax.Patterns
 
     -- support
     Planetary.Support.Parser

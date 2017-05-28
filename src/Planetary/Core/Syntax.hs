@@ -27,7 +27,6 @@ import Data.Foldable (toList)
 import Data.Functor.Classes
 import Data.Hashable (Hashable)
 import qualified Data.HashMap.Strict as HashMap
-import Data.List (elemIndex)
 import Data.Monoid ((<>))
 import GHC.Generics
 import Network.IPLD hiding (Value, Row)
@@ -81,12 +80,6 @@ data Polytype uid a = Polytype
   , polyVal :: Scope Int (ValTy uid) a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-polytype :: Eq a => Vector (a, Kind) -> ValTy uid a -> Polytype uid a
-polytype binders body =
-  -- let (names, _kinds) = unzip binders
-  let names = fst <$> binders
-  in Polytype binders (abstract (`elemIndex` names) body)
-
 newtype ConstructorDecl uid a = ConstructorDecl (Vector (ValTy uid a))
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
@@ -137,7 +130,7 @@ data Value uid a b
 
   -- construction (checked)
   | DataConstructor uid Row (Vector (Tm uid a b))
-  | Lambda (Scope Int (Tm uid a) b)
+  | Lambda (Vector String) (Scope Int (Tm uid a) b)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 data Continuation uid a b
@@ -145,13 +138,13 @@ data Continuation uid a b
   = Application (Spine uid a b)
 
   -- construction (checked)
-  | Case uid (Vector (Scope Int (Tm uid a) b))
+  | Case uid (Vector (Vector String, Scope Int (Tm uid a) b))
   | Handle
       (Adjustment uid a)
       (Peg uid a)
       (AdjustmentHandlers uid a b)
       (Scope () (Tm uid a) b)
-  | Let (Polytype uid a) (Scope () (Tm uid a) b)
+  | Let (Polytype uid a) String (Scope () (Tm uid a) b)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 data Tm uid a b
@@ -193,97 +186,12 @@ data InterfaceDecl uid a = InterfaceDecl String (EffectInterface uid a)
 data TermDecl uid a b = TermDecl
   String           -- ^ the term's name
   (Tm uid a b)     -- ^ body
-  -- (Polytype uid a) -- ^ type
   deriving (Eq, Ord, Show, Typeable, Data, Generic)
 
 type DeclS          = Decl          String String String
 type DataDeclS      = DataDecl      String String
 type InterfaceDeclS = InterfaceDecl String String
 type TermDeclS      = TermDecl      String String String
-
-pattern ForeignData :: uid -> Value uid a b
-pattern ForeignData uid = DataConstructor uid 0 []
-
-pattern ForeignDataTm :: uid -> Tm uid a b
-pattern ForeignDataTm uid = Value (ForeignData uid)
-
-pattern DataTm :: uid -> Row -> Vector (Tm uid a b) -> Tm uid a b
-pattern DataTm uid row vals = Value (DataConstructor uid row vals)
-
-pattern V :: b -> Tm uid a b
-pattern V name = Variable name
-
-pattern CommandV :: uid -> Row -> Spine uid a b -> Tm uid a b
-pattern CommandV uid row spine = Value (Command uid row spine)
-
-pattern ConstructV :: uid -> Row -> Vector (Tm uid a b) -> Tm uid a b
-pattern ConstructV uId row args = Value (DataConstructor uId row args)
-
-pattern LambdaV :: Scope Int (Tm uid a) b -> Tm uid a b
-pattern LambdaV scope = Value (Lambda scope)
-
-pattern DataConstructorV :: uid -> Row -> Vector (Tm uid a b) -> Tm uid a b
-pattern DataConstructorV cid row tms = Value (DataConstructor cid row tms)
-
-
--- patterns
--- TODO: make these bidirectional
-
-lam :: Eq b => Vector b -> Tm uid a b -> Value uid a b
-lam vars body = Lambda (abstract (`elemIndex` vars) body)
-
--- pattern Lam :: Vector b -> Tm uid a b -> Value uid a b
--- pattern Lam names tm <- (instantiate V ->  where
---   Lam vars body = lam vars body
-
-case_
-  :: (IsUid uid, Eq b)
-  => uid
-  -> Vector (Vector b, Tm uid a b)
-  -> Continuation uid a b
-case_ uid tms =
-  let f (vars, tm) = abstract (`elemIndex` vars) tm
-  in Case uid (f <$> tms)
-
-handle
-  :: forall uid a b.
-     Eq b
-  => Adjustment uid a
-  -> Peg uid a
-  -> UIdMap uid (Vector (Vector b, b, Tm uid a b))
-  -> (b, Tm uid a b)
-  -> Continuation uid a b
-handle adj peg handlers (bodyVar, body) =
-  let abstractor vars kVar var
-        | var == kVar = Just Nothing
-        | otherwise   = Just <$> elemIndex var vars
-      handlers' = AdjustmentHandlers $
-        (\(vars, kVar, rhs) -> abstract (abstractor vars kVar) rhs) <$$>
-        handlers
-      body' = abstract1 bodyVar body
-  in Handle adj peg handlers' body'
-
-let_ :: Eq b => b -> Polytype uid a -> Tm uid a b -> Tm uid a b -> Tm uid a b
-let_ name pty rhs body = Cut
-  -- Dragons: `rhs` and `body` are in the opposite positions of what you'd
-  -- expect because body is the continuation and rhs is the term / value we're
-  -- cutting against. `let_` matches the order they appear in the typical
-  -- syntax.
-
-  (Let pty (abstract1 name body)) -- continuation
-  rhs -- term
-
-letrec
-  :: Eq b
-  => Vector b
-  -> Vector (Polytype uid a, Value uid a b)
-  -> Tm uid a b
-  -> Tm uid a b
-letrec names binderVals body =
-  Letrec binderVals (abstract (`elemIndex` names) body)
-
-pattern VTy :: a -> ValTy uid a
-pattern VTy name = VariableTy name
 
 -- simple abilities
 
@@ -348,13 +256,13 @@ abstract0 = abstract
   (error "abstract0 being used to instantiate > 0 variables")
 
 closeVar :: Eq a => (a, b) -> Tm uid c a -> Maybe (Tm uid c b)
-closeVar (a, b) = instantiate1 (V b) <$$> closed . abstract1 a
+closeVar (a, b) = instantiate1 (Variable b) <$$> closed . abstract1 a
 
 -- closeVars :: (Eq a, Hashable a) => [(a, b)] -> Tm uid c a -> Maybe (Tm uid c b)
 -- closeVars vars =
 --   let mapping = HashMap.fromList vars
 --       abstractor k = HashMap.lookup k mapping
---   in instantiate V <$$> closed . abstract abstractor
+--   in instantiate Variable <$$> closed . abstract abstractor
 
 
 -- Instance Hell:
@@ -454,17 +362,19 @@ bindVal :: Value uid c a -> (a -> Tm uid c b) -> Value uid c b
 bindVal (Command uid row spine) f = Command uid row ((>>= f) <$> spine)
 bindVal (DataConstructor uid row tms) f =
   DataConstructor uid row ((>>= f) <$> tms)
-bindVal (Lambda body) f = Lambda (body >>>= f)
+bindVal (Lambda binderNames body) f = Lambda binderNames (body >>>= f)
 
 bindContinuation :: Continuation uid c a -> (a -> Tm uid c b) -> Continuation uid c b
 bindContinuation (Application spine) f = Application ((>>= f) <$> spine)
-bindContinuation (Case uid branches) f = Case uid ((>>>= f) <$> branches)
+bindContinuation (Case uid branches) f =
+  let bindBranch (binders, body) = (binders, body >>>= f)
+  in Case uid (bindBranch <$> branches)
 bindContinuation (Handle adj peg (AdjustmentHandlers handlers) rhs) f = Handle
   adj
   peg
   (AdjustmentHandlers ((>>>= f) <$$> handlers))
   (rhs >>>= f)
-bindContinuation (Let poly rhs) f = Let poly (rhs >>>= f)
+bindContinuation (Let poly name rhs) f = Let poly name (rhs >>>= f)
 
 instance Applicative (Tm uid a) where pure = Variable; (<*>) = ap
 instance Monad (Tm uid a) where
@@ -522,7 +432,9 @@ instance (IsUid uid, Eq e) => Eq1 (Value uid e) where
     uid1 == uid2 && row1 == row2 && liftEq (liftEq eq) spine1 spine2
   liftEq eq (DataConstructor uid1 row1 app1) (DataConstructor uid2 row2 app2) =
     uid1 == uid2 && row1 == row2 && liftEq (liftEq eq) app1 app2
-  liftEq eq (Lambda body1) (Lambda body2) = liftEq eq body1 body2
+  liftEq eq (Lambda binderNames1 body1) (Lambda binderNames2 body2) =
+    binderNames1 == binderNames2 &&
+    liftEq eq body1 body2
   liftEq _ _ _ = False
 
 instance (IsUid uid, Eq e) => Eq1 (Continuation uid e) where
@@ -530,15 +442,18 @@ instance (IsUid uid, Eq e) => Eq1 (Continuation uid e) where
     (Application spine1, Application spine2) ->
       liftEq (liftEq eq) spine1 spine2
     (Case uid1 rows1, Case uid2 rows2) ->
-      uid1 == uid2 &&
-      liftEq (liftEq eq) (toList rows1) (toList rows2)
+      let f (binders1, body1) (binders2, body2) =
+            binders1 == binders2 &&
+            liftEq eq body1 body2
+      in uid1 == uid2 &&
+         liftEq f (toList rows1) (toList rows2)
     (Handle adj1 peg1 handlers1 body1, Handle adj2 peg2 handlers2 body2) ->
       adj1 == adj2 &&
       peg1 == peg2 &&
       liftEq eq handlers1 handlers2 &&
       liftEq eq body1 body2
-    (Let pty1 body1, Let pty2 body2) ->
-      pty1 == pty2 && liftEq eq body1 body2
+    (Let pty1 name1 body1, Let pty2 name2 body2) ->
+      pty1 == pty2 && name1 == name2 && liftEq eq body1 body2
     _ -> False
 
 instance (IsUid uid, Eq e) => Eq1 (Tm uid e) where
@@ -578,10 +493,16 @@ instance IsUid uid => Ord1 (CompTy uid) where
 instance (IsUid uid, Ord o) => Ord1 (Value uid o) where
   liftCompare cmp l r = case (l, r) of
     (Command uid1 row1 spine1, Command uid2 row2 spine2) ->
-      compare uid1 uid2 <> compare row1 row2 <> liftCompare (liftCompare cmp) spine1 spine2
+      compare uid1 uid2 <>
+      compare row1 row2 <>
+      liftCompare (liftCompare cmp) spine1 spine2
     (DataConstructor uid1 row1 app1, DataConstructor uid2 row2 app2) ->
-      compare uid1 uid2 <> compare row1 row2 <> liftCompare (liftCompare cmp) app1 app2
-    (Lambda body1, Lambda body2) -> liftCompare cmp body1 body2
+      compare uid1 uid2 <>
+      compare row1 row2 <>
+      liftCompare (liftCompare cmp) app1 app2
+    (Lambda binderNames1 body1, Lambda binderNames2 body2) ->
+      compare binderNames1 binderNames2 <>
+      liftCompare cmp body1 body2
     (x, y) -> compare (ordering x) (ordering y)
 
     where ordering = \case
@@ -594,15 +515,17 @@ instance (IsUid uid, Ord o) => Ord1 (Continuation uid o) where
     (Application spine1, Application spine2) ->
       liftCompare (liftCompare cmp) spine1 spine2
     (Case uid1 rows1, Case uid2 rows2) ->
-      compare uid1 uid2 <>
-      liftCompare (liftCompare cmp) (toList rows1) (toList rows2)
+      let f (binders1, body1) (binders2, body2) =
+            compare binders1 binders2 <> liftCompare cmp body1 body2
+      in compare uid1 uid2 <>
+         liftCompare f (toList rows1) (toList rows2)
     (Handle adj1 peg1 handlers1 body1, Handle adj2 peg2 handlers2 body2) ->
       compare adj1 adj2 <>
       compare peg1 peg2 <>
       liftCompare cmp handlers1 handlers2 <>
       liftCompare cmp body1 body2
-    (Let pty1 body1, Let pty2 body2) ->
-      compare pty1 pty2 <> liftCompare cmp body1 body2
+    (Let pty1 name1 body1, Let pty2 name2 body2) ->
+      compare pty1 pty2 <> compare name1 name2 <> liftCompare cmp body1 body2
 
     (x, y) -> compare (ordering x) (ordering y)
 
@@ -728,8 +651,9 @@ instance (Show uid, Show a) => Show1 (Value uid a) where
       . shows row
       . showSpace
       . liftShowList s sl tms
-    Lambda scope ->
+    Lambda binderNames scope ->
         showString "Lambda "
+      . showList binderNames
       . liftShowsPrec s sl 11 scope
 
 instance (Show uid, Show a) => Show1 (Continuation uid a) where
@@ -741,7 +665,7 @@ instance (Show uid, Show a) => Show1 (Continuation uid a) where
         showString "Case "
       . shows uid
       . showSpace
-      . liftShowList s sl branches
+      . liftShowList s sl (snd <$> branches)
     Handle adj peg handlers body ->
         showString "Handle "
       . showsPrec 11 adj
@@ -751,9 +675,12 @@ instance (Show uid, Show a) => Show1 (Continuation uid a) where
       . liftShowsPrec s sl 11 handlers
       . showSpace
       . liftShowsPrec s sl 11 body
-    Let pty body ->
+    Let pty name body ->
         showString "Let"
       . showsPrec 11 pty
+      . showSpace
+      . showString name
+      . showSpace
       . liftShowsPrec s sl 11 body
 
 instance (Show uid, Show a) => Show1 (AdjustmentHandlers uid a) where

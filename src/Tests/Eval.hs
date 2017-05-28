@@ -70,12 +70,12 @@ unitTests =
       true = bool 1
 
       not = Case boolId
-        [ abstract0 true
-        , abstract0 false
+        [ ([], abstract0 true)
+        , ([], abstract0 false)
         ]
       boolOfInt = Case boolId
-        [ abstract0 one
-        , abstract0 zero
+        [ ([], abstract0 one)
+        , ([], abstract0 zero)
         ]
 
   in testGroup "evaluation"
@@ -116,13 +116,13 @@ unitTests =
              (Cut boolOfInt true)
              (Right zero)
            ]
-       , let ty = polytype [] (DataTy boolId [])
+       , let ty = PolytypeP [] (DataTy boolId [])
              -- TODO: remove shadowing
              Just tm = closeVar ("x" :: String, 0) $ let_ "x" ty false (V"x")
          in stepTest "let x = false in x" simpleEnv 1 tm (Right false)
 
        , let
-             ty = polytype [] (DataTy boolId [])
+             ty = PolytypeP [] (DataTy boolId [])
              -- Just tm = cast [tmExp|
              --   let x: forall. $boolId = $false in
              --     let y: forall. $boolId = $not x in

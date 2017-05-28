@@ -19,6 +19,7 @@ import Data.Monoid ((<>))
 import Network.IPLD hiding (Row)
 
 import Planetary.Core.Syntax
+import Planetary.Core.Syntax.Patterns
 import Planetary.Core.UIdMap
 import Planetary.Util
 
@@ -105,7 +106,8 @@ infer = \case
 
 check :: TmI -> ValTyI -> TcM' ()
 -- FUN
-check (Value (Lambda body)) (SuspendedTy (CompTy dom (Peg ability codom))) = do
+check (Value (Lambda _binders body))
+      (SuspendedTy (CompTy dom (Peg ability codom))) = do
   body' <- openWithTypes dom body
   withAbility ability $ check body' codom
 -- DATA
@@ -121,7 +123,7 @@ check (Cut (Case uid1 rows) m) ty = do
 
   dataRows <- lookupDataType uid1 -- :: Vector (Vector ValTyI)
   zipped <- strictZip ZipLengthMismatch dataRows rows
-  forM_ zipped $ \(dataConTys, rhs) ->
+  forM_ zipped $ \(dataConTys, (_, rhs)) ->
     withValTypes' dataConTys rhs (`check` ty)
 -- HANDLE
 check (Cut (Handle adj peg (AdjustmentHandlers handlers) fallthrough) val) ty = do
@@ -136,7 +138,7 @@ check (Cut (Handle adj peg (AdjustmentHandlers handlers) fallthrough) val) ty = 
     let fallthrough' = succOpen fallthrough
     in check fallthrough' ty
 -- LET
-check (Cut (Let pty body) val) ty = do
+check (Cut (Let pty _name body) val) ty = do
   valTy <- instantiateWithEnv pty
   check val valTy
   withPolyty pty $ check (succOpen body) ty
