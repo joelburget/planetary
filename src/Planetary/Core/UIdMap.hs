@@ -62,8 +62,8 @@ uidMapUnion = over2 UIdMap HashMap.union
 instance (IsUid uid, Ord a) => Ord (UIdMap uid a) where
   compare m1 m2 = compare (toList m1) (toList m2)
 
-instance FunctorWithIndex uid (UIdMap uid) where
-instance FoldableWithIndex uid (UIdMap uid) where
+instance FunctorWithIndex uid (UIdMap uid)
+instance FoldableWithIndex uid (UIdMap uid)
 
 instance TraversableWithIndex uid (UIdMap uid) where
   itraverse f (UIdMap t) = UIdMap <$> HashMap.traverseWithKey f t

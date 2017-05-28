@@ -60,7 +60,7 @@ fns = letrec
   -- TODO: consider why Abort doesn't appear in the signature
   -- catch : forall X. {<Abort>X -> {X} -> X}
   catch : forall X. {X -> {X} -> X}
-        = \x h -> handle (<Abort>) (X) x with
+        = \x h -> handle x : X with
           Abort:
             | -> aborting -> h! -- handle the abort
           -- TODO: we require renaming the value here?
@@ -76,16 +76,16 @@ in catch
 -- pipe = letrec
 --   pipe : forall [e] X Y. {{[e, Abort, Send X] Unit} -> [e, Abort, Receive X] Y} -> [e, Abort] Y}
 --        -- TODO change the lambda delimiter from `->` to `.` like the paper?
---        = \x y -> handle (<Send X>) ([e | <Abort>] Y) y! with
---          Send:
---            | x -> s -> handle (<Receive X>) ([e, Abort] Y) y! with
---              Receive:
+--        = \x y -> handle y! : [e | <Abort>] Y with
+--          Send X:
+--            | x -> s -> handle y! : [e, Abort] Y with
+--              Receive X:
 --                | -> r -> pipe (s unit) (r x)
 --              | y      -> y
 --          | x -> case x of
 --            Unit:
---              | unit -> handle (<Receive X>) ([e, Abort] Y) y! with
---                Receive:
+--              | unit -> handle y! : [e, Abort] Y with
+--                Receive X:
 --                  | -> r -> abort!
 --                | y      -> y
 --        .

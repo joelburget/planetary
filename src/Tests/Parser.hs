@@ -185,8 +185,8 @@ unitTests = testGroup "parsing"
     in parserTest defn parseInterfaceDecl expected
 
   , let defn = T.unlines
-          [ "handle (<Receive X>) ([e | <Abort>] Y) y! with"
-          , "  Receive:"
+          [ "handle y! : [e | <Abort>] Y with"
+          , "  Receive X:"
           , "    | -> r -> abort!"
           , "  | y    -> y"
           ]

@@ -58,6 +58,7 @@ planetaryStyle = IdentifierStyle {
   , _styleStart = satisfy (\c -> isAlphaNum c || c == '_' || c == '$')
   , _styleLetter = satisfy (\c -> isAlphaNum c || c == '_' || c == '\'')
   , _styleReserved = HashSet.fromList
+    -- TODO: data and interface aren't really reserved from the term language
     [ "data"
     , "interface"
     , "let"
@@ -292,15 +293,15 @@ parseCase = do
 parseHandle :: MonadicParsing m => m Tm'
 parseHandle = do
   _ <- reserved "handle"
-  adj <- parens parseAdjustment
-  -- TODO: "returning"?
-  peg <- parens parsePeg
   target <- parseTm
+  _ <- colon
+  peg <- parsePeg
   _ <- reserved "with"
 
-  (effectHandlers, valueHandler) <- localIndentation Gt $ absoluteIndentation $ do
+  (effectHandlers, adjustment, valueHandler) <- localIndentation Gt $ absoluteIndentation $ do
     effectHandlers <- many $ do
       uid <- parseUid
+      tyArgs <- many parseTyArg
       _ <- colon
 
       rows <- localIndentation Gt $ absoluteIndentation $ many $ do
@@ -312,7 +313,7 @@ parseHandle = do
         rhs <- parseTm
         pure (vars, kVar, rhs)
 
-      pure (uid, rows)
+      pure (uid, tyArgs, rows)
 
     valueHandler <- do
       _ <- bar
@@ -321,9 +322,14 @@ parseHandle = do
       rhs <- parseTm
       pure (var, rhs)
 
-    pure (uIdMapFromList effectHandlers, valueHandler)
+    let handlers = uIdMapFromList $
+          (\(uid, _, rows) -> (uid, rows)) <$> effectHandlers
+        adjustment = Adjustment $ uIdMapFromList $
+          (\(uid, tyArgs, _) -> (uid, tyArgs)) <$> effectHandlers
 
-  let cont = handle adj peg effectHandlers valueHandler
+    pure (handlers, adjustment, valueHandler)
+
+  let cont = handle adjustment peg effectHandlers valueHandler
   pure Cut {cont, target}
 
 parseTm :: MonadicParsing m => m Tm'
@@ -357,14 +363,6 @@ parseTmNoApp = choice
   , parseLetrec
   , Variable <$> identifier
   ] <?> "Tm (no app)"
-
-parseAdjustment :: MonadicParsing m => m Adjustment'
-parseAdjustment = (do
-  -- Same as parseInterfaceInstance
-  let adjItem = angles $ (,) <$> parseUid <*> many parseTyArg
-  rows <- adjItem `sepBy1` textSymbol "+"
-  pure $ Adjustment $ uIdMapFromList rows
-  ) <?> "Adjustment"
 
 -- parseContinuation
 
