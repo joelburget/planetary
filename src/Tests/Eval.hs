@@ -61,9 +61,9 @@ unitTests =
       world = mkForeignTm @String "world"
       helloWorld = mkForeignTm @String "hello world"
 
-      add = ForeignFunTm intOpsId 0
-      sub = ForeignFunTm intOpsId 1
-      cat = ForeignFunTm strOpsId 0
+      add = CommandV intOpsId 0
+      sub = CommandV intOpsId 1
+      cat = CommandV strOpsId 0
 
       -- true, false :: forall a b. Tm Cid a b
       false = bool 0
@@ -81,19 +81,17 @@ unitTests =
   in testGroup "evaluation"
        [ testGroup "foreign operations"
          [ stepTest "1 + 1" simpleEnv 1
-           [tmExp| $add $one $one |]
-           (Right two)
-         , stepTest "1 + 1" simpleEnv 1
-           (Cut (Application [one, one]) add)
+           -- [tmExp| $add $one $one |]
+           (add [one, one])
            (Right two)
          , stepTest "2 + 2" simpleEnv 1
-           (Cut (Application [two, two]) add)
+           (add [two, two])
            (Right four)
          , stepTest "2 - 1" simpleEnv 1
-           (Cut (Application [two, one]) sub)
+           (sub [two, one])
            (Right one)
          , stepTest "\"hello \" <> \"world\"" simpleEnv 1
-           (Cut (Application [hello, world]) cat)
+           (cat [hello, world])
            (Right helloWorld)
          , stepTest "not false" simpleEnv 1
            (Cut not false)

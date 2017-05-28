@@ -27,11 +27,12 @@ data Err
 
 type CI = ContinuationI
 
-type ForeignContinuations a b =
+type CurrentHandlers a b =
   UIdMap Cid [Spine Cid a b -> ForeignM a b (Tm Cid a b)]
 type HandlerStore a b = UIdMap Cid IPLD.Value
-type EvalEnv = (ForeignContinuations Int Int, HandlerStore Int Int)
+type EvalEnv = (CurrentHandlers Int Int, HandlerStore Int Int)
 
+-- TODO: what is a foreignm?
 type ForeignM a b c = ExceptT Err (State (HandlerStore a b)) c
 
 -- Maintain a stack of continuations to resume as we evaluate the current
@@ -56,6 +57,10 @@ halt :: EvalM a
 halt = throwError Halt
 
 step :: TmI -> EvalM TmI
+step (CommandV uid row tms) = do
+  -- handler <- findHandler
+  runHandler uid row tms
+  -- handleCommand cid row spine handlers
 step v@(Value _) = pure v -- ?
 step Cut {cont, target} = stepCut cont target
   -- case target of
@@ -66,6 +71,7 @@ step Cut {cont, target} = stepCut cont target
 step Variable{}           = halt
 step InstantiatePolyVar{} = halt
 step Annotation{}         = halt
+step Letrec{} = todo "step letrec"
 
 stepCut :: CI -> TmI -> EvalM TmI
 stepCut (Application spine) (LambdaV scope)
@@ -75,10 +81,6 @@ stepCut (Case _uid1 rows) (DataConstructorV _uid2 rowNum args) = do
   row <- rows ^? ix rowNum ?? IndexErr
   -- TODO: maybe we need to evaluate the args to a value first
   pure (instantiate (args !!) row)
-stepCut (Application spine) (ForeignFunTm fUid row) = do
-  runHandler fUid row spine
-stepCut (Handle _adj _peg handlers _) (CommandV cid row spine) =
-  handleCommand cid row spine handlers
 stepCut (Handle _adj _peg _handlers handleValue) v@Value{} =
   pure $ instantiate1 v handleValue
 

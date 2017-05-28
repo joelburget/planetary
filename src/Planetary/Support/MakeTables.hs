@@ -205,7 +205,6 @@ convertValue = \case
     <$> lookupUid cid
     <*> pure row
     <*> mapM convertTm spine
-  ForeignFun cid row -> ForeignFun <$> lookupUid cid <*> pure row
   DataConstructor cid row spine -> DataConstructor
     <$> lookupUid cid
     <*> pure row

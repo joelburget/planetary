@@ -88,14 +88,7 @@ infer = \case
     -- p <- lookupPolyVarTy v
     -- pure $ instantiate (polyVarInstantiator tys) p
   -- COMMAND
-  -- XXX
   Value (Command uid row spine) -> do
-    CommandDeclaration from to <- lookupCommandTy uid row
-    ambient <- getAmbient
-    pure $ SuspendedTy (CompTy from (Peg ambient to))
-  Value (ForeignFun uid row) -> do
-    -- TODO:
-    -- Again, I wonder whether ForeignFun and Command are exactly the same.
     CommandDeclaration from to <- lookupCommandTy uid row
     ambient <- getAmbient
     pure $ SuspendedTy (CompTy from (Peg ambient to))

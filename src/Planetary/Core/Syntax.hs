@@ -133,8 +133,7 @@ newtype Adjustment uid a = Adjustment (UIdMap uid (Vector (TyArg uid a)))
 
 data Value uid a b
   -- use (inferred)
-  = Command uid Row (Spine uid a b)
-  | ForeignFun uid Row -- TODO: Is ForeignFun just a Command?
+  = Command uid Row (Vector (Tm uid a b))
 
   -- construction (checked)
   | DataConstructor uid Row (Vector (Tm uid a b))
@@ -210,9 +209,6 @@ pattern ForeignDataTm uid = Value (ForeignData uid)
 
 pattern DataTm :: uid -> Row -> Vector (Tm uid a b) -> Tm uid a b
 pattern DataTm uid row vals = Value (DataConstructor uid row vals)
-
-pattern ForeignFunTm :: uid -> Row -> Tm uid a b
-pattern ForeignFunTm uid row = Value (ForeignFun uid row)
 
 pattern V :: b -> Tm uid a b
 pattern V name = Variable name
@@ -459,7 +455,6 @@ bindVal (Command uid row spine) f = Command uid row ((>>= f) <$> spine)
 bindVal (DataConstructor uid row tms) f =
   DataConstructor uid row ((>>= f) <$> tms)
 bindVal (Lambda body) f = Lambda (body >>>= f)
-bindVal (ForeignFun uid row) _ = ForeignFun uid row
 
 bindContinuation :: Continuation uid c a -> (a -> Tm uid c b) -> Continuation uid c b
 bindContinuation (Application spine) f = Application ((>>= f) <$> spine)
@@ -587,15 +582,12 @@ instance (IsUid uid, Ord o) => Ord1 (Value uid o) where
     (DataConstructor uid1 row1 app1, DataConstructor uid2 row2 app2) ->
       compare uid1 uid2 <> compare row1 row2 <> liftCompare (liftCompare cmp) app1 app2
     (Lambda body1, Lambda body2) -> liftCompare cmp body1 body2
-    (ForeignFun uid1 row1, ForeignFun uid2 row2) ->
-      compare uid1 uid2 <> compare row1 row2
     (x, y) -> compare (ordering x) (ordering y)
 
     where ordering = \case
             Command{}            -> 0 :: Int
             DataConstructor{}    -> 1
             Lambda{}             -> 2
-            ForeignFun{}         -> 3
 
 instance (IsUid uid, Ord o) => Ord1 (Continuation uid o) where
   liftCompare cmp l r = case (l, r) of
@@ -739,11 +731,6 @@ instance (Show uid, Show a) => Show1 (Value uid a) where
     Lambda scope ->
         showString "Lambda "
       . liftShowsPrec s sl 11 scope
-    ForeignFun uid row ->
-        showString "ForeignFun "
-      . shows uid
-      . showSpace
-      . shows row
 
 instance (Show uid, Show a) => Show1 (Continuation uid a) where
   liftShowsPrec s sl d cont_ = showParen (d > 10) $ case cont_ of

@@ -43,7 +43,7 @@ interfaceTable = uIdMapFromList
     ])
   ]
 
-foreignContinuations :: ForeignContinuations Int Int
+foreignContinuations :: CurrentHandlers Int Int
 foreignContinuations = uIdMapFromList
   [ (intOpsId, [ liftBinaryOp @Int (+) , liftBinaryOp @Int (-) ])
   , (boolOpsId, [ liftBinaryOp (&&) , liftBinaryOp (||), liftUnaryOp not ])
