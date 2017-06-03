@@ -220,6 +220,7 @@ type AdjustmentI = Executable1 Adjustment
 type CompTyI     = Executable1 CompTy
 type PolytypeI   = Executable1 Polytype
 type ValTyI      = Executable1 ValTy
+type TyArgI      = Executable1 TyArg
 
 type TmI                 = Executable2 Tm
 type ValueI              = Executable2 Value

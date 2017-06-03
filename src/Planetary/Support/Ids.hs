@@ -34,6 +34,9 @@ module Planetary.Support.Ids
   , textIfaceId
   , consoleId
   , charHandlerId
+  , vectorId
+  , uidMapId
+  , lfixId
   ) where
 
 import Data.Byteable (toBytes)
@@ -82,4 +85,7 @@ intId
   : textIfaceId
   : consoleId
   : charHandlerId
+  : vectorId
+  : uidMapId
+  : lfixId
   :_ = generateCids
