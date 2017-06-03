@@ -1,6 +1,6 @@
 [submodule "haskell-ipld"]
 	path = ipld
-	url = git@github.com:joelburget/haskell-ipld.git
+	url = https://github.com/joelburget/planetary.git
 [submodule "binary-serialise-cbor"]
 	path = binary-serialise-cbor
-	url = git@github.com:well-typed/binary-serialise-cbor.git
+	url = https://github.com/well-typed/binary-serialise-cbor.git
