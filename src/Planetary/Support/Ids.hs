@@ -27,7 +27,6 @@ module Planetary.Support.Ids
   , spineUid
   , uidUid
   , voidUid
-  , unitUid
   , idUid
   , uidOpsId
   , uidId
@@ -76,7 +75,6 @@ intId
   : spineUid
   : uidUid
   : voidUid
-  : unitUid
   : idUid
   : uidOpsId
   : uidId

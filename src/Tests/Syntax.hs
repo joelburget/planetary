@@ -6,7 +6,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import Planetary.Core
-import Planetary.Support.UIds
+import Planetary.Support.Ids
 
 unitTy :: forall a. ValTy Cid a
 unitTy = DataTy unitId []

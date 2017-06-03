@@ -21,7 +21,7 @@ import Language.Haskell.TH.Syntax (Dec(..), Pat(..), Body(..), Type(ConT))
 import Network.IPLD (Cid)
 
 import Planetary.Core
-import Planetary.Support.MakeTables
+import Planetary.Support.NameResolution
 import Planetary.Support.Parser
 
 -- TODO:

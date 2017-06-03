@@ -12,7 +12,7 @@ import Test.Tasty.HUnit
 import Planetary.Core
 import Planetary.Library.HaskellForeign
 import Planetary.Support.Parser.QQ
-import Planetary.Support.UIds
+import Planetary.Support.Ids
 
 stepTest
   :: String
@@ -24,16 +24,14 @@ stepTest
 stepTest name env steps tm expected =
   let applications = iterate (step =<<) (pure tm)
       actual = applications !! steps
-  in testCase name $ fst (runEvalM env [] actual) @?= expected
 
-mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
-mkForeign val = let val' = toIpld val in (valueCid val', val')
+  in testCase name $ do
+    result <- runEvalM env [] actual
 
-mkForeignTm :: IsIpld a => a -> TmI
-mkForeignTm = ForeignDataTm . fst . mkForeign
+    fst result @?= expected
 
 -- TODO: this is awfully kludgy:
--- * uids are duplicated here and in Interplanetary.UIds
+-- * ids are duplicated here and in Interplanetary.Ids
 -- * we shouldn't need to supply the Uid separately -- it can be derived from
 -- the data
 simpleEnv :: EvalEnv
@@ -53,10 +51,10 @@ bool :: Int -> Tm Cid a b
 bool i = DataTm boolId i []
 
 unitTests :: TestTree
-unitTests =
-  let one = mkForeignTm @Int 1
-      zero = mkForeignTm @Int 0
-      two = mkForeignTm @Int 2
+unitTests  =
+  let zero = mkForeignTm @Int 0
+      one  = mkForeignTm @Int 1
+      two  = mkForeignTm @Int 2
       four = mkForeignTm @Int 4
 
       hello = mkForeignTm @Text "hello "

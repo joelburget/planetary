@@ -34,11 +34,11 @@ unitTests :: TestTree
 unitTests = testGroup "parsing"
   [ parserTest "X" identifier "X"
 
-  , parserTest "X" parseValTyNoAp (VTy"X")
+  , parserTest "X" parseValTy (VTy"X")
 
-  , parserTest "X | X Y" parseConstructors
-    [ ConstructorDecl [VTy"X"]
-    , ConstructorDecl [VTy"X", VTy"Y"]
+  , parserTest "<_ X> | <_ X Y>" parseConstructors
+    [ ConstructorDecl "_" [VTy"X"]
+    , ConstructorDecl "_" [VTy"X", VTy"Y"]
     ]
 
   , parserTest "X" parseTyArg $ TyArgVal (VTy"X")
@@ -55,18 +55,18 @@ unitTests = testGroup "parsing"
 
   -- also test with args
   -- Bool
-  , parserTest "data Bool = | " parseDataDecl
+  , parserTest "data Bool = <true> | <false> " parseDataDecl
     (DataDecl "Bool" $ DataTypeInterface []
-      [ ConstructorDecl []
-      , ConstructorDecl []
+      [ ConstructorDecl "true" []
+      , ConstructorDecl "false" []
       ])
 
   -- TODO: also test with effect parameter
-  , parserTest "data Either X Y = X | Y" parseDataDecl
+  , parserTest "data Either X Y = <left X> | <right Y>" parseDataDecl
     (DataDecl "Either" $
       DataTypeInterface [("X", ValTy), ("Y", ValTy)]
-        [ ConstructorDecl [VTy"X"]
-        , ConstructorDecl [VTy"Y"]
+        [ ConstructorDecl "left" [VTy"X"]
+        , ConstructorDecl "right" [VTy"Y"]
         ])
 
   -- also test effect ty, multiple instances
@@ -122,8 +122,8 @@ unitTests = testGroup "parsing"
       , CommandDeclaration [VTy"Y"] (VTy"X")
       ]))
 
-  , parserTest "Z!" parseApplication $ Cut (Application []) (V"Z")
-  , parserTest "Z Z Z" parseApplication $
+  , parserTest "Z!" parseTm $ Cut (Application []) (V"Z")
+  , parserTest "Z Z Z" parseTm $
       Cut (Application [V"Z", V"Z"]) (V"Z")
 
   , parserTest "let Z: forall. X = W in Z" parseLet $
@@ -169,11 +169,11 @@ unitTests = testGroup "parsing"
          , parserTest defn parseCase expected
          ]
 
-  , let defn = "data Maybe x = x |"
+  , let defn = "data Maybe x = <just x> | <nothing>"
           -- "data Maybe x = Just x | Nothing"
         expected = DataDecl "Maybe" (DataTypeInterface [("x", ValTy)]
-          [ ConstructorDecl [VariableTy "x"]
-          , ConstructorDecl []
+          [ ConstructorDecl "just" [VariableTy "x"]
+          , ConstructorDecl "nothing" []
           ])
     in parserTest defn parseDataDecl expected
 
@@ -187,10 +187,10 @@ unitTests = testGroup "parsing"
   , let defn = T.unlines
           [ "handle y! : [e | <Abort>] Y with"
           , "  Receive X:"
-          , "    | -> r -> abort!"
-          , "  | y    -> y"
+          , "    <receive -> r> -> abort!"
+          , "  y -> y"
           ]
-        target = Cut (Application []) (V"y")
+        scrutinee = Cut (Application []) (V"y")
         adj = Adjustment (uIdMapFromList
           [ ("Receive", [TyArgVal (VariableTy"X")])
           ])
@@ -200,7 +200,7 @@ unitTests = testGroup "parsing"
           ]
         fallthrough = ("y", V"y")
         cont = handle adj peg (uIdMapFromList handlers) fallthrough
-        expected = Cut {cont, target}
+        expected = Cut {cont, scrutinee}
     in parserTest defn parseHandle expected
 
   , parserTest "X" parseTyVar ("X", ValTy)

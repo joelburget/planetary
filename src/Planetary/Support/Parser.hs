@@ -92,33 +92,30 @@ identifier = Tok.ident planetaryStyle
 
 -- TODO: get an exact count of digits
 parseUid :: MonadicParsing m => m Text
-parseUid = identifier
-  -- (('$':) <$> (string "$" *> identifier) <|>
-  --  (string "d" *> textSymbol "%" *> some alphaNum))
-  <?> "uid"
+parseUid = identifier <?> "uid"
 
 parseValTy :: MonadicParsing m => m ValTy'
-parseValTy = parseDataTy <|> parseValTyNoAp
-  <?> "Val Ty"
-
-parseValTyNoAp :: MonadicParsing m => m ValTy'
-parseValTyNoAp = parens parseValTy
-          <|> SuspendedTy <$> braces parseCompTy
-          <|> VariableTy  <$> identifier
-          <?> "Val Ty (not data)"
+parseValTy = choice
+  [ parseDataTy
+  , parens parseValTy
+  , SuspendedTy <$> braces parseCompTy
+  , VariableTy  <$> identifier
+  ] <?> "Val Ty"
 
 parseTyArg :: MonadicParsing m => m TyArg'
-parseTyArg = TyArgVal     <$> parseValTyNoAp
-         <|> TyArgAbility <$> brackets parseAbilityBody
+parseTyArg = TyArgAbility <$> brackets parseAbilityBody
+         <|> TyArgVal     <$> parseValTy
          <?> "Ty Arg"
 
 parseConstructors :: MonadicParsing m => m (Vector ConstructorDecl')
 parseConstructors = sepBy parseConstructor bar <?> "Constructors"
 
 parseConstructor :: MonadicParsing m => m ConstructorDecl'
-parseConstructor = ConstructorDecl <$> many parseValTyNoAp <?> "Constructor"
+parseConstructor = angles (ConstructorDecl
+  <$> identifier
+  <*> many parseValTy
+  ) <?> "Constructor"
 
--- Parse a potential datatype. Note it may actually be a type variable.
 parseDataTy :: MonadicParsing m => m ValTy'
 parseDataTy = angles $ DataTy
   <$> parseUid
@@ -132,17 +129,18 @@ parseTyVar = (,EffTy) <$> brackets identifier
          <?> "Ty Var"
 
 -- 0 | 0|Interfaces | e|Interfaces | Interfaces
--- TODO: change to comma?
 -- TODO: allow explicit e? `[e]`
 parseAbilityBody :: MonadicParsing m => m Ability'
 parseAbilityBody =
   let closedAb = do
         _ <- textSymbol "0"
-        instances <- option [] (bar *> parseInterfaceInstances)
+        skipOptional comma
+        instances <- option [] (parseInterfaceInstances)
         return $ Ability ClosedAbility (uIdMapFromList instances)
       varAb = do
-        var <- option "e" (try identifier)
-        instances <- option [] (bar *> parseInterfaceInstances)
+        var <- option ("e" :: Text) (try identifier)
+        skipOptional comma
+        instances <- parseInterfaceInstances
         return $ Ability OpenAbility (uIdMapFromList instances)
   in closedAb <|> varAb <?> "Ability Body"
 
@@ -192,6 +190,8 @@ parseCommandType
   :: MonadicParsing m
   => m (Vector ValTy', ValTy')
 parseCommandType = do
+  name <- identifier -- TODO!
+  _ <- colon
   vs <- sepBy1 parseValTy arr
   maybe empty pure (unsnoc vs)
   -- maybe empty pure . unsnoc =<< sepBy1 parseValTy arr
@@ -271,16 +271,17 @@ parseValue = choice
   [ parseDataConstructor
   -- parseCommand
   , parseLambda
-  ]
+  ] <?> "Value"
 
 parseDataConstructor :: MonadicParsing m => m Value'
-parseDataConstructor = angles $ DataConstructor
+parseDataConstructor = angles (DataConstructor
   <$> parseUid <* dot
   <*> (fromIntegral <$> natural)
   <*> many parseTm
+  ) <?> "Data constructor"
 
 parseCase :: MonadicParsing m => m Tm'
-parseCase = do
+parseCase = (do
   _ <- reserved "case"
   m <- parseTm
   _ <- reserved "of"
@@ -290,17 +291,19 @@ parseCase = do
 
     branches <- localIndentation Gt $ absoluteIndentation $ many $ do
       _ <- bar
-      vars <- many identifier
+      idents <- angles $ some identifier
       _ <- arr
       rhs <- parseTm
+      let name:vars = idents -- TODO!
       pure (vars, rhs)
     pure (uid, branches)
   pure $ Cut (CaseP uid branches) m
+  ) <?> "case"
 
 parseHandle :: MonadicParsing m => m Tm'
-parseHandle = do
+parseHandle = (do
   _ <- reserved "handle"
-  target <- parseTm
+  scrutinee <- parseTm
   _ <- colon
   peg <- parsePeg
   _ <- reserved "with"
@@ -313,11 +316,12 @@ parseHandle = do
 
       rows <- localIndentation Gt $ absoluteIndentation $ many $ do
         _ <- bar
-        vars <- many identifier
-        _ <- arr
-        kVar <- identifier
+        (idents, kVar) <- angles $ (,)
+          <$> some identifier <* arr
+          <*> identifier
         _ <- arr
         rhs <- parseTm
+        let name:vars = idents -- TODO!
         pure (vars, kVar, rhs)
 
       pure (uid, tyArgs, rows)
@@ -337,41 +341,59 @@ parseHandle = do
     pure (handlers, adjustment, valueHandler)
 
   let cont = handle adjustment peg effectHandlers valueHandler
-  pure Cut {cont, target}
+  pure Cut {cont, scrutinee}
+  ) <?> "handle"
 
 parseTm :: MonadicParsing m => m Tm'
 parseTm = (do
-  tms <- some parseTmNoApp
-  -- "We write '!' for the empty spine"
-  hasBang <- (bang $> True) <|> pure False
-  case (tms, hasBang) of
-    ([],           _) -> empty
-    ([tm],      True) -> pure (Cut (Application []) tm)
-    (_,         True) -> empty
-    ([tm],     False) -> pure tm
-    (tm:spine, False) -> pure (Cut (Application spine) tm)
+  tms <- some $ do
+    tm <- parseTmNoApp
+
+    -- "We write '!' for the empty spine"
+    (Cut (Application []) tm <$ bang) <|> pure tm
+
+  case tms of
+    [] -> empty
+    [tm] -> pure tm
+    fun:spine -> pure $ Cut (Application spine) fun
   ) <?> "Tm"
 
-parseApplication :: MonadicParsing m => m Use
-parseApplication =
-  let parser = do
-        fun <- Variable <$> identifier -- TODO: not sure this line is right
-        spine <- choice [some parseTmNoApp, bang $> []]
-        pure $ Cut (Application spine) fun
-  in parser <?> "Application"
+parseTmOrAnnot :: MonadicParsing m => m Tm'
+parseTmOrAnnot =
+  let p1 = do
+        val <- parseValue
+        maybeTy <- optional $ try $ do
+          _ <- colon
+          parseValTy
+        pure $ case maybeTy of
+          Nothing -> Value val
+          Just ty -> Annotation val ty
+      p2 = parseTm
+  in p1 <|> p2 <?> "term or annot"
 
 parseTmNoApp :: MonadicParsing m => m Tm'
 parseTmNoApp = choice
-  [ parens parseTm
+  [ parens parseTmOrAnnot
   , Value <$> parseValue
   , parseCase
   , parseHandle
   , parseLet
   , parseLetrec
-  , Variable <$> identifier
+  , parseCommandOrIdent
   ] <?> "Tm (no app)"
 
--- parseContinuation
+parseCommandOrIdent :: MonadicParsing m => m Tm'
+parseCommandOrIdent = do
+  ident <- identifier
+
+  dotRow <- optional $ try $ do
+    _ <- dot
+    natural
+
+  -- TODO: named commands
+  pure $ case dotRow of
+    Nothing -> Variable ident
+    Just row -> CommandV ident (fromIntegral row) []
 
 parseLambda :: MonadicParsing m => m Value'
 parseLambda = Lam

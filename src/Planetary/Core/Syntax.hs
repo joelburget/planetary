@@ -81,7 +81,7 @@ data Polytype uid a = Polytype
   , polyVal :: Scope Int (ValTy uid) a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-newtype ConstructorDecl uid a = ConstructorDecl (Vector (ValTy uid a))
+data ConstructorDecl uid a = ConstructorDecl Text (Vector (ValTy uid a))
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 -- A collection of data constructor signatures (which can refer to bound type /
@@ -95,7 +95,7 @@ data DataTypeInterface uid a = DataTypeInterface
 
 dataInterface :: DataTypeInterface uid a -> Vector (Vector (ValTy uid a))
 dataInterface (DataTypeInterface _ ctors) =
-  let f (ConstructorDecl args) = args
+  let f (ConstructorDecl _name args) = args
   in f <$> ctors
 
 -- commands take arguments (possibly including variables) and return a value
@@ -153,7 +153,7 @@ data Tm uid a b
   | InstantiatePolyVar b (Vector (TyArg uid a))
   | Annotation (Value uid a b) (ValTy uid a)
   | Value (Value uid a b)
-  | Cut { cont :: Continuation uid a b, target :: Tm uid a b }
+  | Cut { cont :: Continuation uid a b, scrutinee :: Tm uid a b }
   | Letrec
       -- invariant: each value is a lambda
       (Vector (Polytype uid a, Value uid a b))
@@ -711,11 +711,11 @@ instance (Show uid, Show a) => Show1 (Tm uid a) where
     Value val ->
         showString "Value "
       . liftShowsPrec s sl 11 val
-    Cut {cont, target} ->
+    Cut {cont, scrutinee} ->
         showString "Cut "
       . liftShowsPrec s sl 11 cont
       . showSpace
-      . liftShowsPrec s sl 11 target
+      . liftShowsPrec s sl 11 scrutinee
     Letrec defns body ->
         showString "Letrec "
       . liftShowList (liftShowsPrec s sl) (liftShowList s sl) defns

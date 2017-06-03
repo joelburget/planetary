@@ -7,7 +7,7 @@ import Control.Monad.State
 import Network.IPLD as IPLD
 
 import Planetary.Core
-import Planetary.Support.UIds
+import Planetary.Support.Ids
 import Planetary.Util
 
 -- TODO: this is really a "haskell int"
@@ -43,21 +43,21 @@ interfaceTable = uIdMapFromList
     ])
   ]
 
-foreignContinuations :: CurrentHandlers Int Int
+foreignContinuations :: CurrentHandlers
 foreignContinuations = uIdMapFromList
   [ (intOpsId, [ liftBinaryOp @Int (+) , liftBinaryOp @Int (-) ])
   , (boolOpsId, [ liftBinaryOp (&&) , liftBinaryOp (||), liftUnaryOp not ])
   , (strOpsId, [ liftBinaryOp @String (++) ])
   ]
 
-lookupForeign :: IsIpld a => Cid -> ForeignM Int Int a
+lookupForeign :: IsIpld a => Cid -> ForeignM a
 lookupForeign cid = do
   val <- gets (^? ix cid) >>= (?? IndexErr)
   case fromIpld val of
     Nothing -> throwError FailedIpldConversion
     Just i  -> pure i
 
-writeForeign :: IsIpld a => a -> ForeignM Int Int Cid
+writeForeign :: IsIpld a => a -> ForeignM Cid
 writeForeign a = do
   let val = toIpld a
       cid = valueCid val
@@ -66,7 +66,7 @@ writeForeign a = do
 
 liftBinaryOp
   :: IsIpld s
-  => (s -> s -> s) -> (Spine Cid a b -> ForeignM a b (Tm Cid a b))
+  => (s -> s -> s) -> (Spine Cid a b -> ForeignM (Tm Cid a b))
 liftBinaryOp op [ForeignDataTm uid1, ForeignDataTm uid2] = do
   i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
   ForeignDataTm <$> writeForeign i
@@ -74,11 +74,17 @@ liftBinaryOp _ _ = throwError FailedForeignFun
 
 liftUnaryOp
   :: IsIpld s
-  => (s -> s) -> (Spine Cid a b -> ForeignM a b (Tm Cid a b))
+  => (s -> s) -> (Spine Cid a b -> ForeignM (Tm Cid a b))
 liftUnaryOp op [ForeignDataTm uid] = do
   i <- op <$> lookupForeign uid
   ForeignDataTm <$> writeForeign i
 liftUnaryOp _ _ = throwError FailedForeignFun
+
+mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
+mkForeign val = let val' = toIpld val in (valueCid val', val')
+
+mkForeignTm :: IsIpld a => a -> TmI
+mkForeignTm = ForeignDataTm . fst . mkForeign
 
 -- TODO: use QQ
 exampleDataTypes :: DataTypeTable Cid String
@@ -86,7 +92,7 @@ exampleDataTypes = uIdMapFromList
   -- void has no constructor
   [ (voidUid, [])
   -- unit has a single nullary constructor
-  , (unitUid, [[]])
+  , (unitId, [[]])
   -- bool has two nullary constructors
   , (boolId, [[], []])
   -- `data Id a = Id a`

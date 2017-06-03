@@ -6,7 +6,6 @@ module Planetary.Core.Eval where
 import Bound
 import Control.Lens hiding ((??))
 import Control.Monad.Except
-import Control.Monad.Reader
 import Control.Monad.State
 import Network.IPLD hiding (Row, Value)
 import qualified Network.IPLD as IPLD
@@ -28,31 +27,59 @@ data Err
 
 type CI = ContinuationI
 
-type CurrentHandlers a b =
-  UIdMap Cid [Spine Cid a b -> ForeignM a b (Tm Cid a b)]
-type HandlerStore a b = UIdMap Cid IPLD.Value
-type EvalEnv = (CurrentHandlers Int Int, HandlerStore Int Int)
+type CurrentHandlers = UIdMap Cid [SpineI -> ForeignM TmI]
+type ValueStore      = UIdMap Cid IPLD.Value
+type EvalEnv         = (CurrentHandlers, ValueStore)
 
+-- This is the monad you write FFI operations in.
 -- TODO: what is a foreignm?
-type ForeignM a b c = ExceptT Err (State (HandlerStore a b)) c
+type ForeignM =
+  ExceptT Err
+  (StateT ValueStore
+  IO)
 
 -- Maintain a stack of continuations to resume as we evaluate the current
 -- target to a value
-type EvalM = ExceptT Err (StateT (Stack CI) (Reader EvalEnv))
+type EvalM =
+  ExceptT Err
+  (StateT (Stack CI, EvalEnv)
+  IO)
 
--- TODO: do this without casing?
--- TODO: bring back runForeignM
+_env :: Lens' (Stack CI, EvalEnv) EvalEnv
+_env = _2
+
 runHandler :: Cid -> Row -> Spine Cid Int Int -> EvalM TmI
 runHandler cid row spine = do
-  cont <- asks (^? _1 . ix cid . ix row) >>= (?? FailedHandlerLookup)
-  store <- asks (^. _2)
+  cont  <- gets (^? _env . _1 . ix cid . ix row) >>= (?? FailedHandlerLookup)
   let action = cont spine
-  case runExceptT action `evalState` store of
+  runForeignM action
+
+-- TODO: do this without casing? mmorph
+runForeignM :: ForeignM a -> EvalM a
+runForeignM action = do
+  (_stack, (_handlers, store)) <- get
+  val <- liftIO $ runExceptT action `evalStateT` store
+  case val of
     Left err -> throwError err
     Right a -> pure a
 
-runEvalM :: EvalEnv -> Stack CI -> EvalM TmI -> (Either Err TmI, Stack CI)
-runEvalM env stack action = runReader (runStateT (runExceptT action) stack) env
+runEvalM
+  :: EvalEnv -> Stack CI -> EvalM TmI
+  -> IO (Either Err TmI, (Stack CI, EvalEnv))
+runEvalM env stack action = runStateT
+  (runExceptT action)
+  (stack, env)
+
+run
+  :: EvalEnv -> Stack CI -> TmI
+  -> IO (Either Err ValueI, (Stack CI, EvalEnv))
+run env stack = \case
+  Value v -> pure (Right v, (stack, env))
+  tm -> do
+    (eitherTm, state@(stack', env')) <- runEvalM env stack (step tm)
+    case eitherTm of
+      Left err -> pure (Left err, state)
+      Right tm -> run env' stack' tm
 
 halt :: EvalM a
 halt = throwError Halt
@@ -63,12 +90,12 @@ step (CommandV uid row tms) = do
   runHandler uid row tms
   -- handleCommand cid row spine handlers
 step v@(Value _) = pure v -- ?
-step Cut {cont, target} = stepCut cont target
-  -- case target of
+step Cut {cont, scrutinee} = stepCut cont scrutinee
+  -- case scrutinee of
   --   Value v -> stepCut cont v
   --   _other -> do
   --     modify (cont:)
-  --     pure target
+  --     pure scrutinee
 step Variable{}           = halt
 step InstantiatePolyVar{} = halt
 step Annotation{}         = halt
@@ -86,7 +113,7 @@ stepCut (Handle _adj _peg _handlers handleValue) v@Value{} =
   pure $ instantiate1 v handleValue
 
 stepCut (Let _polyty _name body) rhs@Value{} = pure $ instantiate1 rhs body
-stepCut cont target = throwError (CantCut cont target)
+stepCut cont scrutinee = throwError (CantCut cont scrutinee)
 
 -- withHandlers :: AdjustmentHandlersI -> Scope () (Tm Cid Int) Int -> EvalM a -> EvalM a
 -- withHandlers (AdjustmentHandlers handlers) handleValue action $ do

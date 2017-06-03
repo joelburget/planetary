@@ -192,10 +192,10 @@ unitTests = testGroup "typechecking"
           -- simpleTables = _
       in testGroup "check handle"
         [ let _tm = [tmExp|
-                handle abort! : [e | <Abort>]HaskellInt with
+                handle abort! : [e , <Abort>]HaskellInt with
                   Abort:
-                    | -> abort -> 1
-                  | k -> 2
+                    | <aborting -> k> -> 1
+                  | v -> 2
               |]
           in testCase "HANDLE (abort)" (pure ())
              -- checkTest "HANDLE (abort)" exampleTables env tm' expectedTy
@@ -205,11 +205,10 @@ unitTests = testGroup "typechecking"
                   Send X:
                     -- TODO: Should we switch to the original syntax?
                     -- <send y -> s>
-                    | y -> send -> 1
+                    | <send y -> s> -> 1
                   Receive Y:
-                    -- <receive -> r>
-                    | -> receive -> 2
-                  | k -> 3
+                    | <receive -> r> -> 2
+                  | v -> 3
               |]
           in testCase "HANDLE (multi)" (pure ())
              -- checkTest "HANDLE (multi)" simpleTables env tm expectedTy

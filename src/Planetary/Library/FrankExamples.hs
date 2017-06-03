@@ -4,11 +4,12 @@
 {-# language QuasiQuotes #-}
 module Planetary.Library.FrankExamples where
 
+import Control.Monad.Except
 import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Network.IPLD
 import System.IO (hFlush, stdout)
+import Network.IPLD
 
 import Planetary.Core
 import Planetary.Library.HaskellForeign
@@ -26,10 +27,17 @@ eraseCharLit = mkForeignTm @Text "\b \b"
 -- TODO: we actually map with a data constructor
 textMap :: SpineI -> ForeignM TmI
 textMap [LambdaV _binderNames body, ForeignDataTm uid] = do
-  text <- lookupForeign uid
-  -- char -> ForeignM char
-  result <- traverse _ text
+  text <- lookupForeign @Text uid
+  let str = T.unpack text
+  let fun :: Char -> ForeignM Char
+      fun char = do
+        charPtr <- ForeignDataTm <$> writeForeign char
+        -- HACK XXX
+        ouch [charPtr]
+        pure char
+  result <- T.pack <$> traverse fun str
   ForeignDataTm <$> writeForeign result
+textMap _ = throwError FailedForeignFun
 
 -- charHandler1 :: TmI -> ContinuationI -> Char -> TmI
 charHandler1 :: SpineI -> ForeignM TmI
@@ -38,6 +46,7 @@ charHandler1 [b1, b2, ForeignDataTm uid] = do
   pure $ case char of
     '\b' -> b1
     c -> Cut (Application [b2]) (mkForeignTm @Char c)
+charHandler1 _ = throwError FailedForeignFun
 
 -- charHandler2 :: TmI -> TmI -> TmI -> Char -> TmI
 charHandler2 :: SpineI -> ForeignM TmI
@@ -46,6 +55,7 @@ charHandler2 [b1, b2, b3, ForeignDataTm uid] = do
     '0' -> b1
     ' ' -> b2
     _   -> b3
+charHandler2 _ = throwError FailedForeignFun
 
 inch :: SpineI -> ForeignM TmI
 inch [] = do
@@ -53,11 +63,14 @@ inch [] = do
   -- Taken from Shonky/Semantics
   let c' = if c == '\DEL' then '\b' else c
   ForeignDataTm <$> writeForeign c'
+inch _ = throwError FailedForeignFun
 
 ouch :: SpineI -> ForeignM TmI
 ouch [ForeignDataTm uid] = do
   c <- lookupForeign uid
   liftIO $ putChar c >> hFlush stdout
+  pure (DataTm unitId 0 [])
+ouch _ = throwError FailedForeignFun
 
 externals :: CurrentHandlers
 externals = uIdMapFromList
@@ -74,161 +87,168 @@ env =
     ]
   )
 
+-- runIt :: IO ()
+-- runIt = print . fst =<< run env [] main
+
 -- TODO:
--- x clarify ffi (eraseCharLit, textMap, charHandler1, charHandler2)
--- x textMap
--- x understand commands vs functions
--- x fix up parser
+-- * fix up textMap
 -- * how is this actually run?
 
 -- * inductive data
 
-[declarations|
-data Zero = -- no constructors
+charId :: Cid
+charId = undefined
 
-data Unit =
-  | <unit>
+-- [declarations|
+-- data Zero = -- no constructors
 
-data Bool =
-  | <tt>
-  | <ff>
+-- data Unit =
+--   <unit>
 
-data Pair X Y =
-  | <pair X Y>
+-- data Bool =
+--   <tt>
+--   | <ff>
 
--- TODO: we can't do inductive data
--- data Nat =
---   | -- zero
---   | Nat -- suc
+-- data Pair X Y =
+--   <pair X Y>
 
--- data List =
---   | <nil>
---   | <cons X (List X)>
+-- -- TODO: we can't do inductive data
+-- -- data Nat =
+-- --   | <zero>
+-- --   | <suc Nat>
 
-interface Send X = X -> <Unit> -- send
-interface Receive X = X -- receive
--- interface State X =
---   | S -- get
---   | S -> Unit -- put
-interface Abort = <Zero> -- aborting
+-- -- data List =
+-- --   | <nil>
+-- --   | <cons X (List X)>
 
-interface LookAhead =
-  | peek : Char
-  | accept : Unit
+-- interface Send X =
+--   send : X -> <Unit>
+-- interface Receive X =
+--   receive : X
+-- -- interface State X =
+-- --   | get : S
+-- --   | put : S -> Unit
+-- interface Abort =
+--   aborting : <Zero>
 
-interface Console =
-  | inch : Char
-  | ouch : Char -> Unit
+-- interface LookAhead =
+--   peek : $charId
+--   | accept : <Unit>
 
-data Log [e] X =
-  | <start {[e]X}>
-  | <inched (Log [e] X) {Char -> [e]X}>
-  | <ouched (Log [e] X)>
+-- interface Console =
+--   inch : $charId
+--   | ouch : $charId -> <Unit>
 
-data Buffer =
-  | <empty>
-  | <hold Char>
+-- -- XXX inductive
+-- data Log [e] X =
+--   <start {[e]X}>
+--   | <inched <Log [e] X> {$charId -> [e]X}>
+--   | <ouched <Log [e] X>>
 
-main = letrec
-  input : forall X. Log [LookAhead, Abort, Console] X
-        -> Buffer
-        -> <LookAhead, Abort>X
-        -> [Console]X
-        = \log buffer x -> handle x : X with
-          LookAhead:
-            <peek -> k> -> case buffer of
-              Buffer:
-                <hold c> -> input <hold c> (k c)
-                <empty> -> on inch! (charHandler1
-                  (rollback l)                              -- '\b'
-                  (\c -> input (inched l k) (hold c) (k c)) -- other char
-                  )
-            <accept -> k> -> case buffer of
-              Buffer:
-                <hold c> -> snd (ouch c) (input (ouched l) empty (k unit))
-                <empty>  -> input l empty (k unit)
-          Abort:
-            <aborting -> k> -> rollback log
-          x -> x
+-- data Buffer =
+--   <empty>
+--   | <hold $charId>
 
-  rollback : forall X. Log [LookAhead, Abort, Console] X -> [Console]X
-  rollback = \x -> case x of
-    <start p> -> parse p
-    <ouched l> -> snd (textMap ouch $eraseCharLit) (rollback l)
-    <inched l k> -> input l empty (k peek!)
+-- main = letrec
+--   input : forall X. {<Log [<LookAhead>, <Abort>, <Console>] X>
+--         -> Buffer
+--         -> X
+--         -> [Console]X}
+--         = \log buffer x -> handle x : X with
+--           LookAhead:
+--             | <peek -> k> -> case buffer of
+--               Buffer:
+--                 | <hold c> -> input <Buffer.0 c> (k c)
+--                 | <empty> -> on Console.0! (charHandler1
+--                   (rollback l)                                  -- '\b'
+--                   (\c -> input <Log.1 l k> <Buffer.0 c> (k c)) -- other char
+--                   )
+--             | <accept -> k> -> case buffer of
+--               Buffer:
+--                 | <hold c> -> snd (Console.1 c) (input <Log.2 l> empty (k unit))
+--                 | <empty>  -> input l empty (k unit)
+--           Abort:
+--             | <aborting -> k> -> rollback log
+--           | x -> x
+--   .
 
-  parse : {[LookAhead, Abort, Console]X} -> [Console]X
-  parse = \p -> input (start p) empty p!
+--   rollback : forall X. {<Log [<LookAhead>, <Abort>, <Console>] X> -> [<Console>]X}
+--            = \x -> case x of
+--     Log:
+--       | <start p> -> parse p
+--       | <ouched l> -> snd (textMap Console.1 $eraseCharLit) (rollback l)
+--       | <inched l k> -> input l empty (k LookAhead.0!)
+--   .
 
-  zeros : Int -> [LookAhead, Abort]Int
-  zeros n = on peek! (charHandler2
-      (snd (accept!) (zeros (n + 1))) -- '0'
-      (snd (accept!) n)               -- ' '
-      (abort!)                        -- other char
-    )
+--   parse : forall X. {{[<LookAhead>, <Abort>, <Console>]X} -> [<Console>]X}
+--         = \p -> input <Log.0 p> empty p!
+--   .
 
-  -- map : forall X Y. {X -> Y} -> List X -> List Y
-  -- map = \x y -> case y of
-  --   List:
-  --     | <nil>       -> <List.nil>
-  --     | <cons x xs> -> <List.cons (f x) (map f xs>
+--   on : forall X Y. {X -> {X -> Y} -> Y}
+--      = \x f -> f x
+--   .
 
-  snd : forall X Y. {X -> Y -> X}
-      = \x y -> y
-      .
+--   snd : forall X Y. {X -> Y -> X}
+--       = \x y -> y
+--   .
 
-  on : forall X Y. {X -> {X -> Y} -> Y}
-     = \x f -> f x
-     .
+--   zeros : forall. {$Int -> [<LookAhead>, <Abort>]$Int}
+--         = \n -> on LookAhead.0! (charHandler2
+--       (snd LookAhead.1! (zeros ($add n 1))) -- '0'
+--       (snd LookAhead.1! n)                  -- ' '
+--       (abort!)                        -- other char
+--     )
+--   .
 
-in (parse (zeros 0) : [Console]Int)
+-- -- in (parse (zeros $zero) : [<Console>]$Int)
+-- in parse (zeros $zero)
 
--- is this a module?
-fns = letrec
-  fst : forall X Y. {X -> Y -> X}
-      = \x y -> x
-      .
+-- -- is this a module?
+-- fns = letrec
+--   fst : forall X Y. {X -> Y -> X}
+--       = \x y -> x
+--       .
 
-  if_ : forall X. {<Bool> -> {X} -> {X} -> X}
-      = \val t f -> case val of
-        Bool:
-          <tt> -> t!
-          <ff> -> f!
-        .
+--   if_ : forall X. {<Bool> -> {X} -> {X} -> X}
+--       = \val t f -> case val of
+--         Bool:
+--           <tt> -> t!
+--           <ff> -> f!
+--         .
 
-  -- TODO: consider why Abort doesn't appear in the signature
-  -- catch : forall X. {<Abort>X -> {X} -> X}
-  catch : forall X. {X -> {X} -> X}
-        = \x h -> handle x : X with
-          Abort:
-            <aborting -> _> -> h! -- handle the abort
+--   -- TODO: consider why Abort doesn't appear in the signature
+--   -- catch : forall X. {<Abort>X -> {X} -> X}
+--   catch : forall X. {X -> {X} -> X}
+--         = \x h -> handle x : X with
+--           Abort:
+--             <aborting -> _> -> h! -- handle the abort
 
-          -- TODO: we require renaming the value here?
-          x -> x -- it returned a value, pass on
-          .
+--           -- TODO: we require renaming the value here?
+--           | x -> x -- it returned a value, pass on
+--           .
 
-in catch
+-- in catch
 
--- TODO
--- * syntax for data constructors
--- * remove duplicate mention of adjustments / effects handled
+-- -- TODO
+-- -- * syntax for data constructors
+-- -- * remove duplicate mention of adjustments / effects handled
 
--- pipe = letrec
---   pipe : forall [e] X Y. {{[e, Abort, Send X] Unit} -> [e, Abort, Receive X] Y} -> [e, Abort] Y}
---        -- TODO change the lambda delimiter from `->` to `.` like the paper?
---        = \x y -> handle y! : [e | <Abort>] Y with
---          Send X:
---            | x -> s -> handle y! : [e, Abort] Y with
---              Receive X:
---                | -> r -> pipe (s unit) (r x)
---              | y      -> y
---          | x -> case x of
---            Unit:
---              | unit -> handle y! : [e, Abort] Y with
---                Receive X:
---                  | -> r -> abort!
---                | y      -> y
---        .
--- in pipe
+-- -- pipe = letrec
+-- --   pipe : forall [e] X Y. {{[e, Abort, Send X] Unit} -> [e, Abort, Receive X] Y} -> [e, Abort] Y}
+-- --        -- TODO change the lambda delimiter from `->` to `.` like the paper?
+-- --        = \x y -> handle y! : [e | <Abort>] Y with
+-- --          Send X:
+-- --            | x -> s -> handle y! : [e, Abort] Y with
+-- --              Receive X:
+-- --                | <receive -> r> -> pipe (s unit) (r x)
+-- --              | y -> y
+-- --          | x -> case x of
+-- --            Unit:
+-- --              | <unit> -> handle y! : [e, Abort] Y with
+-- --                Receive X:
+-- --                  | <aborting -> r> -> abort!
+-- --                | y -> y
+-- --        .
+-- -- in pipe
 
-|]
+-- |]
