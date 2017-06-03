@@ -1,4 +1,4 @@
 packages:
   ./
   ./ipld/
-  ./binary-serialise-cbor/
+  ./ipld/binary-serialise-cbor/
