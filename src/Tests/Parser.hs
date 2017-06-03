@@ -178,10 +178,10 @@ unitTests = testGroup "parsing"
     in parserTest defn parseDataDecl expected
 
   , let defn = "interface IFace = foo -> bar | baz"
-        expected = (InterfaceDecl "IFace" (EffectInterface []
+        expected = InterfaceDecl "IFace" (EffectInterface []
           [ CommandDeclaration [VariableTy "foo"] (VariableTy "bar")
           , CommandDeclaration [] (VariableTy "baz")
-          ]))
+          ])
     in parserTest defn parseInterfaceDecl expected
 
   , let defn = T.unlines

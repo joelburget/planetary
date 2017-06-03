@@ -50,7 +50,7 @@ charHandler1 _ = throwError FailedForeignFun
 
 -- charHandler2 :: TmI -> TmI -> TmI -> Char -> TmI
 charHandler2 :: SpineI -> ForeignM TmI
-charHandler2 [b1, b2, b3, ForeignDataTm uid] = do
+charHandler2 [b1, b2, b3, ForeignDataTm uid] =
   flip fmap (lookupForeign uid) $ \case
     '0' -> b1
     ' ' -> b2

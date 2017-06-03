@@ -1,5 +1,18 @@
 {-# language Rank2Types #-}
-module Planetary.Util where
+module Planetary.Util
+  ( Vector
+  , Stack
+  , todo
+  , assertM
+  , assert
+  , strictZip
+  , withState'
+  , (??)
+  , (<$$>)
+  , over2
+  , maybeIf
+  , Unifiable(unify)
+  ) where
 
 import Control.Monad.State.Strict
 import Control.Monad.Except

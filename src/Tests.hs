@@ -1,5 +1,5 @@
 {-# language OverloadedLists #-}
-module Tests where
+module Tests (runTests) where
 
 import Test.Tasty
 

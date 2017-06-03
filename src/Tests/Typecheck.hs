@@ -1,6 +1,5 @@
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
-{-# language TypeApplications #-}
 module Tests.Typecheck where
 
 import Bound (closed)

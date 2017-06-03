@@ -5,10 +5,9 @@
 {-# language MultiWayIf #-}
 {-# language NamedFieldPuns #-}
 {-# language StandaloneDeriving #-}
-{-# language TypeApplications #-}
 {-# language TypeSynonymInstances #-}
 {-# language TupleSections #-}
-module Planetary.Support.NameResolution where
+module Planetary.Support.NameResolution (makeTables, TablingErr(..)) where
 
 import Bound
 import Control.Lens ((&), ix, at, (?~), _1, _2, _3, _4, (^?), (%~), mapMOf)
@@ -106,7 +105,7 @@ makeTablesM (TermDecl_ (TermDecl name recTm):xs) = do
   Just recTm' <- pure (closed recTm)
   recTm'' <- convertTm recTm'
   Just recTm''' <- pure (closed recTm'')
-  pure (xs' & _4 %~ ((TermDecl name recTm'''):))
+  pure (xs' & _4 %~ (TermDecl name recTm''':))
 makeTablesM [] = pure (mempty, mempty, [], [])
 
 lookupVar :: Text -> TablingM Int
@@ -282,9 +281,9 @@ convertIntScope scope = do
   unique <- gen
   let tm = instantiate (Variable . (unique,)) scope
   convertedTm <- convertTm tm
-  let closer = (\(unique', i) -> if
+  let closer (unique', i) = if
         | unique' /= unique -> Nothing
-        | otherwise         -> Just i)
+        | otherwise         -> Just i
   pure (abstract closer convertedTm)
 
 convertUnitScope
