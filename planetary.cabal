@@ -24,11 +24,11 @@ library
     -- support
     Planetary.Support.Parser
     Planetary.Support.Parser.QQ
-    Planetary.Support.UIds
+    Planetary.Support.Ids
     Planetary.Support.MakeTables
 
     -- library
-    Planetary.Library.Frank
+    Planetary.Library.FrankExamples
     Planetary.Library.HaskellForeign
     Planetary.Library.Syntax
 
@@ -64,6 +64,7 @@ library
     binary-serialise-cbor,
     syb,
     monad-gen == 0.3.*,
+    mmorph >= 1.0 && < 1.2,
 
     -- testing
     tasty == 0.11.*,

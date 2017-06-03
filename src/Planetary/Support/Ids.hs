@@ -1,8 +1,8 @@
 {-# options_ghc -fno-warn-missing-signatures #-}
 {-# language OverloadedStrings #-}
 {-# language TypeApplications #-}
--- Intentionally don't export any easy way to construct uids
-module Planetary.Support.UIds
+-- Intentionally don't export any easy way to construct ids
+module Planetary.Support.Ids
   ( intId
   , boolId
   , strId
@@ -31,6 +31,10 @@ module Planetary.Support.UIds
   , idUid
   , uidOpsId
   , uidId
+  , textId
+  , textIfaceId
+  , consoleId
+  , charHandlerId
   ) where
 
 import Data.Byteable (toBytes)
@@ -76,4 +80,8 @@ intId
   : idUid
   : uidOpsId
   : uidId
+  : textId
+  : textIfaceId
+  : consoleId
+  : charHandlerId
   :_ = generateCids
