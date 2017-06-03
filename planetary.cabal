@@ -25,7 +25,7 @@ library
     Planetary.Support.Parser
     Planetary.Support.Parser.QQ
     Planetary.Support.Ids
-    Planetary.Support.MakeTables
+    Planetary.Support.NameResolution
 
     -- library
     Planetary.Library.FrankExamples

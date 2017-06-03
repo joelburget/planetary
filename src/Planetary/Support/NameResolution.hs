@@ -8,7 +8,7 @@
 {-# language TypeApplications #-}
 {-# language TypeSynonymInstances #-}
 {-# language TupleSections #-}
-module Planetary.Support.MakeTables where
+module Planetary.Support.NameResolution where
 
 import Bound
 import Control.Lens ((&), ix, at, (?~), _1, _2, _3, _4, (^?), (%~), mapMOf)
@@ -67,7 +67,8 @@ deriving instance MonadState TablingState TablingM
 --
 -- Term conversions can spawn child type conversions (at the places where terms
 -- hold types).
-makeTables :: [DeclS]
+makeTables
+  :: [DeclS]
   -> Either TablingErr
      ( DataTypeTable Cid Int
      , InterfaceTable Cid Int
@@ -124,7 +125,7 @@ withPushedVars names = local (names ++)
 --
 
 convertDti
-  :: DataTypeInterface Text Text
+  :: Raw1 DataTypeInterface
   -> TablingM (Cid, Executable1 DataTypeInterface)
 convertDti (DataTypeInterface binders ctrs) = do
   let varNames = map fst binders
@@ -134,7 +135,7 @@ convertDti (DataTypeInterface binders ctrs) = do
   pure (cidOf dti, dti)
 
 convertEi
-  :: EffectInterface Text Text
+  :: Raw1 EffectInterface
   -> TablingM (Cid, Executable1 EffectInterface)
 convertEi (EffectInterface binders cmds) = do
   let varNames = map fst binders
@@ -144,11 +145,11 @@ convertEi (EffectInterface binders cmds) = do
   pure (cidOf ei, ei)
 
 convertCtr
-  :: ConstructorDecl Text Text -> TablingM (Executable1 ConstructorDecl)
-convertCtr (ConstructorDecl vtys)
-  = ConstructorDecl <$> traverse convertValTy vtys
+  :: Raw1 ConstructorDecl -> TablingM (Executable1 ConstructorDecl)
+convertCtr (ConstructorDecl name vtys)
+  = ConstructorDecl name <$> traverse convertValTy vtys
 
-convertValTy :: ValTy Text Text -> TablingM (Executable1 ValTy)
+convertValTy :: Raw1 ValTy -> TablingM (Executable1 ValTy)
 convertValTy = \case
   DataTy uid tyargs -> DataTy
     <$> lookupUid uid
@@ -156,24 +157,24 @@ convertValTy = \case
   SuspendedTy cty   -> SuspendedTy <$> convertCompTy cty
   VariableTy var    -> VariableTy  <$> lookupVar var
 
-convertTyArg :: TyArg Text Text -> TablingM (Executable1 TyArg)
+convertTyArg :: Raw1 TyArg -> TablingM (Executable1 TyArg)
 convertTyArg = \case
   TyArgVal valTy -> TyArgVal <$> convertValTy valTy
   TyArgAbility ability -> TyArgAbility <$> convertAbility ability
 
-convertCompTy :: CompTy Text Text -> TablingM (Executable1 CompTy)
+convertCompTy :: Raw1 CompTy -> TablingM (Executable1 CompTy)
 convertCompTy (CompTy dom (Peg ab codom)) = CompTy
   <$> traverse convertValTy dom
   <*> (Peg
     <$> convertAbility ab
     <*> convertValTy codom)
 
-convertAbility :: Ability Text Text -> TablingM (Executable1 Ability)
+convertAbility :: Raw1 Ability -> TablingM (Executable1 Ability)
 convertAbility (Ability initAb umap)
   = Ability initAb <$> convertUidMap convertTyArg umap
 
 convertCmd
-  :: CommandDeclaration Text Text
+  :: Raw1 CommandDeclaration
   -> TablingM (Executable1 CommandDeclaration)
 convertCmd (CommandDeclaration dom codom) = CommandDeclaration
   <$> traverse convertValTy dom
@@ -188,7 +189,7 @@ convertTm = \case
     <$> convertValue val
     <*> convertValTy valTy
   Value val -> Value <$> convertValue val
-  Cut { cont, target } -> Cut <$> convertContinuation cont <*> convertTm target
+  Cut { cont, scrutinee } -> Cut <$> convertContinuation cont <*> convertTm scrutinee
   Letrec defns body ->
         -- we have to be careful here -- the variables the polytype binds also
         -- scope over the term
