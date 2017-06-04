@@ -113,6 +113,7 @@ stepCut (Handle _adj _peg _handlers handleValue) v@Value{} =
   pure $ instantiate1 v handleValue
 
 stepCut (Let _polyty _name body) rhs@Value{} = pure $ instantiate1 rhs body
+stepCut cont cut@Cut {} = stepCut cont =<< step cut
 stepCut cont scrutinee = throwError (CantCut cont scrutinee)
 
 -- withHandlers :: AdjustmentHandlersI -> Scope () (Tm Cid Int) Int -> EvalM a -> EvalM a
