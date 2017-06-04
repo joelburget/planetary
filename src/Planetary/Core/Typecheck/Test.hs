@@ -1,6 +1,6 @@
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
-module Tests.Typecheck where
+module Planetary.Core.Typecheck.Test where
 
 import Bound (closed)
 import Control.Lens

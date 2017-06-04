@@ -34,10 +34,11 @@ library
 
     -- test (export both "run everything" and more specific tests)
     Tests
-    Tests.Eval
-    Tests.Parser
-    Tests.Syntax
-    Tests.Typecheck
+    Planetary.Core.Eval.Test
+    Planetary.Core.Syntax.Test
+    Planetary.Core.Typecheck.Test
+    Planetary.Support.Parser.Test
+    Planetary.Library.HaskellForeign.Test
 
   -- other-extensions:
   build-depends:

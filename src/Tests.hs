@@ -3,22 +3,22 @@ module Tests (runTests) where
 
 import Test.Tasty
 
-import qualified Tests.Eval as Eval
--- import qualified Tests.Meta as Meta
-import qualified Tests.Parser as Parser
-import qualified Tests.Syntax as Syntax
-import qualified Tests.Typecheck as Typecheck
+import qualified Planetary.Core.Eval.Test as Eval
+import qualified Planetary.Core.Syntax.Test as Syntax
+import qualified Planetary.Core.Typecheck.Test as Typecheck
+import qualified Planetary.Support.Parser.Test as Parser
+import qualified Planetary.Library.HaskellForeign.Test as HaskellForeign
 
 runTests :: IO ()
 runTests = defaultMain tests
 
 tests :: TestTree
 tests = testGroup "planetary"
-  [ Eval.unitTests
-  -- , Meta.unitTests
-  , Parser.unitTests
-  , Syntax.unitTests
+  [ Syntax.unitTests
+  , Eval.unitTests
   , Typecheck.unitTests
+  , Parser.unitTests
+  , HaskellForeign.unitTests
   ]
 
 -- unitTests :: TestTree

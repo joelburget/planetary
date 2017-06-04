@@ -215,12 +215,13 @@ extendAbility (Ability initAb uidMap) (Adjustment adj)
 type Executable1 f = f Cid Int
 type Executable2 f = f Cid Int Int
 
-type AbilityI    = Executable1 Ability
-type AdjustmentI = Executable1 Adjustment
-type CompTyI     = Executable1 CompTy
-type PolytypeI   = Executable1 Polytype
-type ValTyI      = Executable1 ValTy
-type TyArgI      = Executable1 TyArg
+type AbilityI            = Executable1 Ability
+type AdjustmentI         = Executable1 Adjustment
+type CommandDeclarationI = Executable1 CommandDeclaration
+type CompTyI             = Executable1 CompTy
+type PolytypeI           = Executable1 Polytype
+type ValTyI              = Executable1 ValTy
+type TyArgI              = Executable1 TyArg
 
 type TmI                 = Executable2 Tm
 type ValueI              = Executable2 Value

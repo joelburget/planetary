@@ -128,7 +128,7 @@ parseTyVar = (,EffTy) <$> brackets identifier
          <|> (,ValTy) <$> identifier
          <?> "Ty Var"
 
--- 0 | 0|Interfaces | e|Interfaces | Interfaces
+-- 0 | 0,Interfaces | e,Interfaces | Interfaces
 -- TODO: allow explicit e? `[e]`
 parseAbilityBody :: MonadicParsing m => m Ability'
 parseAbilityBody =

@@ -7,18 +7,13 @@ import Network.IPLD
 import Planetary.Core
 import Planetary.Support.Ids
 import Planetary.Support.Parser.QQ
+import Planetary.Library.HaskellForeign
 import Planetary.Util
 
-vector, uidMap, lfix :: Vector TyArgI -> ValTyI
-
-vector = DataTy vectorId
-uidMap = DataTy uidMapId
-lfix   = DataTy lfixId
-
-dataTypeTable :: DataTypeTable Cid Int
-interfaceTable :: InterfaceTable Cid Int
-( dataTypeTable :: DataTypeTable Cid Int,
-  interfaceTable :: InterfaceTable Cid Int,
+dataTypeTable :: DataTypeTableI
+interfaceTable :: InterfaceTableI
+( dataTypeTable :: DataTypeTableI,
+  interfaceTable :: InterfaceTableI,
   _,
   _) = [declarations|
 

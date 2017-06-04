@@ -24,7 +24,7 @@ import Planetary.Core.UIdMap
 import Planetary.Util
 
 data TcErr
-  = DataUIdMismatch
+  = DataUIdMismatch Cid Cid
   | ZipLengthMismatch
   | FailedDataTypeLookup
   | FailedConstructorLookup
@@ -66,11 +66,16 @@ newtype TcM uid a b = TcM
   deriving (Functor, Applicative, Monad, MonadError TcErr)
 deriving instance MonadState (TypingEnv uid a) (TcM uid a)
 deriving instance MonadReader (TypingTables uid a) (TcM uid a)
-type TcM' = TcM Cid Int
+
+type DataTypeTableI  = DataTypeTable  Cid Int
+type InterfaceTableI = InterfaceTable Cid Int
+type TypingTablesI   = TypingTables   Cid Int
+type TypingEnvI      = TypingEnv      Cid Int
+type TcM'            = TcM            Cid Int
 
 runTcM
-  :: TypingTables Cid Int
-  -> TypingEnv Cid Int
+  :: TypingTablesI
+  -> TypingEnvI
   -> TcM' a
   -> Either TcErr a
 runTcM tables env (TcM action) = runReader
@@ -112,14 +117,14 @@ check (Value (Lambda _binders body))
   withAbility ability $ check body' codom
 -- DATA
 check (Value (DataConstructor uid1 row tms)) (DataTy uid2 valTys) = do
-  assert DataUIdMismatch (uid1 == uid2)
+  assert (DataUIdMismatch uid1 uid2) (uid1 == uid2)
   argTys <- lookupConstructorTy uid1 row
   mapM_ (uncurry check) =<< strictZip ZipLengthMismatch tms argTys
 -- CASE
 check (Cut (Case uid1 rows) m) ty = do
   -- args :: (Vector (TyArg a))
   DataTy uid2 _args <- infer m
-  assert DataUIdMismatch (uid1 == uid2)
+  assert (DataUIdMismatch uid1 uid2) (uid1 == uid2)
 
   dataRows <- lookupDataType uid1 -- :: Vector (Vector ValTyI)
   zipped <- strictZip ZipLengthMismatch dataRows rows
@@ -150,10 +155,10 @@ check m b = do
 
 -- TODO: convert to `fromScope`?
 -- TODO: is the succ necessary?
-succOpen :: Scope () (Tm Cid Int) Int -> Tm Cid Int Int
+succOpen :: Scope () (Tm Cid Int) Int -> TmI
 succOpen = (succ <$>) . instantiate1 (V 0)
 
-instantiateAbility :: AbilityI -> TcM' (UIdMap Cid [CommandDeclaration Cid Int])
+instantiateAbility :: AbilityI -> TcM' (UIdMap Cid [CommandDeclarationI])
 instantiateAbility (Ability _ uidmap) =
   iforM uidmap $ \uid tyArgs -> lookupCommands uid
     -- iforM cmds $ \row (CommandDeclaration as b) ->
@@ -221,10 +226,10 @@ lookupConstructorTy :: Cid -> Row -> TcM' [ValTyI]
 lookupConstructorTy uid row
   = asks (^? _1 . ix uid . ix row) >>= (?? FailedConstructorLookup)
 
-lookupCommands :: Cid -> TcM' [CommandDeclaration Cid Int]
+lookupCommands :: Cid -> TcM' [CommandDeclarationI]
 lookupCommands uid = asks (^? _2 . ix uid . commands) >>= (?? LookupCommands)
 
-lookupCommandTy :: Cid -> Row -> TcM' (CommandDeclaration Cid Int)
+lookupCommandTy :: Cid -> Row -> TcM' CommandDeclarationI
 lookupCommandTy uid row
   = asks (^? _2 . ix uid . commands . ix row) >>= (?? LookupCommandTy)
 

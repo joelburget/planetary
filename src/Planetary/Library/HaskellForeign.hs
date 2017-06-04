@@ -10,7 +10,14 @@ import Planetary.Core
 import Planetary.Support.Ids
 import Planetary.Util
 
--- TODO: this is really a "haskell int"
+haskellOracles :: CurrentHandlers
+haskellOracles = uIdMapFromList
+  [ (intOpsId, [ liftBinaryOp @Int (+) , liftBinaryOp @Int (-) ])
+  , (boolOpsId, [ liftBinaryOp (&&) , liftBinaryOp (||), liftUnaryOp not ])
+  , (strOpsId, [ liftBinaryOp @String (++) ])
+  -- , (uidOpsId, [ generateUid ]
+  ]
+
 intTy :: ValTyI
 intTy = DataTy intId []
 
@@ -23,8 +30,23 @@ strTy = DataTy strId []
 uidTy :: ValTyI
 uidTy = DataTy uidId []
 
+vector, uidMap, lfix :: Vector TyArgI -> ValTyI
+
+vector = DataTy vectorId
+uidMap = DataTy uidMapId
+lfix   = DataTy lfixId
+
+-- For now these are all opaque: they don't expose any constructors we can see
+-- XXX how do we check the types are saturated correctly?
+dataTypes :: DataTypeTableI
+dataTypes = uIdMapFromList
+  [ (vectorId, [])
+  , (uidMapId, [])
+  , (lfixId, [])
+  ]
+
 -- TODO: some way to declare both implementation and type at the same time
-interfaceTable :: InterfaceTable Cid Int
+interfaceTable :: InterfaceTableI
 interfaceTable = uIdMapFromList
   [ (intOpsId, EffectInterface []
     [ CommandDeclaration [intTy, intTy] intTy -- +
@@ -41,13 +63,6 @@ interfaceTable = uIdMapFromList
   , (uidOpsId, EffectInterface []
     [ CommandDeclaration [] uidTy -- generateUid
     ])
-  ]
-
-foreignContinuations :: CurrentHandlers
-foreignContinuations = uIdMapFromList
-  [ (intOpsId, [ liftBinaryOp @Int (+) , liftBinaryOp @Int (-) ])
-  , (boolOpsId, [ liftBinaryOp (&&) , liftBinaryOp (||), liftUnaryOp not ])
-  , (strOpsId, [ liftBinaryOp @String (++) ])
   ]
 
 lookupForeign :: IsIpld a => Cid -> ForeignM a
@@ -86,19 +101,19 @@ mkForeign val = let val' = toIpld val in (valueCid val', val')
 mkForeignTm :: IsIpld a => a -> TmI
 mkForeignTm = ForeignDataTm . fst . mkForeign
 
--- TODO: use QQ
-exampleDataTypes :: DataTypeTable Cid String
-exampleDataTypes = uIdMapFromList
-  -- void has no constructor
-  [ (voidUid, [])
-  -- unit has a single nullary constructor
-  , (unitId, [[]])
-  -- bool has two nullary constructors
-  , (boolId, [[], []])
-  -- `data Id a = Id a`
-  , (idUid, [[VTy"a"]])
-  -- A, B = D [R] | { C } | X
-  , (valueTyUid, [
-      -- [uidUid
-    ])
-  ]
+-- -- TODO: use QQ
+-- exampleDataTypes :: DataTypeTable Cid String
+-- exampleDataTypes = uIdMapFromList
+--   -- void has no constructor
+--   [ (voidUid, [])
+--   -- unit has a single nullary constructor
+--   , (unitId, [[]])
+--   -- bool has two nullary constructors
+--   , (boolId, [[], []])
+--   -- `data Id a = Id a`
+--   , (idUid, [[VTy"a"]])
+--   -- A, B = D [R] | { C } | X
+--   , (valueTyUid, [
+--       -- [uidUid
+--     ])
+--   ]

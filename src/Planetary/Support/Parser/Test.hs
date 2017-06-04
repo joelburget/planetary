@@ -3,7 +3,7 @@
 {-# language PackageImports #-}
 {-# language PatternSynonyms #-}
 {-# language RecordWildCards #-}
-module Tests.Parser where
+module Planetary.Support.Parser.Test where
 
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -83,14 +83,14 @@ unitTests = testGroup "parsing"
   , parserTest "<1>" parseInterfaceInstance ("1", [])
 
   , parserTest "0" parseAbilityBody closedAbility
-  , parserTest "0|<1>" parseAbilityBody $
+  , parserTest "0,<1>" parseAbilityBody $
     Ability ClosedAbility (uIdMapFromList [("1", [])])
   , parserTest "e" parseAbilityBody emptyAbility
-  , parserTest "e|<1>" parseAbilityBody $
+  , parserTest "e,<1>" parseAbilityBody $
     Ability OpenAbility (uIdMapFromList [("1", [])])
 
   -- TODO: parseAbility
-  , parserTest "[0|<1>]" parseAbility $
+  , parserTest "[0,<1>]" parseAbility $
     Ability ClosedAbility (uIdMapFromList [("1", [])])
 
   , parserTest "[]" parseAbility emptyAbility
@@ -114,9 +114,9 @@ unitTests = testGroup "parsing"
   , parserTest "X" parseValTy (VTy"X")
   , parserTest "(X)" parseValTy (VTy"X")
 
-  , parserTest "X -> X" parseCommandDecl $ CommandDeclaration [VTy"X"] (VTy"X")
+  , parserTest "foo : X -> X" parseCommandDecl $ CommandDeclaration [VTy"X"] (VTy"X")
 
-  , parserTest "interface Iface X Y = X -> Y | Y -> X" parseInterfaceDecl
+  , parserTest "interface Iface X Y = foo : X -> Y | bar : Y -> X" parseInterfaceDecl
     (InterfaceDecl "Iface" (EffectInterface [("X", ValTy), ("Y", ValTy)]
       [ CommandDeclaration [VTy"X"] (VTy"Y")
       , CommandDeclaration [VTy"Y"] (VTy"X")
@@ -156,8 +156,8 @@ unitTests = testGroup "parsing"
   , let defn = T.unlines
           [ "case x of"
           , "  e829515d5:"
-          , "    | -> y"
-          , "    | a b c -> z"
+          , "    | <_> -> y"
+          , "    | <_ a b c> -> z"
           ]
         cont = CaseP "e829515d5"
           [ ([], Variable "y")
@@ -177,7 +177,7 @@ unitTests = testGroup "parsing"
           ])
     in parserTest defn parseDataDecl expected
 
-  , let defn = "interface IFace = foo -> bar | baz"
+  , let defn = "interface IFace = _ : foo -> bar | _ : baz"
         expected = InterfaceDecl "IFace" (EffectInterface []
           [ CommandDeclaration [VariableTy "foo"] (VariableTy "bar")
           , CommandDeclaration [] (VariableTy "baz")
@@ -185,10 +185,10 @@ unitTests = testGroup "parsing"
     in parserTest defn parseInterfaceDecl expected
 
   , let defn = T.unlines
-          [ "handle y! : [e | <Abort>] Y with"
+          [ "handle y! : [e , <Abort>] Y with"
           , "  Receive X:"
-          , "    <receive -> r> -> abort!"
-          , "  y -> y"
+          , "    | <receive -> r> -> abort!"
+          , "  | y -> y"
           ]
         scrutinee = Cut (Application []) (V"y")
         adj = Adjustment (uIdMapFromList
