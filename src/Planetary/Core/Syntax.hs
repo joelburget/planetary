@@ -127,10 +127,15 @@ newtype Adjustment uid a = Adjustment (UIdMap uid (Vector (TyArg uid a)))
 
 data Value uid a b
   -- use (inferred)
-  = Command uid Row (Vector (Tm uid a b))
+  = Command uid Row
 
   -- construction (checked)
   | DataConstructor uid Row (Vector (Tm uid a b))
+  | ForeignValue
+    { foreignTyUid :: uid
+    , foreignTySaturation :: Vector (ValTy uid a)
+    , foreignValueUid :: uid
+    }
   | Lambda (Vector Text) (Scope Int (Tm uid a) b)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
@@ -366,7 +371,7 @@ bindPeg :: Peg uid a -> (a -> ValTy uid b) -> Peg uid b
 bindPeg (Peg ab val) f = Peg (bindAbility ab f) (val >>= f)
 
 bindVal :: Value uid c a -> (a -> Tm uid c b) -> Value uid c b
-bindVal (Command uid row spine) f = Command uid row ((>>= f) <$> spine)
+bindVal (Command uid row) f = Command uid row
 bindVal (DataConstructor uid row tms) f =
   DataConstructor uid row ((>>= f) <$> tms)
 bindVal (Lambda binderNames body) f = Lambda binderNames (body >>>= f)
@@ -435,8 +440,8 @@ instance (IsUid uid, Eq a) => Eq1 (AdjustmentHandlers uid a) where
     liftEq (liftEq (liftEq eq)) (toList handlers1) (toList handlers2)
 
 instance (IsUid uid, Eq e) => Eq1 (Value uid e) where
-  liftEq eq (Command uid1 row1 spine1) (Command uid2 row2 spine2) =
-    uid1 == uid2 && row1 == row2 && liftEq (liftEq eq) spine1 spine2
+  liftEq eq (Command uid1 row1) (Command uid2 row2) =
+    uid1 == uid2 && row1 == row2
   liftEq eq (DataConstructor uid1 row1 app1) (DataConstructor uid2 row2 app2) =
     uid1 == uid2 && row1 == row2 && liftEq (liftEq eq) app1 app2
   liftEq eq (Lambda binderNames1 body1) (Lambda binderNames2 body2) =
@@ -499,10 +504,9 @@ instance IsUid uid => Ord1 (CompTy uid) where
 
 instance (IsUid uid, Ord o) => Ord1 (Value uid o) where
   liftCompare cmp l r = case (l, r) of
-    (Command uid1 row1 spine1, Command uid2 row2 spine2) ->
+    (Command uid1 row1, Command uid2 row2) ->
       compare uid1 uid2 <>
-      compare row1 row2 <>
-      liftCompare (liftCompare cmp) spine1 spine2
+      compare row1 row2
     (DataConstructor uid1 row1 app1, DataConstructor uid2 row2 app2) ->
       compare uid1 uid2 <>
       compare row1 row2 <>
@@ -644,13 +648,11 @@ instance Show uid => Show1 (Peg uid) where
 
 instance (Show uid, Show a) => Show1 (Value uid a) where
   liftShowsPrec s sl d val = showParen (d > 10) $ case val of
-    Command uid row spine ->
+    Command uid row ->
         showString "Command "
       . shows uid
       . showSpace
       . shows row
-      . showSpace
-      . liftShowList s sl spine
     DataConstructor uid row tms ->
         showString "DataConstructor "
       . shows uid

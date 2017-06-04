@@ -85,10 +85,6 @@ halt :: EvalM a
 halt = throwError Halt
 
 step :: TmI -> EvalM TmI
-step (CommandV uid row tms) = do
-  -- handler <- findHandler
-  runHandler uid row tms
-  -- handleCommand cid row spine handlers
 step v@(Value _) = pure v -- ?
 step Cut {cont, scrutinee} = stepCut cont scrutinee
   -- case scrutinee of
@@ -105,6 +101,10 @@ stepCut :: CI -> TmI -> EvalM TmI
 stepCut (Application spine) (LambdaV _names scope)
   -- TODO: safe
   = pure $ instantiate (spine !!) scope
+stepCut (Application spine) (CommandV uid row) = do
+  -- handler <- findHandler
+  runHandler uid row spine
+  -- handleCommand cid row spine handlers
 stepCut (Case _uid1 rows) (DataConstructorV _uid2 rowNum args) = do
   (_, row) <- rows ^? ix rowNum ?? IndexErr
   -- TODO: maybe we need to evaluate the args to a value first

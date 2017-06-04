@@ -14,38 +14,38 @@ import Planetary.Support.Parser.QQ
 
 checkTest
   :: String
-  -> TypingTables Cid Int
-  -> TypingEnv Cid Int
+  -> TypingTablesI
+  -> TypingEnvI
   -> TmI
-  -> ValTy Cid Int
+  -> ValTyI
   -> TestTree
 checkTest name tables env tm ty = testCase name $
   runTcM tables env (check tm ty) @?= Right ()
 
 inferTest
   :: String
-  -> TypingTables Cid Int
-  -> TypingEnv Cid Int
+  -> TypingTablesI
+  -> TypingEnvI
   -> TmI
-  -> Either TcErr (ValTy Cid Int)
+  -> Either TcErr ValTyI
   -> TestTree
 inferTest name tables env tm expected = testCase name $
   runTcM tables env (infer tm) @?= expected
 
 -- TODO: use QQ
-exampleInterfaces :: InterfaceTable Cid Int
+exampleInterfaces :: InterfaceTableI
 exampleInterfaces = uIdMapFromList []
 
-dataTypeTable :: DataTypeTable Cid Int
+dataTypeTable :: DataTypeTableI
 dataTypeTable = mempty
 
-ambientAbility :: Ability Cid Int
+ambientAbility :: AbilityI
 ambientAbility = emptyAbility
 
-exampleTables :: TypingTables Cid Int
+exampleTables :: TypingTablesI
 exampleTables = (dataTypeTable, exampleInterfaces, ambientAbility)
 
-emptyTypingEnv :: TypingEnv Cid Int
+emptyTypingEnv :: TypingEnvI
 emptyTypingEnv = TypingEnv []
 
 mockCid :: ByteString -> Cid
@@ -57,7 +57,7 @@ unitTests = testGroup "typechecking"
     [ let ty = VariableTy 787
           env = TypingEnv [Left ty]
       in inferTest "VAR 1" exampleTables env (V 0) (Right ty)
-    , inferTest "VAR 2" exampleTables emptyTypingEnv (V 0) (Left LookupVarTy)
+    , inferTest "VAR 2" exampleTables emptyTypingEnv (V 0) (Left (LookupVarTy 0))
     ]
 
   , testGroup "TODO: infer polyvar"
@@ -85,34 +85,44 @@ unitTests = testGroup "typechecking"
           tables = exampleTables & _2 .~ interfaces
                                  & _3 .~ ambient
 
+          cmd = CommandV cmdUid 0
+
           expected = Right $
             SuspendedTy $ CompTy [domTy] $ Peg ambient codomTy
 
-      in inferTest "COMMAND" tables emptyTypingEnv (CommandV cmdUid 0 []) expected
+      in inferTest "COMMAND" tables emptyTypingEnv cmd expected
     ]
 
-  , testGroup "infer app"
-    [ let dataUid = mockCid "dataUid"
-          v1Uid = mockCid "v1"
-          v2Uid = mockCid "v2"
-          tm1 = DataTm v1Uid 0 []
-          tm2 = DataTm v2Uid 0 []
-          ty1 = DataTy v1Uid []
-          ty2 = DataTy v2Uid []
-          app = Application [tm1, tm2]
-          Just f = closed $ Lam ["x", "y"] $
-            DataTm dataUid 0 [V"x", V"y"]
-          resultTy = DataTy dataUid [TyArgVal ty1, TyArgVal ty2]
-          annF = Annotation f $ SuspendedTy $
-            CompTy [ty1, ty2] (Peg emptyAbility resultTy)
-          expected = Right resultTy
-          tables = exampleTables & _1 .~ uIdMapFromList
-            [ (dataUid, [[ty1, ty2]])
-            , (v1Uid, [[]])
-            , (v2Uid, [[]])
-            ]
-      in inferTest "APP" tables emptyTypingEnv (Cut app annF) expected
-    ]
+  , let dataUid = mockCid "dataUid"
+        v1Id = mockCid "v1"
+        v2Id = mockCid "v2"
+        tm1 = DataTm v1Id 0 []
+        tm2 = DataTm v2Id 0 []
+        ty1 = DataTy v1Id []
+        ty2 = DataTy v2Id []
+        app = Application [tm1, tm2]
+        Just f = closed $ Lam ["x", "y"] $
+          DataTm dataUid 0 [V"x", V"y"]
+        resultTy = DataTy dataUid [TyArgVal ty1, TyArgVal ty2]
+
+        goodAnnF = Annotation f $ SuspendedTy $
+          CompTy [ty1, ty2] (Peg emptyAbility resultTy)
+        expected = Right resultTy
+
+        baddAnnF = Annotation f $ SuspendedTy $
+          CompTy [ty1, ty1] (Peg emptyAbility resultTy)
+        expectedBad = Left (TyUnification ty1 ty2)
+
+        tables = exampleTables & _1 .~ uIdMapFromList
+          [ (dataUid, [[ty1, ty2]])
+          , (v1Id, [[]])
+          , (v2Id, [[]])
+          ]
+
+    in testGroup "infer app"
+      [ inferTest "APP (1)" tables emptyTypingEnv (Cut app goodAnnF) expected
+      , inferTest "APP (2)" tables emptyTypingEnv (Cut app baddAnnF) expectedBad
+      ]
 
   , testGroup "infer annotation" []
     -- [ let ty = DataTy (mockCid "ty") []
@@ -122,23 +132,23 @@ unitTests = testGroup "typechecking"
   , testGroup "TODO: check lambda" []
 
   , testGroup "check data"
-    [ let v1Uid = mockCid "v1"
-          tm1 = DataTm v1Uid 0 []
-          ty1 = DataTy v1Uid []
+    [ let v1Id = mockCid "v1"
+          tm1 = DataTm v1Id 0 []
+          ty1 = DataTy v1Id []
           tables = exampleTables & _1 .~ uIdMapFromList
-            [ (v1Uid, [[]]) ]
+            [ (v1Id, [[]]) ]
       in checkTest "DATA (simple)" tables emptyTypingEnv tm1 ty1
     , let dataUid = mockCid "dataUid"
-          v1Uid = mockCid "v1"
-          v2Uid = mockCid "v2"
-          tm1 = DataTm v1Uid 0 []
-          tm2 = DataTm v2Uid 0 []
-          ty1 = DataTy v1Uid []
-          ty2 = DataTy v2Uid []
+          v1Id = mockCid "v1"
+          v2Id = mockCid "v2"
+          tm1 = DataTm v1Id 0 []
+          tm2 = DataTm v2Id 0 []
+          ty1 = DataTy v1Id []
+          ty2 = DataTy v2Id []
           tables = exampleTables & _1 .~ uIdMapFromList
             [ (dataUid, [[ty1, ty2]])
-            , (v1Uid, [[]])
-            , (v2Uid, [[]])
+            , (v1Id, [[]])
+            , (v2Id, [[]])
             ]
           tm = DataTm dataUid 0 [tm1, tm2]
           expectedTy = DataTy dataUid [TyArgVal ty1, TyArgVal ty2]

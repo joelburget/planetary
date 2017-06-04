@@ -202,10 +202,9 @@ convertTm = \case
 
 convertValue :: PartiallyConverted Value -> TablingM (FullyConverted Value)
 convertValue = \case
-  Command cid row spine -> Command
+  Command cid row -> Command
     <$> lookupUid cid
     <*> pure row
-    <*> mapM convertTm spine
   DataConstructor cid row spine -> DataConstructor
     <$> lookupUid cid
     <*> pure row

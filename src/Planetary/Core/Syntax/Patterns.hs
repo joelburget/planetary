@@ -11,8 +11,7 @@ module Planetary.Core.Syntax.Patterns
   , let_
   , letrec
 
-  , pattern ForeignData
-  , pattern ForeignDataTm
+  , pattern ForeignTm
   , pattern DataTm
   , pattern V
   , pattern CommandV
@@ -30,11 +29,9 @@ import Planetary.Core.Syntax
 import Planetary.Core.UIdMap
 import Planetary.Util
 
-pattern ForeignData :: uid -> Value uid a b
-pattern ForeignData uid = DataConstructor uid 0 []
-
-pattern ForeignDataTm :: uid -> Tm uid a b
-pattern ForeignDataTm uid = Value (ForeignData uid)
+pattern ForeignTm :: uid -> Vector (ValTy uid a) -> uid -> Tm uid a b
+pattern ForeignTm tyUid tySat valueUid
+  = Value (ForeignValue tyUid tySat valueUid)
 
 pattern DataTm :: uid -> Row -> Vector (Tm uid a b) -> Tm uid a b
 pattern DataTm uid row vals = Value (DataConstructor uid row vals)
@@ -42,8 +39,8 @@ pattern DataTm uid row vals = Value (DataConstructor uid row vals)
 pattern V :: b -> Tm uid a b
 pattern V name = Variable name
 
-pattern CommandV :: uid -> Row -> Spine uid a b -> Tm uid a b
-pattern CommandV uid row spine = Value (Command uid row spine)
+pattern CommandV :: uid -> Row -> Tm uid a b
+pattern CommandV uid row = Value (Command uid row )
 
 pattern ConstructV :: uid -> Row -> Vector (Tm uid a b) -> Tm uid a b
 pattern ConstructV uId row args = Value (DataConstructor uId row args)

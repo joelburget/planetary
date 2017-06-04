@@ -29,10 +29,10 @@ data TcErr
   | FailedDataTypeLookup
   | FailedConstructorLookup
   | AbilityUnification
-  | TyUnification
+  | TyUnification ValTyI ValTyI
   | LookupCommands
   | LookupCommandTy
-  | LookupVarTy
+  | LookupVarTy Int
   | CantInfer TmI
   | NotClosed
   deriving (Eq, Show)
@@ -94,7 +94,7 @@ infer = \case
     -- p <- lookupPolyVarTy v
     -- pure $ instantiate (polyVarInstantiator tys) p
   -- COMMAND
-  Value (Command uid row spine) -> do
+  Value (Command uid row) -> do
     CommandDeclaration from to <- lookupCommandTy uid row
     ambient <- getAmbient
     pure $ SuspendedTy (CompTy from (Peg ambient to))
@@ -107,14 +107,17 @@ infer = \case
     pure retTy
   -- COERCE
   Annotation n a -> check (Value n) a >> pure a
+
+  ForeignTm uid sat _ -> pure (DataTy uid (TyArgVal <$> sat))
   x -> throwError (CantInfer x)
 
 check :: TmI -> ValTyI -> TcM' ()
 -- FUN
 check (Value (Lambda _binders body))
       (SuspendedTy (CompTy dom (Peg ability codom))) = do
-  body' <- openWithTypes dom body
-  withAbility ability $ check body' codom
+  withValTypes' dom body $ \body' ->
+    withAbility ability $
+      check body' codom
 -- DATA
 check (Value (DataConstructor uid1 row tms)) (DataTy uid2 valTys) = do
   assert (DataUIdMismatch uid1 uid2) (uid1 == uid2)
@@ -150,7 +153,7 @@ check (Cut (Let pty _name body) val) ty = do
 -- SWITCH
 check m b = do
   a <- infer m
-  _ <- unify a b ?? TyUnification
+  _ <- unify a b ?? TyUnification a b
   pure ()
 
 -- TODO: convert to `fromScope`?
@@ -182,7 +185,6 @@ withValTypes :: [ValTyI] -> TcM' a -> TcM' a
 withValTypes tys = withState'
   (\(TypingEnv env) -> TypingEnv $ env <> (Left <$> tys))
 
--- TODO: these next two functions seem the same?
 withValTypes'
   :: [ValTyI]
   -> Scope Int (Tm Cid Int) Int
@@ -191,10 +193,6 @@ withValTypes'
 withValTypes' tys scope cb =
   let body = instantiate V scope
   in withValTypes tys (cb body)
-
-openWithTypes :: [ValTyI] -> Scope Int (Tm Cid Int) Int -> TcM' TmI
-openWithTypes tys scope = withValTypes tys $
-  pure $ instantiate V scope
 
 openAdjustmentHandler
   :: Scope (Maybe Int) (Tm Cid Int) Int
@@ -246,4 +244,4 @@ getAmbient = asks (^?! _3)
 -- lookupPolyVarTy = _
 
 lookupVarTy :: Int -> TcM' ValTyI
-lookupVarTy v = gets (^? ix v . _Left) >>= (?? LookupVarTy)
+lookupVarTy v = gets (^? ix v . _Left) >>= (?? LookupVarTy v)

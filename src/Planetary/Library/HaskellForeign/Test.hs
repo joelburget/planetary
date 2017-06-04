@@ -3,10 +3,11 @@
 {-# language TypeApplications #-}
 module Planetary.Library.HaskellForeign.Test where
 
+import Control.Lens
 import Data.Text (Text)
 import Prelude hiding (not)
-import Network.IPLD as IPLD
 import Test.Tasty
+import Test.Tasty.HUnit
 
 import Planetary.Core
 import Planetary.Support.Ids
@@ -35,17 +36,19 @@ simpleEnv =
 unitTests :: TestTree
 unitTests =
   let -- zero = mkForeignTm @Int 0
-      one  = mkForeignTm @Int 1
-      two  = mkForeignTm @Int 2
-      four = mkForeignTm @Int 4
+      one  = mkForeignTm @Int intId [] 1
+      two  = mkForeignTm @Int intId [] 2
+      four = mkForeignTm @Int intId [] 4
 
-      hello = mkForeignTm @Text "hello "
-      world = mkForeignTm @Text "world"
-      helloWorld = mkForeignTm @Text "hello world"
+      hello = mkForeignTm @Text textId [] "hello "
+      world = mkForeignTm @Text textId [] "world"
+      helloWorld = mkForeignTm @Text textId [] "hello world"
 
-      add = CommandV intOpsId 0
-      sub = CommandV intOpsId 1
-      cat = CommandV strOpsId 0
+      add spine = Cut (Application spine) (CommandV intOpsId 0)
+      sub spine = Cut (Application spine) (CommandV intOpsId 1)
+      cat spine = Cut (Application spine) (CommandV textOpsId 0)
+
+      tables = exampleTables & _2 .~ interfaceTable
 
    in testGroup "haskell foreign"
        [ testGroup "evaluation"
@@ -65,7 +68,13 @@ unitTests =
          ]
 
        , testGroup "typechecking"
-         [ checkTest "1 : Int" exampleTables emptyTypingEnv one intTy
+         [ checkTest "1 : Int" tables emptyTypingEnv one intTy
+         , checkTest "1 + 1 : Int" tables emptyTypingEnv (add [one, one]) intTy
+         , checkTest "\"hello \" <> \"world\" : String" tables emptyTypingEnv (cat [hello, world]) textTy
+         , let tm = (add [one, hello])
+               err = TyUnification textTy intTy
+           in testCase "1 + \"hello\" /: Int" $
+             runTcM tables emptyTypingEnv (check tm intTy) @?= Left err
          ]
        ]
 

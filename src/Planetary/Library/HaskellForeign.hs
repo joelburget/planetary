@@ -4,6 +4,8 @@ module Planetary.Library.HaskellForeign where
 import Control.Lens hiding ((??), op)
 import Control.Monad.Except
 import Control.Monad.State
+import Data.Monoid ((<>))
+import Data.Text (Text)
 import Network.IPLD as IPLD
 
 import Planetary.Core
@@ -14,7 +16,7 @@ haskellOracles :: CurrentHandlers
 haskellOracles = uIdMapFromList
   [ (intOpsId, [ liftBinaryOp @Int (+) , liftBinaryOp @Int (-) ])
   , (boolOpsId, [ liftBinaryOp (&&) , liftBinaryOp (||), liftUnaryOp not ])
-  , (strOpsId, [ liftBinaryOp @String (++) ])
+  , (textOpsId, [ liftBinaryOp @Text (<>) ])
   -- , (uidOpsId, [ generateUid ]
   ]
 
@@ -24,8 +26,8 @@ intTy = DataTy intId []
 boolTy :: ValTyI
 boolTy = DataTy boolId []
 
-strTy :: ValTyI
-strTy = DataTy strId []
+textTy :: ValTyI
+textTy = DataTy textId []
 
 uidTy :: ValTyI
 uidTy = DataTy uidId []
@@ -57,8 +59,8 @@ interfaceTable = uIdMapFromList
     , CommandDeclaration [boolTy, boolTy] boolTy -- ||
     , CommandDeclaration [boolTy]         boolTy -- not
     ])
-  , (strOpsId, EffectInterface []
-    [ CommandDeclaration [strTy, strTy] strTy -- concat
+  , (textOpsId, EffectInterface []
+    [ CommandDeclaration [textTy, textTy] textTy -- concat
     ])
   , (uidOpsId, EffectInterface []
     [ CommandDeclaration [] uidTy -- generateUid
@@ -79,27 +81,29 @@ writeForeign a = do
   modify (& ix cid .~ val)
   pure cid
 
+-- XXX
 liftBinaryOp
   :: IsIpld s
   => (s -> s -> s) -> (Spine Cid a b -> ForeignM (Tm Cid a b))
-liftBinaryOp op [ForeignDataTm uid1, ForeignDataTm uid2] = do
+liftBinaryOp op [ForeignTm tyUid tySat uid1, ForeignTm _ _ uid2] = do
   i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
-  ForeignDataTm <$> writeForeign i
+  ForeignTm tyUid tySat <$> writeForeign i
 liftBinaryOp _ _ = throwError FailedForeignFun
 
+-- XXX
 liftUnaryOp
   :: IsIpld s
   => (s -> s) -> (Spine Cid a b -> ForeignM (Tm Cid a b))
-liftUnaryOp op [ForeignDataTm uid] = do
+liftUnaryOp op [ForeignTm tyUid tySat uid] = do
   i <- op <$> lookupForeign uid
-  ForeignDataTm <$> writeForeign i
+  ForeignTm tyUid tySat <$> writeForeign i
 liftUnaryOp _ _ = throwError FailedForeignFun
 
 mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
 mkForeign val = let val' = toIpld val in (valueCid val', val')
 
-mkForeignTm :: IsIpld a => a -> TmI
-mkForeignTm = ForeignDataTm . fst . mkForeign
+mkForeignTm :: IsIpld a => Cid -> Vector ValTyI -> a -> TmI
+mkForeignTm tyId tySat = ForeignTm tyId tySat . fst . mkForeign
 
 -- -- TODO: use QQ
 -- exampleDataTypes :: DataTypeTable Cid String

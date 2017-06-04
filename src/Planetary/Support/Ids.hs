@@ -5,7 +5,6 @@
 module Planetary.Support.Ids
   ( intId
   , boolId
-  , strId
   , intOpsId
   , boolOpsId
   , strOpsId
@@ -31,7 +30,7 @@ module Planetary.Support.Ids
   , uidOpsId
   , uidId
   , textId
-  , textIfaceId
+  , textOpsId
   , consoleId
   , charHandlerId
   , vectorId
@@ -56,7 +55,6 @@ generateCids = mkCid . toBytes @D . hashFinalize <$>
 
 intId
   : boolId
-  : strId
   : intOpsId
   : boolOpsId
   : strOpsId
@@ -82,7 +80,7 @@ intId
   : uidOpsId
   : uidId
   : textId
-  : textIfaceId
+  : textOpsId
   : consoleId
   : charHandlerId
   : vectorId
