@@ -132,22 +132,22 @@ charId = undefined
 --   aborting : <Zero>
 
 -- interface LookAhead =
---   peek : $charId
+--   peek : char
 --   | accept : <Unit>
 
 -- interface Console =
---   inch : $charId
---   | ouch : $charId -> <Unit>
+--   inch : char
+--   | ouch : char -> <Unit>
 
 -- -- XXX inductive
 -- data Log [e] X =
 --   <start {[e]X}>
---   | <inched <Log [e] X> {$charId -> [e]X}>
+--   | <inched <Log [e] X> {char -> [e]X}>
 --   | <ouched <Log [e] X>>
 
 -- data Buffer =
 --   <empty>
---   | <hold $charId>
+--   | <hold char>
 
 -- main = letrec
 --   input : forall X. {<Log [<LookAhead>, <Abort>, <Console>] X>
@@ -176,7 +176,7 @@ charId = undefined
 --            = \x -> case x of
 --     Log:
 --       | <start p> -> parse p
---       | <ouched l> -> snd (textMap Console.1 $eraseCharLit) (rollback l)
+--       | <ouched l> -> snd (textMap Console.1 eraseCharLit) (rollback l)
 --       | <inched l k> -> input l empty (k LookAhead.0!)
 --   .
 
@@ -192,16 +192,16 @@ charId = undefined
 --       = \x y -> y
 --   .
 
---   zeros : forall. {$Int -> [<LookAhead>, <Abort>]$Int}
+--   zeros : forall. {Int -> [<LookAhead>, <Abort>]Int}
 --         = \n -> on LookAhead.0! (charHandler2
---       (snd LookAhead.1! (zeros ($add n 1))) -- '0'
+--       (snd LookAhead.1! (zeros (add n 1))) -- '0'
 --       (snd LookAhead.1! n)                  -- ' '
 --       (abort!)                        -- other char
 --     )
 --   .
 
--- -- in (parse (zeros $zero) : [<Console>]$Int)
--- in parse (zeros $zero)
+-- -- in (parse (zeros zero) : [<Console>]Int)
+-- in parse (zeros zero)
 
 -- -- is this a module?
 -- fns = letrec
@@ -252,3 +252,10 @@ charId = undefined
 -- -- in pipe
 
 -- |]
+
+  -- [ ("char", char)
+  -- , ("eraseCharLit", eraseCharLit)
+  -- , ("Int", int)
+  -- , ("add", add)
+  -- , ("zero", zero)
+  -- ]

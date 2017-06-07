@@ -55,7 +55,7 @@ unitTests =
    in testGroup "haskell foreign"
        [ testGroup "evaluation"
          [ stepTest "1 + 1" simpleEnv 1
-           -- [tmExp| $add $one $one |]
+           -- [tmExp| add one one |]
            (add [one, one])
            (Right two)
          , stepTest "2 + 2" simpleEnv 1
@@ -88,7 +88,7 @@ unitTests =
                | <consf a f>
              |]
 
-             resolved = nameResolution decls ^?! _Right
+             resolved = nameResolution decls mempty ^?! _Right
              listFDecl = resolved ^. datatypes
 
              Just (listfId, _) = namedData "ListF" resolved

@@ -46,7 +46,7 @@ type FreeV = (Unique, LevelIx)
 type PartiallyConverted f = f Text Text FreeV
 type FullyConverted     f = f Cid  Int  FreeV
 
-newtype TablingM a = TablingM
+newtype ResolutionM a = ResolutionM
   (ExceptT ResolutionErr
   (ReaderT [Text]
   (StateT ResolutionState
@@ -59,7 +59,7 @@ newtype TablingM a = TablingM
            , MonadReader [Text]
            , MonadGen Unique
            )
-deriving instance MonadState ResolutionState TablingM
+deriving instance MonadState ResolutionState ResolutionM
 
 -- For each declaration, in order:
 -- * Close the term and type levels (convert Text free vars to Int)
@@ -70,12 +70,15 @@ deriving instance MonadState ResolutionState TablingM
 --
 -- Term conversions can spawn child type conversions (at the places where terms
 -- hold types).
-nameResolution :: [DeclS] -> Either ResolutionErr ResolvedDecls
-nameResolution xs =
-  let TablingM action = nameResolutionM xs
-  in runGen (evalStateT (runReaderT (runExceptT action) []) mempty)
+nameResolution
+  :: [DeclS]
+  -> ResolutionState
+  -> Either ResolutionErr ResolvedDecls
+nameResolution xs init =
+  let ResolutionM action = nameResolutionM xs
+  in runGen (evalStateT (runReaderT (runExceptT action) []) init)
 
-nameResolutionM :: [DeclS] -> TablingM ResolvedDecls
+nameResolutionM :: [DeclS] -> ResolutionM ResolvedDecls
 nameResolutionM (DataDecl_ (DataDecl name ddecl):xs) = do
   (cid, ddeclI) <- convertDti ddecl
   modify (& at name ?~ cid)
@@ -96,24 +99,24 @@ nameResolutionM (TermDecl_ (TermDecl name recTm):xs) = do
   pure (xs' & terms %~ (TermDecl name recTm''':))
 nameResolutionM [] = pure (ResolvedDecls mempty mempty [] [])
 
-lookupVar :: Text -> TablingM Int
+lookupVar :: Text -> ResolutionM Int
 lookupVar var = do
   vars <- ask
   elemIndex var vars ?? VarLookup var
 
-lookupUid :: Text -> TablingM Cid
+lookupUid :: Text -> ResolutionM Cid
 lookupUid name = do
   defns <- get
   defns ^? ix name ?? UnresolvedUid name
 
-withPushedVars :: [Text] -> TablingM a -> TablingM a
+withPushedVars :: [Text] -> ResolutionM a -> ResolutionM a
 withPushedVars names = local (names ++)
 
 --
 
 convertDti
   :: Raw1 DataTypeInterface
-  -> TablingM (Cid, Executable1 DataTypeInterface)
+  -> ResolutionM (Cid, Executable1 DataTypeInterface)
 convertDti (DataTypeInterface binders ctrs) = do
   let varNames = map fst binders
       binders' = imap (\i (_, kind) -> (i, kind)) binders
@@ -123,7 +126,7 @@ convertDti (DataTypeInterface binders ctrs) = do
 
 convertEi
   :: Raw1 EffectInterface
-  -> TablingM (Cid, Executable1 EffectInterface)
+  -> ResolutionM (Cid, Executable1 EffectInterface)
 convertEi (EffectInterface binders cmds) = do
   let varNames = map fst binders
       binders' = imap (\i (_, kind) -> (i, kind)) binders
@@ -132,11 +135,11 @@ convertEi (EffectInterface binders cmds) = do
   pure (cidOf ei, ei)
 
 convertCtr
-  :: Raw1 ConstructorDecl -> TablingM (Executable1 ConstructorDecl)
+  :: Raw1 ConstructorDecl -> ResolutionM (Executable1 ConstructorDecl)
 convertCtr (ConstructorDecl name vtys)
   = ConstructorDecl name <$> traverse convertValTy vtys
 
-convertValTy :: Raw1 ValTy -> TablingM (Executable1 ValTy)
+convertValTy :: Raw1 ValTy -> ResolutionM (Executable1 ValTy)
 convertValTy = \case
   DataTy uid tyargs -> DataTy
     <$> lookupUid uid
@@ -144,30 +147,30 @@ convertValTy = \case
   SuspendedTy cty   -> SuspendedTy <$> convertCompTy cty
   VariableTy var    -> VariableTy  <$> lookupVar var
 
-convertTyArg :: Raw1 TyArg -> TablingM (Executable1 TyArg)
+convertTyArg :: Raw1 TyArg -> ResolutionM (Executable1 TyArg)
 convertTyArg = \case
   TyArgVal valTy -> TyArgVal <$> convertValTy valTy
   TyArgAbility ability -> TyArgAbility <$> convertAbility ability
 
-convertCompTy :: Raw1 CompTy -> TablingM (Executable1 CompTy)
+convertCompTy :: Raw1 CompTy -> ResolutionM (Executable1 CompTy)
 convertCompTy (CompTy dom (Peg ab codom)) = CompTy
   <$> traverse convertValTy dom
   <*> (Peg
     <$> convertAbility ab
     <*> convertValTy codom)
 
-convertAbility :: Raw1 Ability -> TablingM (Executable1 Ability)
+convertAbility :: Raw1 Ability -> ResolutionM (Executable1 Ability)
 convertAbility (Ability initAb umap)
   = Ability initAb <$> convertUidMap convertTyArg umap
 
 convertCmd
   :: Raw1 CommandDeclaration
-  -> TablingM (Executable1 CommandDeclaration)
+  -> ResolutionM (Executable1 CommandDeclaration)
 convertCmd (CommandDeclaration dom codom) = CommandDeclaration
   <$> traverse convertValTy dom
   <*> convertValTy codom
 
-convertTm :: PartiallyConverted Tm -> TablingM (FullyConverted Tm)
+convertTm :: PartiallyConverted Tm -> ResolutionM (FullyConverted Tm)
 convertTm = \case
   Variable v -> pure (Variable v)
   InstantiatePolyVar tyVar tyArgs -> InstantiatePolyVar tyVar
@@ -188,7 +191,7 @@ convertTm = \case
           pure (pty', val')
     in Letrec <$> mapM convertPolyty defns <*> convertIntScope body
 
-convertValue :: PartiallyConverted Value -> TablingM (FullyConverted Value)
+convertValue :: PartiallyConverted Value -> ResolutionM (FullyConverted Value)
 convertValue = \case
   Command cid row -> Command
     <$> lookupUid cid
@@ -199,12 +202,12 @@ convertValue = \case
     <*> mapM convertTm spine
   Lambda binderName scope -> Lambda binderName <$> convertIntScope scope
 
-convertAdjustment :: Adjustment' -> TablingM AdjustmentI
+convertAdjustment :: Adjustment' -> ResolutionM AdjustmentI
 convertAdjustment (Adjustment umap)
   = Adjustment <$> convertUidMap convertTyArg umap
 
 convertUidMap
-  :: (a -> TablingM b) -> UIdMap Text [a] -> TablingM (UIdMap Cid [b])
+  :: (a -> ResolutionM b) -> UIdMap Text [a] -> ResolutionM (UIdMap Cid [b])
 convertUidMap f umap = do
   umap' <- traverse
     (\(key, tyArg) -> (,)
@@ -215,13 +218,13 @@ convertUidMap f umap = do
 
 convertHandlers
   :: PartiallyConverted AdjustmentHandlers
-  -> TablingM (FullyConverted AdjustmentHandlers)
+  -> ResolutionM (FullyConverted AdjustmentHandlers)
 convertHandlers (AdjustmentHandlers handlers) =
   AdjustmentHandlers <$> convertUidMap convertMaybeScope handlers
 
 -- Note: this function expects its binding variables to already be pushed. See
 -- `convertTm`
-convertPolytype :: Polytype' -> TablingM PolytypeI
+convertPolytype :: Polytype' -> ResolutionM PolytypeI
 convertPolytype (Polytype binders scope) = do
   let newBinders = imap (,) (snd <$> binders)
       names = fst <$> binders
@@ -231,7 +234,7 @@ convertPolytype (Polytype binders scope) = do
 
 convertContinuation
   :: PartiallyConverted Continuation
-  -> TablingM (FullyConverted Continuation)
+  -> ResolutionM (FullyConverted Continuation)
 convertContinuation = \case
   Application spine -> Application <$> mapM convertTm spine
   Case cid handlers -> Case
@@ -247,7 +250,7 @@ convertContinuation = \case
 
 convertMaybeScope
   :: Scope (Maybe Int) (Tm Text Text) FreeV
-  -> TablingM (Scope (Maybe Int) (Tm Cid Int) FreeV)
+  -> ResolutionM (Scope (Maybe Int) (Tm Cid Int) FreeV)
 convertMaybeScope scope = do
   unique <- gen
   let makeFree = Variable . (unique,) . \case
@@ -263,7 +266,7 @@ convertMaybeScope scope = do
 
 convertIntScope
   :: Scope Int (Tm Text Text) FreeV
-  -> TablingM (Scope Int (Tm Cid Int) FreeV)
+  -> ResolutionM (Scope Int (Tm Cid Int) FreeV)
 convertIntScope scope = do
   unique <- gen
   let tm = instantiate (Variable . (unique,)) scope
@@ -275,7 +278,7 @@ convertIntScope scope = do
 
 convertUnitScope
   :: Scope () (Tm Text Text) FreeV
-  -> TablingM (Scope () (Tm Cid Int) FreeV)
+  -> ResolutionM (Scope () (Tm Cid Int) FreeV)
 convertUnitScope scope = do
   unique <- gen
   let free = Variable (unique, 0)

@@ -4,8 +4,6 @@
 {-# language TemplateHaskell #-}
 module Planetary.Library.Syntax where
 
-import Control.Lens
-import Data.HashMap.Strict (HashMap)
 import Data.Text (Text)
 import Network.IPLD
 
@@ -41,12 +39,12 @@ data TyFamily =
 
 data Ty uid a ty =
   -- ValTy
-  <dataTy uid <$vectorIdStr ty>>
+  <dataTy uid <vector ty>>
   | <suspendedTy ty>
   | <variableTy a>
 
   -- CompTy
-  | <compTy <$vectorIdStr ty> ty>
+  | <compTy <vector ty> ty>
 
   -- Peg
   | <peg ty ty>
@@ -56,13 +54,19 @@ data Ty uid a ty =
   | <tyArgAbility ty>
 
   -- Ability
-  | <ability InitiateAbility <$uidMapIdStr uid ty>>
+  | <ability InitiateAbility <uidMap uid ty>>
 
 data Adjustment uid a =
- <adjustment <$uidMapIdStr uid <$lfixIdStr <Ty uid a>>>>
+ <adjustment <uidMap uid <lfix <Ty uid a>>>>
 |]
 
-Right resolvedDecls = nameResolution decls
+resolvedDecls :: ResolvedDecls
+Right resolvedDecls = nameResolution decls $ uIdMapFromList
+  [ ("vector", vectorId)
+  , ("uidMap", uidMapId)
+  , ("lfix", lfixId)
+  ]
+tyId :: Cid
 Just (tyId, _) = namedData "Ty" resolvedDecls
 
 pattern VarTyVal :: a -> TyArg uid a

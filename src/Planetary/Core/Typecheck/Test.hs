@@ -168,7 +168,7 @@ unitTests = testGroup "typechecking"
     --         val = DataTm otherUid 1 [abcdVal, abcdVal]
     --         tm = -- closed $ substitute "val" val $
     --           [tmExp|
-    --             case $val of
+    --             case val of
     --               123424321432:
     --                 | x y z -> x
     --                 | y z -> z

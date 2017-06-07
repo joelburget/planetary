@@ -13,6 +13,7 @@ import Data.Generics.Aliases
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Typeable (Typeable)
 import Language.Haskell.TH
   (ExpQ, Exp(..), Lit(..), appE, varE, litE, mkName, lookupValueName)
 import qualified Language.Haskell.TH as TH
@@ -45,29 +46,27 @@ quoteTmExp str = do
       pos = parseLocation loc
   case runTokenParse parseTm pos (T.pack str') of
     Left err -> fail ("failed to parse tm: " ++ err)
-    Right parsedTm -> dataToExpQ
-      (const Nothing `extQ` replaceVars `extQ` handleByteString)
-      parsedTm
+    Right parsedTm -> dataToExpQ handleAll parsedTm
 
 declarations :: QuasiQuoter
 declarations = QuasiQuoter
-  { quoteExp  = antiDecls
+  { quoteExp  = quoteDeclarations
   , quotePat  = const (fail "can't quote declarations patterns")
   , quoteType = const (fail "can't quote declarations types")
   , quoteDec  = const (fail "can't quote declarations")
   }
 
-antiDecls :: String -> ExpQ
-antiDecls str = do
+quoteDeclarations :: String -> ExpQ
+quoteDeclarations str = do
   loc <- TH.location
   let str' = normalizeQQInput str
       pos = parseLocation loc
   case runTokenParse parseDecls pos (T.pack str') of
     Left err -> fail ("failed to parse declarations: " ++ err)
-    Right decls -> do
-      dataToExpQ
-        (const Nothing `extQ` handleByteString `extQ` replaceVars)
-        decls
+    Right decls -> dataToExpQ handleAll decls
+
+handleAll :: Typeable a => a -> Maybe ExpQ
+handleAll = const Nothing `extQ` handleByteString `extQ` handleText
 
 -- https://stackoverflow.com/questions/12788181/data-text-text-and-quasiquoting
 handleByteString :: ByteString -> Maybe ExpQ
@@ -81,17 +80,6 @@ handleText x =
   -- convert the text to a string literal
   -- and wrap it with T.pack
   Just $ appE (varE 'T.pack) $ litE $ StringL $ T.unpack x
-
-replaceVars :: Text -> Maybe ExpQ
-replaceVars (T.unpack -> '$':strName) = Just $ do
-  Just name <- lookupValueName strName
-  pure $ VarE name
-replaceVars other = Just $ appE (varE 'T.pack) $ litE $ StringL $ T.unpack other
-
-antiVarExp :: Text -> Maybe ExpQ
-antiVarExp  (T.unpack -> '$':name)
-  = Just $ pure $ VarE $ mkName name
-antiVarExp  _ = Nothing
 
 -- Adapted from https://github.com/nikita-volkov/neat-interpolation/blob/master/library/NeatInterpolation/String.hs:
 

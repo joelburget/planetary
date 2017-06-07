@@ -53,7 +53,7 @@ unitTests  =
   in testGroup "evaluation"
        [ testGroup "functions"
          [ let x = V 0
-               -- tm = [tmExp| (\y -> y) $x |]
+               -- tm = [tmExp| (\y -> y) x |]
                Just lam = closed (Lam ["X"] (V"X"))
                tm = Cut (Application [x]) (Value lam)
            in stepTest "application 1" emptyEnv 1 tm (Right x)
@@ -62,11 +62,16 @@ unitTests  =
            [ stepTest "case False of { False -> True; True -> False }"
                emptyEnv 1
              -- [tmExp|
-             --   case $false of
-             --     $boolId:
-             --       | -> $one
-             --       | -> $zero
+             --   case false of
+             --     boolId:
+             --       | -> one
+             --       | -> zero
              -- |]
+             -- [ ("false", false)
+             -- , ("bool", bool)
+             -- , ("one", one)
+             -- , ("zero", zero)
+             -- ]
              (Cut not false)
              (Right true)
            , stepTest "case True of { False -> True; True -> False }"
@@ -86,9 +91,9 @@ unitTests  =
        , let
              ty = PolytypeP [] (DataTy boolId [])
              -- Just tm = cast [tmExp|
-             --   let x: forall. $boolId = $false in
-             --     let y: forall. $boolId = $not x in
-             --       $not y
+             --   let x: forall. bool = false in
+             --     let y: forall. bool = not x in
+             --       not y
              -- |]
              Just tm = closeVar ("x", 0) $
                   let_ "x" ty false $
