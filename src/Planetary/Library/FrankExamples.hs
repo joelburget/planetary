@@ -80,9 +80,9 @@ externals = uIdMapFromList
   ]
 
 env :: EvalEnv
-env =
-  ( externals
-  , uIdMapFromList
+env = EvalEnv
+  externals
+  (uIdMapFromList
     [ mkForeign @Text "\b \b"
     ]
   )

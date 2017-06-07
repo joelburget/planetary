@@ -7,15 +7,19 @@
 {-# language StandaloneDeriving #-}
 {-# language TypeSynonymInstances #-}
 {-# language TupleSections #-}
-module Planetary.Support.NameResolution (makeTables, TablingErr(..)) where
+module Planetary.Support.NameResolution
+  (nameResolution, ResolutionErr(..))
+  where
 
 import Bound
-import Control.Lens ((&), ix, at, (?~), _1, _2, _3, _4, (^?), (%~), mapMOf)
+import Control.Lens ((&), ix, at, (?~), _2, (^?), (%~), mapMOf)
 import Control.Lens.Indexed (imap)
 import Control.Monad.Except
 import Control.Monad.Gen
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
 import Data.List (elemIndex)
 import Data.Text (Text)
 import Data.Word (Word32)
@@ -24,13 +28,13 @@ import Network.IPLD hiding (Value)
 import Planetary.Core hiding (NotClosed)
 import Planetary.Util
 
-data TablingErr
+data ResolutionErr
   = UnresolvedUid Text
   | VarLookup Text
   | NotClosed
   deriving Show
 
-type TablingState = UIdMap Text Cid
+type ResolutionState = UIdMap Text Cid
 
 -- big enough?
 newtype Unique = Unique Word32
@@ -43,19 +47,19 @@ type PartiallyConverted f = f Text Text FreeV
 type FullyConverted     f = f Cid  Int  FreeV
 
 newtype TablingM a = TablingM
-  (ExceptT TablingErr
+  (ExceptT ResolutionErr
   (ReaderT [Text]
-  (StateT TablingState
+  (StateT ResolutionState
   (Gen Unique)))
   a)
   deriving ( Functor
            , Applicative
            , Monad
-           , MonadError TablingErr
+           , MonadError ResolutionErr
            , MonadReader [Text]
            , MonadGen Unique
            )
-deriving instance MonadState TablingState TablingM
+deriving instance MonadState ResolutionState TablingM
 
 -- For each declaration, in order:
 -- * Close the term and type levels (convert Text free vars to Int)
@@ -66,47 +70,31 @@ deriving instance MonadState TablingState TablingM
 --
 -- Term conversions can spawn child type conversions (at the places where terms
 -- hold types).
-makeTables
-  :: [DeclS]
-  -> Either TablingErr
-     ( DataTypeTable Cid Int
-     , InterfaceTable Cid Int
-     , [(Text, Cid)]
-     , [Executable2 TermDecl]
-     )
-makeTables xs =
-  let TablingM action = makeTablesM xs
+nameResolution :: [DeclS] -> Either ResolutionErr ResolvedDecls
+nameResolution xs =
+  let TablingM action = nameResolutionM xs
   in runGen (evalStateT (runReaderT (runExceptT action) []) mempty)
 
-makeTablesM
-  :: [DeclS]
-  -> TablingM
-       ( DataTypeTable Cid Int
-       , InterfaceTable Cid Int
-       , [(Text, Cid)]
-       , [Executable2 TermDecl]
-       )
-makeTablesM (DataDecl_ (DataDecl name ddecl):xs) = do
+nameResolutionM :: [DeclS] -> TablingM ResolvedDecls
+nameResolutionM (DataDecl_ (DataDecl name ddecl):xs) = do
   (cid, ddeclI) <- convertDti ddecl
   modify (& at name ?~ cid)
-  xs' <- makeTablesM xs
-  -- TODO: inconsistency with DataTypeTable not using DataTypeInterface
-  -- `dataInterface` shouldn't be necessary
-  pure $ xs' & _1 . at cid ?~ dataInterface ddeclI
-             & _3 %~ ((name, cid):)
-makeTablesM (InterfaceDecl_ (InterfaceDecl name iface):xs) = do
+  xs' <- nameResolutionM xs
+  pure $ xs' & datatypes . at cid ?~ ddeclI
+             & globalCids %~ ((name, cid):)
+nameResolutionM (InterfaceDecl_ (InterfaceDecl name iface):xs) = do
   (cid, ifaceI) <- convertEi iface
   modify (& at name ?~ cid)
-  xs' <- makeTablesM xs
-  pure $ xs' & _2 . at cid ?~ ifaceI
-             & _3 %~ ((name, cid):)
-makeTablesM (TermDecl_ (TermDecl name recTm):xs) = do
-  xs' <- makeTablesM xs
+  xs' <- nameResolutionM xs
+  pure $ xs' & interfaces . at cid ?~ ifaceI
+             & globalCids %~ ((name, cid):)
+nameResolutionM (TermDecl_ (TermDecl name recTm):xs) = do
+  xs' <- nameResolutionM xs
   Just recTm' <- pure (closed recTm)
   recTm'' <- convertTm recTm'
   Just recTm''' <- pure (closed recTm'')
-  pure (xs' & _4 %~ (TermDecl name recTm''':))
-makeTablesM [] = pure (mempty, mempty, [], [])
+  pure (xs' & terms %~ (TermDecl name recTm''':))
+nameResolutionM [] = pure (ResolvedDecls mempty mempty [] [])
 
 lookupVar :: Text -> TablingM Int
 lookupVar var = do

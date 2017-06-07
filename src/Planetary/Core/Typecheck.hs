@@ -4,6 +4,7 @@
 {-# language MultiParamTypeClasses #-}
 {-# language LambdaCase #-}
 {-# language StandaloneDeriving #-}
+{-# language TemplateHaskell #-}
 {-# language TypeOperators #-}
 {-# language TypeFamilies #-}
 module Planetary.Core.Typecheck where
@@ -27,7 +28,7 @@ data TcErr
   = DataUIdMismatch Cid Cid
   | ZipLengthMismatch
   | FailedDataTypeLookup
-  | FailedConstructorLookup
+  | FailedConstructorLookup Cid Row
   | AbilityUnification
   | TyUnification ValTyI ValTyI
   | LookupCommands
@@ -38,44 +39,49 @@ data TcErr
   deriving (Eq, Show)
 
 -- Read-only typing information
--- TODO: why does DataTypeTable not hold `DataTypeInterface`s?
-type DataTypeTable  uid a = UIdMap uid (Vector (Vector (ValTy uid a)))
+type DataTypeTable  uid a = UIdMap uid (DataTypeInterface uid a)
 type InterfaceTable uid a = UIdMap uid (EffectInterface uid a)
 
 -- * The data type table and interface table are global and never change
 -- * The ability changes as we push in and pop out of rules
-type TypingTables uid a = (DataTypeTable uid a, InterfaceTable uid a, Ability uid a)
+data TypingEnv uid a = TypingEnv
+  { _typingData       :: DataTypeTable  uid a
+  , _typingInterfaces :: InterfaceTable uid a
+  , _typingAbilities  :: Ability        uid a
+  } deriving Show
+
+makeLenses ''TypingEnv
 
 -- Mutable typing information
 --
 -- This is mutable so we can solve for a type variable in some context and
 -- carry the solution back out.
-type TypingEnvVal uid a = Either (ValTy uid a) PolytypeI
-newtype TypingEnv uid a = TypingEnv (Stack (TypingEnvVal uid a))
+type TypingStateEntry uid a = Either (ValTy uid a) PolytypeI
+newtype TypingState uid a = TypingState (Stack (TypingStateEntry uid a))
 
-type instance IxValue (TypingEnv uid a) = TypingEnvVal uid a
-type instance Index (TypingEnv uid a) = Int
-instance Ixed (TypingEnv uid a) where
-  ix k f (TypingEnv m) = TypingEnv <$> ix k f m
+type instance IxValue (TypingState uid a) = TypingStateEntry uid a
+type instance Index (TypingState uid a) = Int
+instance Ixed (TypingState uid a) where
+  ix k f (TypingState m) = TypingState <$> ix k f m
 
 newtype TcM uid a b = TcM
   (ExceptT TcErr
-  (StateT (TypingEnv uid a)
-  (Reader (TypingTables uid a)))
+  (StateT (TypingState uid a)
+  (Reader (TypingEnv uid a)))
   b)
   deriving (Functor, Applicative, Monad, MonadError TcErr)
-deriving instance MonadState (TypingEnv uid a) (TcM uid a)
-deriving instance MonadReader (TypingTables uid a) (TcM uid a)
+deriving instance MonadState (TypingState uid a) (TcM uid a)
+deriving instance MonadReader (TypingEnv uid a) (TcM uid a)
 
 type DataTypeTableI  = DataTypeTable  Cid Int
 type InterfaceTableI = InterfaceTable Cid Int
-type TypingTablesI   = TypingTables   Cid Int
 type TypingEnvI      = TypingEnv      Cid Int
+type TypingStateI    = TypingState    Cid Int
 type TcM'            = TcM            Cid Int
 
 runTcM
-  :: TypingTablesI
-  -> TypingEnvI
+  :: TypingEnvI
+  -> TypingStateI
   -> TcM' a
   -> Either TcErr a
 runTcM tables env (TcM action) = runReader
@@ -121,7 +127,7 @@ check (Value (Lambda _binders body))
 -- DATA
 check (Value (DataConstructor uid1 row tms)) (DataTy uid2 valTys) = do
   assert (DataUIdMismatch uid1 uid2) (uid1 == uid2)
-  argTys <- lookupConstructorTy uid1 row
+  ConstructorDecl _name argTys <- lookupConstructorTy uid1 row
   mapM_ (uncurry check) =<< strictZip ZipLengthMismatch tms argTys
 -- CASE
 check (Cut (Case uid1 rows) m) ty = do
@@ -129,7 +135,7 @@ check (Cut (Case uid1 rows) m) ty = do
   DataTy uid2 _args <- infer m
   assert (DataUIdMismatch uid1 uid2) (uid1 == uid2)
 
-  dataRows <- lookupDataType uid1 -- :: Vector (Vector ValTyI)
+  dataRows <- dataInterface <$> lookupDataType uid1 -- :: Vector (Vector ValTyI)
   zipped <- strictZip ZipLengthMismatch dataRows rows
   forM_ zipped $ \(dataConTys, (_, rhs)) ->
     withValTypes' dataConTys rhs (`check` ty)
@@ -155,6 +161,11 @@ check m b = do
   a <- infer m
   _ <- unify a b ?? TyUnification a b
   pure ()
+
+dataInterface :: DataTypeInterface uid a -> Vector (Vector (ValTy uid a))
+dataInterface (DataTypeInterface _ ctors) =
+  let f (ConstructorDecl _name args) = args
+  in f <$> ctors
 
 -- TODO: convert to `fromScope`?
 -- TODO: is the succ necessary?
@@ -183,7 +194,7 @@ uidZip (UIdMap as) (UIdMap bs) = UIdMap <$>
 -- * we should reverse and push at the head
 withValTypes :: [ValTyI] -> TcM' a -> TcM' a
 withValTypes tys = withState'
-  (\(TypingEnv env) -> TypingEnv $ env <> (Left <$> tys))
+  (\(TypingState env) -> TypingState $ env <> (Left <$> tys))
 
 withValTypes'
   :: [ValTyI]
@@ -201,7 +212,7 @@ openAdjustmentHandler
   -> (TmI -> TcM' a)
   -> TcM' a
 openAdjustmentHandler handler argTys handlerTy cb =
-  let envAdj (TypingEnv env) = TypingEnv $
+  let envAdj (TypingState env) = TypingState $
         (Left <$> argTys) <> ((Left $ SuspendedTy handlerTy):env)
 
       instantiator Nothing  = V 0
@@ -211,31 +222,38 @@ openAdjustmentHandler handler argTys handlerTy cb =
 
 withPolyty :: PolytypeI -> TcM' a -> TcM' a
 withPolyty pty = withState'
-  (\(TypingEnv env) -> TypingEnv $ env <> [Right pty])
+  (\(TypingState env) -> TypingState $ env <> [Right pty])
 
 -- | Get the types each data constructor holds for this data type.
 --
 -- Question: should this be parametrized by type parameters / abilities? IE do
 -- we allow GADTs?
-lookupDataType :: Cid -> TcM' (Vector (Vector ValTyI))
-lookupDataType uid = asks (^? _1 . ix uid) >>= (?? FailedDataTypeLookup)
+lookupDataType :: Cid -> TcM' DataTypeInterfaceI
+lookupDataType uid
+  = asks (^? typingData . ix uid)
+    >>= (?? FailedDataTypeLookup)
 
-lookupConstructorTy :: Cid -> Row -> TcM' [ValTyI]
+lookupConstructorTy :: Cid -> Row -> TcM' ConstructorDeclI
 lookupConstructorTy uid row
-  = asks (^? _1 . ix uid . ix row) >>= (?? FailedConstructorLookup)
+  = do  env <- ask
+        asks (^? typingData . ix uid . constructors . ix row)
+          >>= (?? FailedConstructorLookup uid row)
 
 lookupCommands :: Cid -> TcM' [CommandDeclarationI]
-lookupCommands uid = asks (^? _2 . ix uid . commands) >>= (?? LookupCommands)
+lookupCommands uid
+  = asks (^? typingInterfaces . ix uid . commands)
+    >>= (?? LookupCommands)
 
 lookupCommandTy :: Cid -> Row -> TcM' CommandDeclarationI
 lookupCommandTy uid row
-  = asks (^? _2 . ix uid . commands . ix row) >>= (?? LookupCommandTy)
+  = asks (^? typingInterfaces . ix uid . commands . ix row)
+    >>= (?? LookupCommandTy)
 
 withAbility :: AbilityI -> TcM' b -> TcM' b
-withAbility ability = local (& _3 .~ ability)
+withAbility ability = local (& typingAbilities .~ ability)
 
 getAmbient :: TcM' AbilityI
-getAmbient = asks (^?! _3)
+getAmbient = asks (^?! typingAbilities)
 
 -- polyVarInstantiator :: [TyArg a] -> Int -> ValTy Int
 -- polyVarInstantiator = _

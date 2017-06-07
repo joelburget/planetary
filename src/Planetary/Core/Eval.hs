@@ -1,6 +1,7 @@
 {-# language FlexibleContexts #-}
 {-# language LambdaCase #-}
 {-# language NamedFieldPuns #-}
+{-# language TemplateHaskell #-}
 module Planetary.Core.Eval where
 
 import Bound
@@ -22,14 +23,20 @@ data Err
   | FailedHandlerLookup
   | FailedIpldConversion
   | FailedForeignFun
-  | CantCut CI TmI
+  | CantCut ContinuationI TmI
   deriving (Eq, Show)
-
-type CI = ContinuationI
 
 type CurrentHandlers = UIdMap Cid [SpineI -> ForeignM TmI]
 type ValueStore      = UIdMap Cid IPLD.Value
-type EvalEnv         = (CurrentHandlers, ValueStore)
+data EvalEnv         = EvalEnv
+  { _currentHandlers :: CurrentHandlers
+  , _valueStore      :: ValueStore
+  }
+
+data EvalState = EvalState
+  { _evalStack :: Stack ContinuationI
+  , _evalEnv   :: EvalEnv
+  }
 
 -- This is the monad you write FFI operations in.
 -- TODO: what is a foreignm?
@@ -42,41 +49,42 @@ type ForeignM =
 -- target to a value
 type EvalM =
   ExceptT Err
-  (StateT (Stack CI, EvalEnv)
+  (StateT EvalState
   IO)
 
-_env :: Lens' (Stack CI, EvalEnv) EvalEnv
-_env = _2
+makeLenses ''EvalEnv
+makeLenses ''EvalState
 
 runHandler :: Cid -> Row -> Spine Cid Int Int -> EvalM TmI
 runHandler cid row spine = do
-  cont  <- gets (^? _env . _1 . ix cid . ix row) >>= (?? FailedHandlerLookup)
+  cont <- gets (^? evalEnv . currentHandlers . ix cid . ix row)
+    >>= (?? FailedHandlerLookup)
   let action = cont spine
   runForeignM action
 
 -- TODO: do this without casing? mmorph
 runForeignM :: ForeignM a -> EvalM a
 runForeignM action = do
-  (_stack, (_handlers, store)) <- get
+  store <- gets (^. evalEnv . valueStore)
   val <- liftIO $ runExceptT action `evalStateT` store
   case val of
     Left err -> throwError err
     Right a -> pure a
 
 runEvalM
-  :: EvalEnv -> Stack CI -> EvalM TmI
-  -> IO (Either Err TmI, (Stack CI, EvalEnv))
+  :: EvalEnv -> Stack ContinuationI -> EvalM TmI
+  -> IO (Either Err TmI, EvalState)
 runEvalM env stack action = runStateT
   (runExceptT action)
-  (stack, env)
+  (EvalState stack env)
 
 run
-  :: EvalEnv -> Stack CI -> TmI
-  -> IO (Either Err ValueI, (Stack CI, EvalEnv))
+  :: EvalEnv -> Stack ContinuationI -> TmI
+  -> IO (Either Err ValueI, EvalState)
 run env stack = \case
-  Value v -> pure (Right v, (stack, env))
+  Value v -> pure (Right v, EvalState stack env)
   tm -> do
-    (eitherTm, state@(stack', env')) <- runEvalM env stack (step tm)
+    (eitherTm, state@(EvalState stack' env')) <- runEvalM env stack (step tm)
     case eitherTm of
       Left err -> pure (Left err, state)
       Right tm -> run env' stack' tm
@@ -97,7 +105,7 @@ step InstantiatePolyVar{} = halt
 step Annotation{}         = halt
 step Letrec{} = todo "step letrec"
 
-stepCut :: CI -> TmI -> EvalM TmI
+stepCut :: ContinuationI -> TmI -> EvalM TmI
 stepCut (Application spine) (LambdaV _names scope)
   -- TODO: safe
   = pure $ instantiate (spine !!) scope

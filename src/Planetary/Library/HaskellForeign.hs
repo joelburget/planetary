@@ -40,11 +40,11 @@ lfix   = DataTy lfixId
 
 -- For now these are all opaque: they don't expose any constructors we can see
 -- XXX how do we check the types are saturated correctly?
-dataTypes :: DataTypeTableI
-dataTypes = uIdMapFromList
-  [ (vectorId, [])
-  , (uidMapId, [])
-  , (lfixId, [])
+haskellDataTypes :: DataTypeTableI
+haskellDataTypes = uIdMapFromList
+  [ (vectorId, emptyDataTypeInterface)
+  , (uidMapId, emptyDataTypeInterface)
+  -- , (lfixId, DataTypeInterface ["Fix"] [])
   ]
 
 -- TODO: some way to declare both implementation and type at the same time

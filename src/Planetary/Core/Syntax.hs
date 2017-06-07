@@ -20,13 +20,14 @@
 module Planetary.Core.Syntax (module Planetary.Core.Syntax) where
 
 import Bound
+import Control.Lens
 import Control.Lens.TH (makeLenses)
 import Control.Monad (ap, zipWithM)
 import Data.Data
 import Data.Foldable (toList)
 import Data.Functor.Classes
-import Data.Hashable (Hashable)
-import qualified Data.HashMap.Strict as HashMap
+import Data.HashMap.Strict (HashMap)
+import Data.List (find)
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import GHC.Generics
@@ -37,8 +38,8 @@ import Planetary.Core.UIdMap
 import Planetary.Util
 
 -- TODO:
--- * Right now we use simple equality to check types but should implement
---   unification
+-- * Right now we use an extremely simple form of unification -- switch to
+--   logict or something
 -- * Be more granular about the capabilities each function needs instead of
 --   hardcoding its monad.
 -- * Error messaging is pitiful
@@ -88,15 +89,13 @@ data ConstructorDecl uid a = ConstructorDecl Text (Vector (ValTy uid a))
 -- effect variables).
 data DataTypeInterface uid a = DataTypeInterface
   -- we universally quantify over some number of type variables
-  { dataBinders :: Vector (a, Kind)
+  { _dataBinders :: Vector (a, Kind)
   -- a collection of constructors taking some arguments
-  , constructors :: Vector (ConstructorDecl uid a)
+  , _constructors :: Vector (ConstructorDecl uid a)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-dataInterface :: DataTypeInterface uid a -> Vector (Vector (ValTy uid a))
-dataInterface (DataTypeInterface _ ctors) =
-  let f (ConstructorDecl _name args) = args
-  in f <$> ctors
+emptyDataTypeInterface :: DataTypeInterface uid a
+emptyDataTypeInterface = DataTypeInterface [] []
 
 -- commands take arguments (possibly including variables) and return a value
 --
@@ -199,6 +198,26 @@ type DataDeclS      = DataDecl      Text Text
 type InterfaceDeclS = InterfaceDecl Text Text
 type TermDeclS      = TermDecl      Text Text Text
 
+data ResolvedDecls = ResolvedDecls
+  { _datatypes  :: UIdMap Cid DataTypeInterfaceI
+  , _interfaces :: UIdMap Cid EffectInterfaceI
+  , _globalCids :: [(Text, Cid)]
+  , _terms      :: [Executable2 TermDecl]
+  }
+
+-- TODO: make traversals
+-- namedData :: Text -> Traversal' ResolvedDecls DataTypeInterfaceI
+
+namedData :: Text -> ResolvedDecls -> Maybe (Cid, DataTypeInterfaceI)
+namedData name decls = do
+  (_, cid) <- find ((== name) . fst) (_globalCids decls)
+  (cid,) <$> _datatypes decls ^? ix cid
+
+namedInterface :: Text -> ResolvedDecls -> Maybe (Cid, EffectInterfaceI)
+namedInterface name decls = do
+  (_, cid) <- find ((== name) . fst) (_globalCids decls)
+  (cid,) <$> _interfaces decls ^? ix cid
+
 -- simple abilities
 
 closedAbility :: IsUid uid => Ability uid a
@@ -227,6 +246,9 @@ type CompTyI             = Executable1 CompTy
 type PolytypeI           = Executable1 Polytype
 type ValTyI              = Executable1 ValTy
 type TyArgI              = Executable1 TyArg
+type DataTypeInterfaceI  = Executable1 DataTypeInterface
+type EffectInterfaceI    = Executable1 EffectInterface
+type ConstructorDeclI    = Executable1 ConstructorDecl
 
 type TmI                 = Executable2 Tm
 type ValueI              = Executable2 Value
@@ -729,3 +751,5 @@ instance (Show uid, Show a) => Show1 (Tm uid a) where
 -- Lens Hell:
 
 makeLenses ''EffectInterface
+makeLenses ''ResolvedDecls
+makeLenses ''DataTypeInterface

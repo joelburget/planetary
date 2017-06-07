@@ -108,7 +108,7 @@ parseTyArg = TyArgAbility <$> brackets parseAbilityBody
          <?> "Ty Arg"
 
 parseConstructors :: MonadicParsing m => m (Vector ConstructorDecl')
-parseConstructors = sepBy parseConstructor bar <?> "Constructors"
+parseConstructors = parseConstructor `sepBy` bar <?> "Constructors"
 
 parseConstructor :: MonadicParsing m => m ConstructorDecl'
 parseConstructor = angles (ConstructorDecl
@@ -173,7 +173,7 @@ parseInterfaceInstance = angles $ (,)
   <?> "Interface Instance"
 
 parseInterfaceInstances :: MonadicParsing m => m [(Text, [TyArg'])]
-parseInterfaceInstances = sepBy parseInterfaceInstance comma
+parseInterfaceInstances = parseInterfaceInstance `sepBy` comma
   <?> "Interface Instances"
 
 parseDataDecl :: MonadicParsing m => m DataDeclS

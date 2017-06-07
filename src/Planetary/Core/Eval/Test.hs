@@ -3,6 +3,7 @@
 {-# language TypeApplications #-}
 module Planetary.Core.Eval.Test where
 
+import Bound (closed)
 import Prelude hiding (not)
 import Network.IPLD as IPLD
 import Test.Tasty
@@ -34,7 +35,7 @@ bool i = DataTm boolId i []
 unitTests :: TestTree
 unitTests  =
   let emptyEnv :: EvalEnv
-      emptyEnv = (mempty, mempty)
+      emptyEnv = EvalEnv mempty mempty
 
       -- true, false :: forall a b. Tm Cid a b
       false = bool 0
@@ -52,7 +53,9 @@ unitTests  =
   in testGroup "evaluation"
        [ testGroup "functions"
          [ let x = V 0
-               tm = [tmExp| (\y -> y) $x |]
+               -- tm = [tmExp| (\y -> y) $x |]
+               Just lam = closed (Lam ["X"] (V"X"))
+               tm = Cut (Application [x]) (Value lam)
            in stepTest "application 1" emptyEnv 1 tm (Right x)
          ]
        , testGroup "case"
