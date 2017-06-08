@@ -10,7 +10,6 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import Planetary.Core
-import Planetary.Support.Parser.QQ
 import Planetary.Support.Ids
 
 stepTest

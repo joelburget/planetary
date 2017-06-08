@@ -84,10 +84,10 @@ run
 run env stack = \case
   Value v -> pure (Right v, EvalState stack env)
   tm -> do
-    (eitherTm, state@(EvalState stack' env')) <- runEvalM env stack (step tm)
+    (eitherTm, evst@(EvalState stack' env')) <- runEvalM env stack (step tm)
     case eitherTm of
-      Left err -> pure (Left err, state)
-      Right tm -> run env' stack' tm
+      Left err -> pure (Left err, evst)
+      Right tm' -> run env' stack' tm'
 
 halt :: EvalM a
 halt = throwError Halt

@@ -26,7 +26,6 @@ import Control.Monad (ap, zipWithM)
 import Data.Data
 import Data.Foldable (toList)
 import Data.Functor.Classes
-import Data.HashMap.Strict (HashMap)
 import Data.List (find)
 import Data.Monoid ((<>))
 import Data.Text (Text)
@@ -393,9 +392,10 @@ bindPeg :: Peg uid a -> (a -> ValTy uid b) -> Peg uid b
 bindPeg (Peg ab val) f = Peg (bindAbility ab f) (val >>= f)
 
 bindVal :: Value uid c a -> (a -> Tm uid c b) -> Value uid c b
-bindVal (Command uid row) f = Command uid row
+bindVal (Command uid row) _ = Command uid row
 bindVal (DataConstructor uid row tms) f =
   DataConstructor uid row ((>>= f) <$> tms)
+bindVal (ForeignValue tyuid tysat valuid) _ = ForeignValue tyuid tysat valuid
 bindVal (Lambda binderNames body) f = Lambda binderNames (body >>>= f)
 
 bindContinuation :: Continuation uid c a -> (a -> Tm uid c b) -> Continuation uid c b
@@ -462,10 +462,16 @@ instance (IsUid uid, Eq a) => Eq1 (AdjustmentHandlers uid a) where
     liftEq (liftEq (liftEq eq)) (toList handlers1) (toList handlers2)
 
 instance (IsUid uid, Eq e) => Eq1 (Value uid e) where
-  liftEq eq (Command uid1 row1) (Command uid2 row2) =
+  liftEq _ (Command uid1 row1) (Command uid2 row2) =
     uid1 == uid2 && row1 == row2
   liftEq eq (DataConstructor uid1 row1 app1) (DataConstructor uid2 row2 app2) =
     uid1 == uid2 && row1 == row2 && liftEq (liftEq eq) app1 app2
+  liftEq _
+    (ForeignValue tyuid1 sat1 valuid1)
+    (ForeignValue tyuid2 sat2 valuid2) =
+    tyuid1 == tyuid2 &&
+    sat1 == sat2 &&
+    valuid1 == valuid2
   liftEq eq (Lambda binderNames1 body1) (Lambda binderNames2 body2) =
     binderNames1 == binderNames2 &&
     liftEq eq body1 body2
@@ -533,6 +539,10 @@ instance (IsUid uid, Ord o) => Ord1 (Value uid o) where
       compare uid1 uid2 <>
       compare row1 row2 <>
       liftCompare (liftCompare cmp) app1 app2
+    (ForeignValue tyuid1 sat1 valuid1, ForeignValue tyuid2 sat2 valuid2) ->
+      compare tyuid1 tyuid2 <>
+      compare sat1 sat2 <>
+      compare valuid1 valuid2
     (Lambda binderNames1 body1, Lambda binderNames2 body2) ->
       compare binderNames1 binderNames2 <>
       liftCompare cmp body1 body2
@@ -541,7 +551,8 @@ instance (IsUid uid, Ord o) => Ord1 (Value uid o) where
     where ordering = \case
             Command{}            -> 0 :: Int
             DataConstructor{}    -> 1
-            Lambda{}             -> 2
+            ForeignValue{}       -> 2
+            Lambda{}             -> 3
 
 instance (IsUid uid, Ord o) => Ord1 (Continuation uid o) where
   liftCompare cmp l r = case (l, r) of
@@ -682,6 +693,13 @@ instance (Show uid, Show a) => Show1 (Value uid a) where
       . shows row
       . showSpace
       . liftShowList s sl tms
+    ForeignValue tyuid sat valuid ->
+        showString "ForeignValue "
+      . shows tyuid
+      . showSpace
+      . showList sat
+      . showSpace
+      . shows valuid
     Lambda binderNames scope ->
         showString "Lambda "
       . showList binderNames

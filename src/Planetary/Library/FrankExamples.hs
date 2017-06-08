@@ -13,7 +13,6 @@ import Network.IPLD
 
 import Planetary.Core
 import Planetary.Library.HaskellForeign
-import Planetary.Support.Parser.QQ
 import Planetary.Support.Ids
 
 -- Examples from the Frank paper.

@@ -70,7 +70,7 @@ unitTests = testGroup "typechecking"
           cmdUid = mockCid "fire missiles"
 
           -- TODO: this duplication between ambient and interfaces is so bad
-          interfaces = uIdMapFromList
+          cmdIfaces = uIdMapFromList
             [ (cmdUid, EffectInterface []
                 [CommandDeclaration [domTy] codomTy]
               )
@@ -82,7 +82,7 @@ unitTests = testGroup "typechecking"
             -- [ (cmdUid, [TyArgVal domTy, TyArgAbility _])
             ]
 
-          tables = emptyTypingEnv & typingInterfaces .~ interfaces
+          tables = emptyTypingEnv & typingInterfaces .~ cmdIfaces
                                   & typingAbilities .~ ambient
 
           cmd = CommandV cmdUid 0

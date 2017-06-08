@@ -13,7 +13,6 @@ module Planetary.Support.Parser where
 import Control.Applicative
 import Control.Lens (unsnoc)
 import Data.ByteString (ByteString)
-import Data.Functor (($>))
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)

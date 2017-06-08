@@ -18,8 +18,6 @@ import Control.Monad.Except
 import Control.Monad.Gen
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HashMap
 import Data.List (elemIndex)
 import Data.Text (Text)
 import Data.Word (Word32)
@@ -74,9 +72,9 @@ nameResolution
   :: [DeclS]
   -> ResolutionState
   -> Either ResolutionErr ResolvedDecls
-nameResolution xs init =
+nameResolution xs initState =
   let ResolutionM action = nameResolutionM xs
-  in runGen (evalStateT (runReaderT (runExceptT action) []) init)
+  in runGen (evalStateT (runReaderT (runExceptT action) []) initState)
 
 nameResolutionM :: [DeclS] -> ResolutionM ResolvedDecls
 nameResolutionM (DataDecl_ (DataDecl name ddecl):xs) = do
