@@ -1,6 +1,7 @@
+{-# language OverloadedStrings #-}
+{-# language PatternSynonyms #-}
 {-# language QuasiQuotes #-}
 {-# language ScopedTypeVariables #-}
-{-# language PatternSynonyms #-}
 {-# language TemplateHaskell #-}
 module Planetary.Library.Syntax where
 
