@@ -15,7 +15,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Typeable (Typeable)
 import Language.Haskell.TH
-  (ExpQ, Exp(..), Lit(..), appE, varE, litE, mkName, lookupValueName)
+  (ExpQ, Lit(..), appE, varE, litE)
 import qualified Language.Haskell.TH as TH
 import Language.Haskell.TH.Quote
 

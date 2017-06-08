@@ -1,6 +1,8 @@
 {-# language PatternSynonyms #-}
 {-# language Rank2Types #-}
 {-# language ViewPatterns #-}
+-- ghc mistakenly thinks we're not using functions used in patterns
+{-# options_ghc -fno-warn-unused-top-binds #-}
 module Planetary.Core.Syntax.Patterns
   ( pattern PolytypeP
   , pattern Lam
@@ -75,13 +77,14 @@ pattern PolytypeP binders body <- (unPolytype -> (binders, body)) where
 lam :: Vector Text -> Tm uid a Text -> Value uid a Text
 lam vars body = Lambda vars (abstract (`elemIndex` vars) body)
 
-unlam :: Value uid a Text -> (Vector Text, Tm uid a Text)
+unlam :: Value uid a Text -> Maybe (Vector Text, Tm uid a Text)
 unlam (Lambda binderNames scope) =
   let variables = V <$> binderNames
-  in (binderNames, instantiate (variables !!) scope)
+  in Just (binderNames, instantiate (variables !!) scope)
+unlam _ = Nothing
 
 pattern Lam :: Vector Text -> Tm uid a Text -> Value uid a Text
-pattern Lam names tm <- (unlam -> (names, tm)) where
+pattern Lam names tm <- (unlam -> Just (names, tm)) where
   Lam vars body = lam vars body
 
 case_
@@ -95,18 +98,19 @@ case_ uid tms =
 
 uncase
   :: Continuation uid a Text
-  -> (uid, Vector (Vector Text, Tm uid a Text))
+  -> Maybe (uid, Vector (Vector Text, Tm uid a Text))
 uncase (Case uid tms) =
   -- let tms' = (\(vars, tm) -> (vars, let vars' = V <$> vars in instantiate (vars' !!) tm)) <$> tms
   let f (vars, tm) = (vars, let vars' = V <$> vars in instantiate (vars' !!) tm)
-  in (uid, f <$> tms)
+  in Just (uid, f <$> tms)
+uncase _ = Nothing
 
 pattern CaseP
   :: IsUid uid
   => uid
   -> Vector (Vector Text, Tm uid a Text)
   -> Continuation uid a Text
-pattern CaseP uid tms <- (uncase -> (uid, tms)) where
+pattern CaseP uid tms <- (uncase -> Just (uid, tms)) where
   CaseP vars body = case_ vars body
 
 handle

@@ -7,11 +7,11 @@ module Planetary.Util
   , assert
   , strictZip
   , withState'
+  , localState
   , (??)
   , (<$$>)
+  , (<$$$>)
   , over2
-  , maybeIf
-  , Unifiable(unify)
   ) where
 
 import Control.Monad.State.Strict
@@ -31,11 +31,11 @@ assertM valid = if valid then pure () else Nothing
 assert :: MonadError e m => e -> Bool -> m ()
 assert reason valid = if valid then pure () else throwError reason
 
-strictZip :: MonadError e m => e -> [a] -> [b] -> m [(a, b)]
+strictZip :: MonadError e m => ([a] -> [b] -> e) -> [a] -> [b] -> m [(a, b)]
 strictZip e as bs =
   if length as == length bs
   then pure (zip as bs)
-  else throwError e
+  else throwError (e as bs)
 
 -- TODO: this has to be a standard function
 withState' :: MonadState s m => (s -> s) -> m a -> m a
@@ -45,6 +45,15 @@ withState' update action = do
   result <- action
   put s
   pure result
+
+-- | Run a state action and undo the state changes at the end.
+localState :: MonadState s m => m a -> m a
+{-# INLINE localState #-}
+localState m = do
+    s <- get
+    x <- m
+    put s
+    return x
 
 infix 0 ??
 
@@ -57,6 +66,11 @@ infixl 4 <$$>
 (<$$>) :: (Functor f, Functor g) => (a -> b) -> f (g a) -> f (g b)
 (<$$>) = fmap . fmap
 
+infixl 5 <$$$>
+
+(<$$$>) :: (Functor f, Functor g, Functor h) => (a -> b) -> f (g (h a)) -> f (g (h b))
+(<$$$>) = fmap . fmap . fmap
+
 -- traverse2
 --   :: (Traversable s, Traversable t, Applicative f)
 --   => (a -> f b)
@@ -68,12 +82,3 @@ over2
   :: (Newtype n o, Newtype n' o')
   => (o -> n) -> (o -> o -> o') -> (n -> n -> n')
 over2 _newtype f n1 n2 = pack (f (unpack n1) (unpack n2))
-
-maybeIf :: Bool -> Maybe a -> Maybe a
-maybeIf False _a = Nothing
-maybeIf True   a = a
-
-class Unifiable f where
-  -- TODO: we should give a way for solutions to escape this scope
-  -- (a (mapping) state monad)
-  unify :: Eq a => f a -> f a -> Maybe (f a)

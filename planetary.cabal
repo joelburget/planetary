@@ -19,7 +19,7 @@ library
     -- core
     Planetary.Util
     Planetary.Core
-    Planetary.Core.Syntax.Patterns
+    Planetary.Core.Unification
 
     -- support
     Planetary.Support.Parser
@@ -86,7 +86,8 @@ executable planetary
     aeson,
     unordered-containers,
     wreq,
-    bytestring
+    bytestring,
+    websockets
   default-language : Haskell2010
   ghc-options:
     -Wall

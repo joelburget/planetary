@@ -36,9 +36,9 @@ unitTests = testGroup "parsing"
 
   , parserTest "X" parseValTy (VTy"X")
 
-  , parserTest "<_ X> | <_ X Y>" parseConstructors
-    [ ConstructorDecl "_" [VTy"X"]
-    , ConstructorDecl "_" [VTy"X", VTy"Y"]
+  , parserTest "<_ X> | <_ X Y>" (parseConstructors [])
+    [ ConstructorDecl "_" [VTy"X"] []
+    , ConstructorDecl "_" [VTy"X", VTy"Y"] []
     ]
 
   , parserTest "X" parseTyArg $ TyArgVal (VTy"X")
@@ -57,17 +57,18 @@ unitTests = testGroup "parsing"
   -- Bool
   , parserTest "data Bool = <true> | <false> " parseDataDecl
     (DataDecl "Bool" $ DataTypeInterface []
-      [ ConstructorDecl "true" []
-      , ConstructorDecl "false" []
+      [ ConstructorDecl "true" [] []
+      , ConstructorDecl "false" [] []
       ])
 
   -- TODO: also test with effect parameter
-  , parserTest "data Either X Y = <left X> | <right Y>" parseDataDecl
-    (DataDecl "Either" $
-      DataTypeInterface [("X", ValTy), ("Y", ValTy)]
-        [ ConstructorDecl "left" [VTy"X"]
-        , ConstructorDecl "right" [VTy"Y"]
-        ])
+  , let ctrResult = [TyArgVal (VariableTy "X"), TyArgVal (VariableTy "Y")]
+    in parserTest "data Either X Y = <left X> | <right Y>" parseDataDecl
+         (DataDecl "Either" $
+           DataTypeInterface [("X", ValTy), ("Y", ValTy)]
+             [ ConstructorDecl "left" [VTy"X"] ctrResult
+             , ConstructorDecl "right" [VTy"Y"] ctrResult
+             ])
 
   -- also test effect ty, multiple instances
   , parserTest "<1 X>" parseInterfaceInstance ("1", [TyArgVal (VTy"X")])
@@ -171,9 +172,11 @@ unitTests = testGroup "parsing"
 
   , let defn = "data Maybe x = <just x> | <nothing>"
           -- "data Maybe x = Just x | Nothing"
+
+        ctrResult = [TyArgVal (VariableTy "x")]
         expected = DataDecl "Maybe" (DataTypeInterface [("x", ValTy)]
-          [ ConstructorDecl "just" [VariableTy "x"]
-          , ConstructorDecl "nothing" []
+          [ ConstructorDecl "just" [VariableTy "x"] ctrResult
+          , ConstructorDecl "nothing" [] ctrResult
           ])
     in parserTest defn parseDataDecl expected
 

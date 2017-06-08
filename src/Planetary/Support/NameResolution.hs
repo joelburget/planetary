@@ -23,7 +23,7 @@ import Data.Text (Text)
 import Data.Word (Word32)
 import Network.IPLD hiding (Value)
 
-import Planetary.Core hiding (NotClosed)
+import Planetary.Core hiding (NotClosed, lookupVar)
 import Planetary.Util
 
 data ResolutionErr
@@ -117,9 +117,9 @@ convertDti
   -> ResolutionM (Cid, Executable1 DataTypeInterface)
 convertDti (DataTypeInterface binders ctrs) = do
   let varNames = map fst binders
-      binders' = imap (\i (_, kind) -> (i, kind)) binders
+      -- binders' = imap (\i (_, kind) -> (i, kind)) binders
   ctrs' <- withPushedVars varNames $ traverse convertCtr ctrs
-  let dti = DataTypeInterface binders' ctrs'
+  let dti = DataTypeInterface binders ctrs'
   pure (cidOf dti, dti)
 
 convertEi
@@ -134,8 +134,10 @@ convertEi (EffectInterface binders cmds) = do
 
 convertCtr
   :: Raw1 ConstructorDecl -> ResolutionM (Executable1 ConstructorDecl)
-convertCtr (ConstructorDecl name vtys)
-  = ConstructorDecl name <$> traverse convertValTy vtys
+convertCtr (ConstructorDecl name vtys tyArgs)
+  = ConstructorDecl name
+    <$> traverse convertValTy vtys
+    <*> traverse convertTyArg tyArgs
 
 convertValTy :: Raw1 ValTy -> ResolutionM (Executable1 ValTy)
 convertValTy = \case
@@ -198,6 +200,10 @@ convertValue = \case
     <$> lookupUid cid
     <*> pure row
     <*> mapM convertTm spine
+  ForeignValue tyId sat valId -> ForeignValue
+    <$> lookupUid tyId
+    <*> traverse convertValTy sat
+    <*> lookupUid valId
   Lambda binderName scope -> Lambda binderName <$> convertIntScope scope
 
 convertAdjustment :: Adjustment' -> ResolutionM AdjustmentI

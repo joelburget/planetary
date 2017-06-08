@@ -17,20 +17,28 @@ import Control.Monad.Reader
 import Control.Monad.State
 import Data.HashMap.Lazy (intersectionWith)
 import Data.Monoid ((<>))
+import Data.Text (Text)
 import Network.IPLD hiding (Row)
 
 import Planetary.Core.Syntax
 import Planetary.Core.Syntax.Patterns
 import Planetary.Core.UIdMap
+import Planetary.Core.Unification
 import Planetary.Util
+
+-- Limitations:
+-- We (by choice) don't check kinds for now.
 
 data TcErr
   = DataUIdMismatch Cid Cid
-  | ZipLengthMismatch
+  | UIdMismatch
+  | ApplicationSpineMismatch [TmI] [ValTyI]
+  | DataSaturationMismatch [TyArgI] [TyArgI]
+  | ConstructorArgMismatch [TmI] [ValTyI]
+  | CaseMismatch [Vector ValTyI] [(Vector Text, Scope Int (Tm Cid Int) Int)]
   | FailedDataTypeLookup
   | FailedConstructorLookup Cid Row
-  | AbilityUnification
-  | TyUnification ValTyI ValTyI
+  | FailedUnification UnificationError
   | LookupCommands
   | LookupCommandTy
   | LookupVarTy Int
@@ -51,6 +59,12 @@ data TypingEnv uid a = TypingEnv
   } deriving Show
 
 makeLenses ''TypingEnv
+
+type DataTypeTableI  = DataTypeTable  Cid Int
+type InterfaceTableI = InterfaceTable Cid Int
+type TypingEnvI      = TypingEnv      Cid Int
+type TypingStateI    = TypingState    Cid Int
+type TcM'            = TcM            Cid Int
 
 -- Mutable typing information
 --
@@ -73,11 +87,24 @@ newtype TcM uid a b = TcM
 deriving instance MonadState (TypingState uid a) (TcM uid a)
 deriving instance MonadReader (TypingEnv uid a) (TcM uid a)
 
-type DataTypeTableI  = DataTypeTable  Cid Int
-type InterfaceTableI = InterfaceTable Cid Int
-type TypingEnvI      = TypingEnv      Cid Int
-type TypingStateI    = TypingState    Cid Int
-type TcM'            = TcM            Cid Int
+instance HasUnification (TcM Cid Int) where
+  cantUnify = throwError . FailedUnification
+
+  locally = localState
+
+  -- lookupVar :: HasUnification m => Int -> m (Maybe ValTyI)
+  lookupVar v = gets (^? ix v . _Left)
+
+  -- bindVar :: HasUnification m => Int -> ValTyI -> m ()
+  bindVar v tm = modify (& ix v . _Left .~ tm)
+
+  -- seenAs :: Int -> ValTyI -> m ()
+  seenAs v t0 = do
+    table <- get
+    case table ^? ix v of
+      Just (Left t)  -> cantUnify $ OccursFailure v t
+      Just (Right pty) -> cantUnify $ UnimplementedEffectUnification pty
+      Nothing -> bindVar v t0
 
 runTcM
   :: TypingEnvI
@@ -108,8 +135,8 @@ infer = \case
   Cut (Application spine) f -> do
     SuspendedTy (CompTy dom (Peg ability retTy)) <- infer f
     ambient <- getAmbient
-    _ <- unify ability ambient ?? AbilityUnification
-    _ <- mapM_ (uncurry check) =<< strictZip ZipLengthMismatch spine dom
+    _ <- unifyAbilities ability ambient
+    _ <- mapM_ (uncurry check) =<< strictZip ApplicationSpineMismatch spine dom
     pure retTy
   -- COERCE
   Annotation n a -> check (Value n) a >> pure a
@@ -125,18 +152,24 @@ check (Value (Lambda _binders body))
     withAbility ability $
       check body' codom
 -- DATA
-check (Value (DataConstructor uid1 row tms)) (DataTy uid2 valTys) = do
+check (Value (DataConstructor uid1 row tms)) (DataTy uid2 valTysExp) = do
   assert (DataUIdMismatch uid1 uid2) (uid1 == uid2)
-  ConstructorDecl _name argTys <- lookupConstructorTy uid1 row
-  mapM_ (uncurry check) =<< strictZip ZipLengthMismatch tms argTys
+  ConstructorDecl _name argTys valTysAct <- lookupConstructorTy uid1 row
+  mapM_ (uncurry unifyTyArgs) =<< strictZip DataSaturationMismatch valTysAct valTysExp
+  mapM_ (uncurry check) =<< strictZip ConstructorArgMismatch tms argTys
+check (Value (DataConstructor uid row tms)) (VariableTy n) = do
+  ConstructorDecl _name argTys valTysAct <- lookupConstructorTy uid row
+  let ty = DataTy uid valTysAct
+  n =: ty
 -- CASE
 check (Cut (Case uid1 rows) m) ty = do
   -- args :: (Vector (TyArg a))
   DataTy uid2 _args <- infer m
   assert (DataUIdMismatch uid1 uid2) (uid1 == uid2)
 
-  dataRows <- dataInterface <$> lookupDataType uid1 -- :: Vector (Vector ValTyI)
-  zipped <- strictZip ZipLengthMismatch dataRows rows
+  dataIface <- dataInterface <$> lookupDataType uid1
+  let dataRows = fst <$> dataIface -- :: Vector (Vector ValTyI)
+  zipped <- strictZip CaseMismatch dataRows rows
   forM_ zipped $ \(dataConTys, (_, rhs)) ->
     withValTypes' dataConTys rhs (`check` ty)
 -- HANDLE
@@ -159,12 +192,14 @@ check (Cut (Let pty _name body) val) ty = do
 -- SWITCH
 check m b = do
   a <- infer m
-  _ <- unify a b ?? TyUnification a b
+  _ <- unifyValTys a b
   pure ()
 
-dataInterface :: DataTypeInterface uid a -> Vector (Vector (ValTy uid a))
+dataInterface
+  :: DataTypeInterface uid a
+  -> Vector (Vector (ValTy uid a), Vector (TyArg uid a))
 dataInterface (DataTypeInterface _ ctors) =
-  let f (ConstructorDecl _name args) = args
+  let f (ConstructorDecl _name args resultArgs) = (args, resultArgs)
   in f <$> ctors
 
 -- TODO: convert to `fromScope`?
@@ -188,7 +223,7 @@ uidZip
   -> UIdMap Cid [b]
   -> m (UIdMap Cid [(a, b)])
 uidZip (UIdMap as) (UIdMap bs) = UIdMap <$>
-  sequence (intersectionWith (strictZip ZipLengthMismatch) as bs)
+  sequence (intersectionWith (strictZip (\_ _ -> UIdMismatch)) as bs)
 
 -- TODO: should we push these in this order?
 -- * we should reverse and push at the head
@@ -234,10 +269,9 @@ lookupDataType uid
     >>= (?? FailedDataTypeLookup)
 
 lookupConstructorTy :: Cid -> Row -> TcM' ConstructorDeclI
-lookupConstructorTy uid row
-  = do  env <- ask
-        asks (^? typingData . ix uid . constructors . ix row)
-          >>= (?? FailedConstructorLookup uid row)
+lookupConstructorTy uid row =
+  asks (^? typingData . ix uid . constructors . ix row)
+    >>= (?? FailedConstructorLookup uid row)
 
 lookupCommands :: Cid -> TcM' [CommandDeclarationI]
 lookupCommands uid

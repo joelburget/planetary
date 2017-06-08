@@ -22,7 +22,7 @@ module Planetary.Core.Syntax (module Planetary.Core.Syntax) where
 import Bound
 import Control.Lens
 import Control.Lens.TH (makeLenses)
-import Control.Monad (ap, zipWithM)
+import Control.Monad (ap)
 import Data.Data
 import Data.Foldable (toList)
 import Data.Functor.Classes
@@ -81,14 +81,18 @@ data Polytype uid a = Polytype
   , polyVal :: Scope Int (ValTy uid) a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
-data ConstructorDecl uid a = ConstructorDecl Text (Vector (ValTy uid a))
+data ConstructorDecl uid a = ConstructorDecl
+  { _constructorName   :: Text
+  , _constructorArgs   :: Vector (ValTy uid a)
+  , _constructorResult :: Vector (TyArg uid a)
+  }
   deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
 
 -- A collection of data constructor signatures (which can refer to bound type /
 -- effect variables).
 data DataTypeInterface uid a = DataTypeInterface
   -- we universally quantify over some number of type variables
-  { _dataBinders :: Vector (a, Kind)
+  { _dataBinders :: Vector (Text, Kind)
   -- a collection of constructors taking some arguments
   , _constructors :: Vector (ConstructorDecl uid a)
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Data, Generic)
@@ -202,7 +206,7 @@ data ResolvedDecls = ResolvedDecls
   , _interfaces :: UIdMap Cid EffectInterfaceI
   , _globalCids :: [(Text, Cid)]
   , _terms      :: [Executable2 TermDecl]
-  }
+  } deriving Show
 
 -- TODO: make traversals
 -- namedData :: Text -> Traversal' ResolvedDecls DataTypeInterfaceI
@@ -248,6 +252,7 @@ type TyArgI              = Executable1 TyArg
 type DataTypeInterfaceI  = Executable1 DataTypeInterface
 type EffectInterfaceI    = Executable1 EffectInterface
 type ConstructorDeclI    = Executable1 ConstructorDecl
+type PegI                = Executable1 Peg
 
 type TmI                 = Executable2 Tm
 type ValueI              = Executable2 Value
@@ -319,52 +324,6 @@ instance IsIpld InitiateAbility
 instance IsIpld Kind
 instance IsIpld (DataTypeInterface Cid Int)
 instance IsIpld (EffectInterface Cid Int)
-
--- Unifiable
-
-instance IsUid uid => Unifiable (Ability uid) where
-  unify (Ability init1 uids1) (Ability init2 uids2)
-    = maybeIf (init1 == init2) (Ability init1 <$> unify uids1 uids2)
-
-instance IsUid uid => Unifiable (Peg uid) where
-  unify (Peg ab1 val1) (Peg ab2 val2)
-    = Peg <$> unify ab1 ab2 <*> unify val1 val2
-
-instance IsUid uid => Unifiable (CompTy uid) where
-  unify (CompTy dom1 codom1) (CompTy dom2 codom2) = CompTy
-    <$> unifyValTys dom1 dom2
-    <*> unify codom1 codom2
-
-unifyValTys
-  :: (IsUid uid, Eq a)
-  => Vector (ValTy uid a)
-  -> Vector (ValTy uid a)
-  -> Maybe (Vector (ValTy uid a))
-unifyValTys vals1 vals2 = maybeIf
-  (length vals1 == length vals2)
-  (zipWithM unify vals1 vals2)
-
-instance IsUid uid => Unifiable (ValTy uid) where
-  unify (DataTy uid1 args1) (DataTy uId2 args2) = maybeIf
-    (uid1 == uId2)
-    (DataTy uid1 <$> unifyTyArgs args1 args2)
-  unify (SuspendedTy cty1) (SuspendedTy cty2) = SuspendedTy <$> unify cty1 cty2
-  unify (VariableTy a) (VariableTy b) = maybeIf (a == b) (Just (VariableTy a))
-  unify _ _ = Nothing
-
-instance IsUid uid => Unifiable (TyArg uid) where
-  unify (TyArgVal v1) (TyArgVal v2) = TyArgVal <$> unify v1 v2
-  unify (TyArgAbility a1) (TyArgAbility a2) = TyArgAbility <$> unify a1 a2
-  unify _ _ = Nothing
-
-unifyTyArgs
-  :: (IsUid uid, Eq a)
-  => Vector (TyArg uid a)
-  -> Vector (TyArg uid a)
-  -> Maybe (Vector (TyArg uid a))
-unifyTyArgs args1 args2 = maybeIf
-  (length args1 == length args2)
-  (zipWithM unify args1 args2)
 
 -- Applicative / Monad
 

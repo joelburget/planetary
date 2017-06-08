@@ -106,13 +106,16 @@ parseTyArg = TyArgAbility <$> brackets parseAbilityBody
          <|> TyArgVal     <$> parseValTy
          <?> "Ty Arg"
 
-parseConstructors :: MonadicParsing m => m (Vector ConstructorDecl')
-parseConstructors = parseConstructor `sepBy` bar <?> "Constructors"
+parseConstructors
+  :: MonadicParsing m => Vector TyArg' -> m (Vector ConstructorDecl')
+parseConstructors tyArgs = parseConstructor tyArgs `sepBy` bar <?> "Constructors"
 
-parseConstructor :: MonadicParsing m => m ConstructorDecl'
-parseConstructor = angles (ConstructorDecl
+parseConstructor
+  :: MonadicParsing m => Vector TyArg' -> m ConstructorDecl'
+parseConstructor tyArgs = angles (ConstructorDecl
   <$> identifier
   <*> many parseValTy
+  <*> pure tyArgs
   ) <?> "Constructor"
 
 parseDataTy :: MonadicParsing m => m ValTy'
@@ -181,7 +184,12 @@ parseDataDecl = do
   name <- identifier
   tyArgs <- many parseTyVar
   _ <- assign
-  ctrs <- localIndentation Gt (absoluteIndentation parseConstructors)
+
+  -- this is the result type each constructor will saturate to
+  let tyArgs' = (\(var, _kind) -> TyArgVal (VariableTy var)) <$> tyArgs
+      ctrParser = parseConstructors tyArgs'
+
+  ctrs <- localIndentation Gt (absoluteIndentation ctrParser)
   return (DataDecl name (DataTypeInterface tyArgs ctrs))
 
 -- only value arguments and result type
@@ -383,7 +391,7 @@ parseTmNoApp = choice
 
 parseCommandOrIdent :: MonadicParsing m => m Tm'
 parseCommandOrIdent = do
-  ident <- identifier
+  name <- identifier
 
   dotRow <- optional $ try $ do
     _ <- dot
@@ -391,9 +399,9 @@ parseCommandOrIdent = do
 
   -- TODO: named commands
   pure $ case dotRow of
-    Nothing -> Variable ident
+    Nothing -> Variable name
     -- TODO application of terms
-    Just row -> Cut (Application []) (CommandV ident (fromIntegral row))
+    Just row -> Cut (Application []) (CommandV name (fromIntegral row))
 
 parseLambda :: MonadicParsing m => m Value'
 parseLambda = Lam

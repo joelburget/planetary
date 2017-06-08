@@ -7,6 +7,7 @@
 {-# language FlexibleInstances #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language MultiParamTypeClasses #-}
+{-# language TupleSections #-}
 {-# language TypeFamilies #-}
 module Planetary.Core.UIdMap where
 
@@ -45,10 +46,15 @@ instance IsUid uid => At (UIdMap uid a) where
 instance IsUid uid => Ixed (UIdMap uid a) where
   ix k f (UIdMap m) = UIdMap <$> ix k f m
 
-instance IsUid uid => Unifiable (UIdMap uid) where
-  unify (UIdMap a) (UIdMap b) = maybeIf
-    (HashMap.null (HashMap.difference a b))
-    (Just $ UIdMap (HashMap.union a b))
+-- instance IsUid uid => Unifiable (UIdMap uid) where
+--   zipMatch (UIdMap a) (UIdMap b) =
+--     let aOnly = Left <$> HashMap.difference a b
+--         bOnly = Left <$> HashMap.difference b a
+--         both = HashMap.intersectionWith (Right <$$> (,)) a b
+
+--         result = HashMap.unions [aOnly, bOnly, both]
+
+--     in Just (UIdMap result)
 
 uIdMapFromList :: IsUid uid => [(uid, a)] -> UIdMap uid a
 uIdMapFromList = UIdMap . HashMap.fromList

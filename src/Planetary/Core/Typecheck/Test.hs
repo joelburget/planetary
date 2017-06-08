@@ -99,13 +99,14 @@ unitTests = testGroup "typechecking"
         tm2 = DataTm v2Id 0 []
         ty1 = DataTy v1Id []
         ty2 = DataTy v2Id []
+        ty1ty2vals = [TyArgVal ty1, TyArgVal ty2]
         constr1 = ConstructorDecl "constr1" [ty1, ty2]
         constr2 = ConstructorDecl "constr2" []
 
         app = Application [tm1, tm2]
         Just f = closed $ Lam ["x", "y"] $
           DataTm dataUid 0 [V"x", V"y"]
-        resultTy = DataTy dataUid [TyArgVal ty1, TyArgVal ty2]
+        resultTy = DataTy dataUid ty1ty2vals
 
         goodAnnF = Annotation f $ SuspendedTy $
           CompTy [ty1, ty2] (Peg emptyAbility resultTy)
@@ -113,18 +114,29 @@ unitTests = testGroup "typechecking"
 
         baddAnnF = Annotation f $ SuspendedTy $
           CompTy [ty1, ty1] (Peg emptyAbility resultTy)
-        expectedBad = Left (TyUnification ty1 ty2)
+        -- expectedBad = Left (TyUnification ty1 ty2)
+        expectedBad = Left (FailedUnification UnspecifiedFailure)
 
         tables = emptyTypingEnv & typingData .~ uIdMapFromList
-          [ (dataUid, DataTypeInterface [] [constr1])
-          , (v1Id, DataTypeInterface [] [constr2])
-          , (v2Id, DataTypeInterface [] [constr2])
+          [ (dataUid, DataTypeInterface [] [constr1 ty1ty2vals])
+          , (v1Id, DataTypeInterface [] [constr2 []])
+          , (v2Id, DataTypeInterface [] [constr2 []])
           ]
 
-    in testGroup "infer app"
-      [ inferTest "APP (1)" tables emptyTypingState (Cut app goodAnnF) expected
-      , inferTest "APP (2)" tables emptyTypingState (Cut app baddAnnF) expectedBad
-      ]
+    in testGroup "(sharing data defns)"
+         [ testGroup "infer app"
+           [ inferTest "APP (1)" tables emptyTypingState (Cut app goodAnnF) expected
+           , inferTest "APP (2)" tables emptyTypingState (Cut app baddAnnF) expectedBad
+           ]
+         , testGroup "check data"
+           [ let tables' = emptyTypingEnv & typingData .~ uIdMapFromList
+                   [ (v1Id, DataTypeInterface [] [ConstructorDecl "constr" [] []]) ]
+             in checkTest "DATA (simple)" tables' emptyTypingState tm1 ty1
+           , let tm = DataTm dataUid 0 [tm1, tm2]
+                 expectedTy = DataTy dataUid ty1ty2vals
+             in checkTest "DATA (args)" tables emptyTypingState tm expectedTy
+           ]
+         ]
 
   , testGroup "infer annotation" []
     -- [ let ty = DataTy (mockCid "ty") []
@@ -132,32 +144,6 @@ unitTests = testGroup "typechecking"
     -- ]
 
   , testGroup "TODO: check lambda" []
-
-  , testGroup "check data"
-    [ let v1Id = mockCid "v1"
-          tm1 = DataTm v1Id 0 []
-          ty1 = DataTy v1Id []
-          tables = emptyTypingEnv & typingData .~ uIdMapFromList
-            [ (v1Id, DataTypeInterface [] [ConstructorDecl "constr" []]) ]
-      in checkTest "DATA (simple)" tables emptyTypingState tm1 ty1
-    , let dataUid = mockCid "dataUid"
-          v1Id = mockCid "v1"
-          v2Id = mockCid "v2"
-          tm1 = DataTm v1Id 0 []
-          tm2 = DataTm v2Id 0 []
-          ty1 = DataTy v1Id []
-          ty2 = DataTy v2Id []
-          constr1 = ConstructorDecl "constr1" [ty1, ty2]
-          constr2 = ConstructorDecl "constr2" []
-          tables = emptyTypingEnv & typingData .~ uIdMapFromList
-            [ (dataUid, DataTypeInterface [] [constr1])
-            , (v1Id, DataTypeInterface [] [constr2])
-            , (v2Id, DataTypeInterface [] [constr2])
-            ]
-          tm = DataTm dataUid 0 [tm1, tm2]
-          expectedTy = DataTy dataUid [TyArgVal ty1, TyArgVal ty2]
-      in checkTest "DATA (args)" tables emptyTypingState tm expectedTy
-    ]
 
     -- , testGroup "check case"
     --   [ let abcdUid = mockCid "abcd"
