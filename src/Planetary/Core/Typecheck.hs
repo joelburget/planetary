@@ -120,7 +120,7 @@ infer = \case
 check :: TmI -> ValTyI -> TcM' ()
 -- FUN
 check (Value (Lambda _binders body))
-      (SuspendedTy (CompTy dom (Peg ability codom))) = do
+      (SuspendedTy (CompTy dom (Peg ability codom))) =
   withValTypes' dom body $ \body' ->
     withAbility ability $
       check body' codom

@@ -1,7 +1,6 @@
 {-# language LambdaCase #-}
 {-# language OverloadedStrings #-}
 {-# language TypeApplications #-}
-{-# language QuasiQuotes #-}
 module Planetary.Library.FrankExamples where
 
 import Control.Monad.Except

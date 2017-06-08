@@ -73,7 +73,7 @@ unitTests =
          [ checkTest "1 : Int" env emptyTypingState one intTy
          , checkTest "1 + 1 : Int" env emptyTypingState (add [one, one]) intTy
          , checkTest "\"hello \" <> \"world\" : String" env emptyTypingState (cat [hello, world]) textTy
-         , let tm = (add [one, hello])
+         , let tm = add [one, hello]
                err = TyUnification textTy intTy
 
            -- TODO: checkFailTest?

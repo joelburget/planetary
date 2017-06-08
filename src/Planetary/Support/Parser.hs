@@ -134,7 +134,7 @@ parseAbilityBody =
   let closedAb = do
         _ <- textSymbol "0"
         skipOptional comma
-        instances <- option [] (parseInterfaceInstances)
+        instances <- option [] parseInterfaceInstances
         return $ Ability ClosedAbility (uIdMapFromList instances)
       varAb = do
         var <- option ("e" :: Text) (try identifier)

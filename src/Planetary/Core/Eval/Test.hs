@@ -1,6 +1,4 @@
 {-# language OverloadedStrings #-}
-{-# language QuasiQuotes #-}
-{-# language TypeApplications #-}
 module Planetary.Core.Eval.Test where
 
 import Bound (closed)

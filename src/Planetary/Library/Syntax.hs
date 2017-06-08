@@ -2,7 +2,6 @@
 {-# language PatternSynonyms #-}
 {-# language QuasiQuotes #-}
 {-# language ScopedTypeVariables #-}
-{-# language TemplateHaskell #-}
 module Planetary.Library.Syntax where
 
 import Data.Text (Text)
