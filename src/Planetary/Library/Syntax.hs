@@ -10,7 +10,7 @@ import Network.IPLD
 import Planetary.Core
 import Planetary.Support.Ids
 import Planetary.Support.NameResolution
-import Planetary.Support.Parser.QQ
+import Planetary.Support.QQ
 
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.Text as T

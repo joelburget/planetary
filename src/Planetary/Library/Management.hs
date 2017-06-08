@@ -1,7 +1,7 @@
 {-# language QuasiQuotes #-}
 module Planetary.Library.Management where
 
-import Planetary.Support.Parser.QQ
+import Planetary.Support.QQ
 
 [declarations|
 data LanguageDiff =

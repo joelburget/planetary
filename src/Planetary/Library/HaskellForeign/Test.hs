@@ -15,7 +15,7 @@ import Planetary.Core.Eval.Test (stepTest)
 import Planetary.Core.Typecheck.Test
   (checkTest, emptyTypingEnv, emptyTypingState)
 import Planetary.Support.Ids
-import Planetary.Support.Parser.QQ
+import Planetary.Support.QQ
 import Planetary.Support.NameResolution
 
 -- TODO: this is awfully kludgy:

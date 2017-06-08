@@ -10,7 +10,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import Planetary.Core
-import Planetary.Support.Parser.QQ
+import Planetary.Support.QQ
 
 checkTest
   :: String
@@ -32,9 +32,8 @@ inferTest
 inferTest name tables env tm expected = testCase name $
   runTcM tables env (infer tm) @?= expected
 
--- TODO: use QQ
 exampleInterfaces :: InterfaceTableI
-exampleInterfaces = uIdMapFromList []
+exampleInterfaces = mempty
 
 dataTypeTable :: DataTypeTableI
 dataTypeTable = mempty

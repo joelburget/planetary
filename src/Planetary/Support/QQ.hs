@@ -2,7 +2,7 @@
 {-# language TemplateHaskellQuotes #-}
 {-# language TemplateHaskell #-}
 {-# language ViewPatterns #-}
-module Planetary.Support.Parser.QQ where
+module Planetary.Support.QQ where
 
 import Control.Arrow ((>>>))
 import Control.Lens (minimumOf)
