@@ -37,6 +37,9 @@ data TyFamily =
   | <tyArg>
   | <ability>
 
+-- TODO: GADT like syntax?
+-- | dataTy : uid -> <vector ty> -> Ty ValTy uid a ty
+
 data Ty uid a ty =
   -- ValTy
   <dataTy uid <vector ty>>
@@ -58,6 +61,36 @@ data Ty uid a ty =
 
 data Adjustment uid a =
  <adjustment <uidMap uid <lfix <Ty uid a>>>>
+
+-- XXX coinductive with Tm
+data AdjustmentHandlers uid tyval tmval =
+  <adjustmentHandlers <uidMap uid <vector tm>>
+
+data TmFamily =
+  <value>
+  | <continuation>
+  | <tm>
+
+data Tm uid tyvar tmvar tm =
+  -- Value
+  <command uid row>
+  | <dataConstructor uid row <vector tm>>
+  | <foreignValue uid <vector <ty uid tyval>> uid>
+  | <lambda <vector text> tm>
+
+  -- Continuation
+  | <application <vector tm>
+  | <case uid <vector <tuple <vector text> tm>>
+  | <handle <adjustment uid tyval> <ty uid tyval> <adjustmentHandlers uid tyval tmval> tm>
+  | <let <polytype uid tyval> text tm>
+
+  -- Tm
+  | <variable tmval>
+  | <instantiatePolyvar tmval <vector <tyArg uid tyval>>
+  | <annotation tm <ty uid tyval>
+  | <value <tm>>
+  | <cut <tm> <tm>>
+  | <letrec <vector <tuple <polytype uid tyval> <tm>>> tm>
 |]
 
 resolvedDecls :: ResolvedDecls
@@ -65,6 +98,9 @@ Right resolvedDecls = nameResolution decls $ uIdMapFromList
   [ ("vector", vectorId)
   , ("uidMap", uidMapId)
   , ("lfix", lfixId)
+  , ("row", _)
+  , ("text", _)
+  , ("tuple", _)
   ]
 tyId :: Cid
 Just (tyId, _) = namedData "Ty" resolvedDecls
