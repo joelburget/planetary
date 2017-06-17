@@ -1,3 +1,4 @@
+{-# language DataKinds #-}
 {-# language OverloadedStrings #-}
 module Planetary.Core.Eval.Test where
 
@@ -26,7 +27,7 @@ stepTest name env steps tm expected =
 
     fst result @?= expected
 
-bool :: Int -> Tm Cid a b
+bool :: Int -> Tm 'TM Cid a b
 bool i = DataTm boolId i []
 
 unitTests :: TestTree
@@ -34,7 +35,7 @@ unitTests  =
   let emptyEnv :: EvalEnv
       emptyEnv = EvalEnv mempty mempty
 
-      -- true, false :: forall a b. Tm Cid a b
+      -- true, false :: forall a b. Tm 'TM Cid a b
       false = bool 0
       true = bool 1
 

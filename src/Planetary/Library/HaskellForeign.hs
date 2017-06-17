@@ -1,3 +1,4 @@
+{-# language DataKinds #-}
 {-# language TypeApplications #-}
 module Planetary.Library.HaskellForeign where
 
@@ -84,7 +85,7 @@ writeForeign a = do
 -- XXX
 liftBinaryOp
   :: IsIpld s
-  => (s -> s -> s) -> (Spine Cid a b -> ForeignM (Tm Cid a b))
+  => (s -> s -> s) -> (Spine Cid a b -> ForeignM (Tm 'TM Cid a b))
 liftBinaryOp op [ForeignTm tyUid tySat uid1, ForeignTm _ _ uid2] = do
   i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
   ForeignTm tyUid tySat <$> writeForeign i
@@ -93,7 +94,7 @@ liftBinaryOp _ _ = throwError FailedForeignFun
 -- XXX
 liftUnaryOp
   :: IsIpld s
-  => (s -> s) -> (Spine Cid a b -> ForeignM (Tm Cid a b))
+  => (s -> s) -> (Spine Cid a b -> ForeignM (Tm 'TM Cid a b))
 liftUnaryOp op [ForeignTm tyUid tySat uid] = do
   i <- op <$> lookupForeign uid
   ForeignTm tyUid tySat <$> writeForeign i
@@ -105,7 +106,6 @@ mkForeign val = let val' = toIpld val in (valueCid val', val')
 mkForeignTm :: IsIpld a => Cid -> Vector ValTyI -> a -> TmI
 mkForeignTm tyId tySat = ForeignTm tyId tySat . fst . mkForeign
 
--- -- TODO: use QQ
 -- exampleDataTypes :: DataTypeTable Cid String
 -- exampleDataTypes = uIdMapFromList
 --   -- void has no constructor

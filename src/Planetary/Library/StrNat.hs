@@ -1,9 +1,7 @@
 {-# language QuasiQuotes #-}
 module Planetary.Library.Management where
 
-import Planetary.Support.QQ
-
-decls = [declarations|
+decls = forceDeclarations [text|
 data Expr f =
   <nat <foreignTm>>
   | <str <foreignTm>>

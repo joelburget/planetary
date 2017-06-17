@@ -1,4 +1,5 @@
 {-# language FlexibleContexts #-}
+{-# language GADTs #-}
 {-# language LambdaCase #-}
 {-# language NamedFieldPuns #-}
 {-# language TemplateHaskell #-}
@@ -94,7 +95,7 @@ halt = throwError Halt
 
 step :: TmI -> EvalM TmI
 step v@(Value _) = pure v -- ?
-step Cut {cont, scrutinee} = stepCut cont scrutinee
+step (Cut cont scrutinee) = stepCut cont scrutinee
   -- case scrutinee of
   --   Value v -> stepCut cont v
   --   _other -> do

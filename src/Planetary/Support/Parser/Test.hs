@@ -65,7 +65,7 @@ unitTests = testGroup "parsing"
   , let ctrResult = [TyArgVal (VariableTy "X"), TyArgVal (VariableTy "Y")]
     in parserTest "data Either X Y = <left X> | <right Y>" parseDataDecl
          (DataDecl "Either" $
-           DataTypeInterface [("X", ValTy), ("Y", ValTy)]
+           DataTypeInterface [("X", ValTyK), ("Y", ValTyK)]
              [ ConstructorDecl "left" [VTy"X"] ctrResult
              , ConstructorDecl "right" [VTy"Y"] ctrResult
              ])
@@ -118,7 +118,7 @@ unitTests = testGroup "parsing"
   , parserTest "foo : X -> X" parseCommandDecl $ CommandDeclaration [VTy"X"] (VTy"X")
 
   , parserTest "interface Iface X Y = foo : X -> Y | bar : Y -> X" parseInterfaceDecl
-    (InterfaceDecl "Iface" (EffectInterface [("X", ValTy), ("Y", ValTy)]
+    (InterfaceDecl "Iface" (EffectInterface [("X", ValTyK), ("Y", ValTyK)]
       [ CommandDeclaration [VTy"X"] (VTy"Y")
       , CommandDeclaration [VTy"Y"] (VTy"X")
       ]))
@@ -136,8 +136,8 @@ unitTests = testGroup "parsing"
           ]
         compDomain = [VTy"X", SuspendedTy (CompTy [VTy"X"] (Peg emptyAbility (VTy"Y")))]
         compCodomain = Peg emptyAbility (VTy"Y")
-        polyVal = SuspendedTy CompTy {..}
-        polyBinders = [("X", ValTy), ("Y", ValTy)]
+        polyVal = SuspendedTy (CompTy compDomain compCodomain)
+        polyBinders = [("X", ValTyK), ("Y", ValTyK)]
         pty = PolytypeP polyBinders polyVal
         expected = let_ "on" pty
           (Value $ Lam ["x", "f"] (Cut (Application [V"x"]) (V"f")))
@@ -174,7 +174,7 @@ unitTests = testGroup "parsing"
           -- "data Maybe x = Just x | Nothing"
 
         ctrResult = [TyArgVal (VariableTy "x")]
-        expected = DataDecl "Maybe" (DataTypeInterface [("x", ValTy)]
+        expected = DataDecl "Maybe" (DataTypeInterface [("x", ValTyK)]
           [ ConstructorDecl "just" [VariableTy "x"] ctrResult
           , ConstructorDecl "nothing" [] ctrResult
           ])
@@ -203,11 +203,11 @@ unitTests = testGroup "parsing"
           ]
         fallthrough = ("y", V"y")
         cont = handle adj peg (uIdMapFromList handlers) fallthrough
-        expected = Cut {cont, scrutinee}
+        expected = Cut cont scrutinee
     in parserTest defn parseHandle expected
 
-  , parserTest "X" parseTyVar ("X", ValTy)
-  , parserTest "[e]" parseTyVar ("e", EffTy)
+  , parserTest "X" parseTyVar ("X", ValTyK)
+  , parserTest "[e]" parseTyVar ("e", EffTyK)
 
   -- , let defn = T.unlines
   --         [

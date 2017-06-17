@@ -1,3 +1,4 @@
+{-# language GADTs #-}
 {-# language OverloadedStrings #-}
 {-# language PatternSynonyms #-}
 {-# language QuasiQuotes #-}
@@ -5,12 +6,13 @@
 module Planetary.Library.Syntax where
 
 import Data.Text (Text)
+import NeatInterpolation
 import Network.IPLD
 
 import Planetary.Core
 import Planetary.Support.Ids
 import Planetary.Support.NameResolution
-import Planetary.Support.QQ
+import Planetary.Support.Parser
 
 import qualified Data.ByteString.Char8 as B8
 import qualified Data.Text as T
@@ -24,7 +26,7 @@ uidMapIdStr = cidText uidMapId
 lfixIdStr   = cidText lfixId
 
 decls :: [DeclS]
-decls = [declarations|
+decls = forceDeclarations [text|
 data InitiateAbility =
   <openAbility>
   | <closedAbility>
@@ -62,35 +64,35 @@ data Ty uid a ty =
 data Adjustment uid a =
  <adjustment <uidMap uid <lfix <Ty uid a>>>>
 
--- XXX coinductive with Tm
-data AdjustmentHandlers uid tyval tmval =
-  <adjustmentHandlers <uidMap uid <vector tm>>
-
 data TmFamily =
   <value>
   | <continuation>
   | <tm>
+  | <adjustmentHandlers>
 
 data Tm uid tyvar tmvar tm =
   -- Value
   <command uid row>
   | <dataConstructor uid row <vector tm>>
-  | <foreignValue uid <vector <ty uid tyval>> uid>
+  | <foreignValue uid <vector <ty uid tyvar>> uid>
   | <lambda <vector text> tm>
 
   -- Continuation
   | <application <vector tm>
   | <case uid <vector <tuple <vector text> tm>>
-  | <handle <adjustment uid tyval> <ty uid tyval> <adjustmentHandlers uid tyval tmval> tm>
-  | <let <polytype uid tyval> text tm>
+  | <handle <adjustment uid tyvar> <ty uid tyvar> <tm uid tyvar tmvar> tm>
+  | <let <polytype uid tyvar> text tm>
 
   -- Tm
-  | <variable tmval>
-  | <instantiatePolyvar tmval <vector <tyArg uid tyval>>
-  | <annotation tm <ty uid tyval>
+  | <variable tmvar>
+  | <instantiatePolyvar tmvar <vector <tyArg uid tyvar>>
+  | <annotation tm <ty uid tyvar>
   | <value <tm>>
   | <cut <tm> <tm>>
-  | <letrec <vector <tuple <polytype uid tyval> <tm>>> tm>
+  | <letrec <vector <tuple <polytype uid tyvar> <tm>>> tm>
+
+  -- AdjustmentHandlers
+  | <adjustmentHandlers <uidMap uid <vector tm>>>
 |]
 
 resolvedDecls :: ResolvedDecls
@@ -98,9 +100,9 @@ Right resolvedDecls = nameResolution decls $ uIdMapFromList
   [ ("vector", vectorId)
   , ("uidMap", uidMapId)
   , ("lfix", lfixId)
-  , ("row", _)
-  , ("text", _)
-  , ("tuple", _)
+  , ("row", rowId)
+  , ("text", textId)
+  , ("tuple", tupleId)
   ]
 tyId :: Cid
 Just (tyId, _) = namedData "Ty" resolvedDecls
@@ -130,7 +132,7 @@ syntaxInterfaceTable =
         ]
 
   in uIdMapFromList
-    [ (syntaxOpsId, EffectInterface [(uid, ValTy), (a, ValTy)]
+    [ (syntaxOpsId, EffectInterface [(uid, ValTyK), (a, ValTyK)]
       -- Fix :: f (Fix f) -> Fix f
       -- FixTy :: Ty uid a (Fix (Ty uid a)) -> Fix (Ty uid a)
       [ CommandDeclaration [tyTy] fixTy

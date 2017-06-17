@@ -1,5 +1,6 @@
 {-# language FlexibleContexts #-}
 {-# language FlexibleInstances #-}
+{-# language GADTs #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language MultiParamTypeClasses #-}
 {-# language StandaloneDeriving #-}

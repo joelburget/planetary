@@ -1,3 +1,4 @@
+{-# language DataKinds #-}
 {-# language FlexibleContexts #-}
 {-# language FlexibleInstances #-}
 {-# language GeneralizedNewtypeDeriving #-}
@@ -35,7 +36,7 @@ data TcErr
   | ApplicationSpineMismatch [TmI] [ValTyI]
   | DataSaturationMismatch [TyArgI] [TyArgI]
   | ConstructorArgMismatch [TmI] [ValTyI]
-  | CaseMismatch [Vector ValTyI] [(Vector Text, Scope Int (Tm Cid Int) Int)]
+  | CaseMismatch [Vector ValTyI] [(Vector Text, Scope Int (Tm 'TM Cid Int) Int)]
   | FailedDataTypeLookup
   | FailedConstructorLookup Cid Row
   | FailedUnification UnificationError
@@ -204,7 +205,7 @@ dataInterface (DataTypeInterface _ ctors) =
 
 -- TODO: convert to `fromScope`?
 -- TODO: is the succ necessary?
-succOpen :: Scope () (Tm Cid Int) Int -> TmI
+succOpen :: Scope () (Tm 'TM Cid Int) Int -> TmI
 succOpen = (succ <$>) . instantiate1 (V 0)
 
 instantiateAbility :: AbilityI -> TcM' (UIdMap Cid [CommandDeclarationI])
@@ -233,7 +234,7 @@ withValTypes tys = withState'
 
 withValTypes'
   :: [ValTyI]
-  -> Scope Int (Tm Cid Int) Int
+  -> Scope Int (Tm 'TM Cid Int) Int
   -> (TmI -> TcM' a)
   -> TcM' a
 withValTypes' tys scope cb =
@@ -241,7 +242,7 @@ withValTypes' tys scope cb =
   in withValTypes tys (cb body)
 
 openAdjustmentHandler
-  :: Scope (Maybe Int) (Tm Cid Int) Int
+  :: Scope (Maybe Int) (Tm 'TM Cid Int) Int
   -> [ValTyI]
   -> CompTyI
   -> (TmI -> TcM' a)

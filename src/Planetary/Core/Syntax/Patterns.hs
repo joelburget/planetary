@@ -1,3 +1,5 @@
+{-# language DataKinds #-}
+{-# language GADTs #-}
 {-# language PatternSynonyms #-}
 {-# language Rank2Types #-}
 {-# language ViewPatterns #-}
@@ -31,26 +33,26 @@ import Planetary.Core.Syntax
 import Planetary.Core.UIdMap
 import Planetary.Util
 
-pattern ForeignTm :: uid -> Vector (ValTy uid a) -> uid -> Tm uid a b
+pattern ForeignTm :: uid -> Vector (ValTy uid a) -> uid -> Tm 'TM uid a b
 pattern ForeignTm tyUid tySat valueUid
   = Value (ForeignValue tyUid tySat valueUid)
 
-pattern DataTm :: uid -> Row -> Vector (Tm uid a b) -> Tm uid a b
+pattern DataTm :: uid -> Row -> Vector (Tm 'TM uid a b) -> Tm 'TM uid a b
 pattern DataTm uid row vals = Value (DataConstructor uid row vals)
 
-pattern V :: b -> Tm uid a b
+pattern V :: b -> Tm 'TM uid a b
 pattern V name = Variable name
 
-pattern CommandV :: uid -> Row -> Tm uid a b
+pattern CommandV :: uid -> Row -> Tm 'TM uid a b
 pattern CommandV uid row = Value (Command uid row )
 
-pattern ConstructV :: uid -> Row -> Vector (Tm uid a b) -> Tm uid a b
+pattern ConstructV :: uid -> Row -> Vector (Tm 'TM uid a b) -> Tm 'TM uid a b
 pattern ConstructV uId row args = Value (DataConstructor uId row args)
 
-pattern LambdaV :: Vector Text -> Scope Int (Tm uid a) b -> Tm uid a b
+pattern LambdaV :: Vector Text -> Scope Int (Tm 'TM uid a) b -> Tm 'TM uid a b
 pattern LambdaV binderNames scope = Value (Lambda binderNames scope)
 
-pattern DataConstructorV :: uid -> Row -> Vector (Tm uid a b) -> Tm uid a b
+pattern DataConstructorV :: uid -> Row -> Vector (Tm 'TM uid a b) -> Tm 'TM uid a b
 pattern DataConstructorV cid row tms = Value (DataConstructor cid row tms)
 
 pattern VTy :: a -> ValTy uid a
@@ -74,31 +76,31 @@ pattern PolytypeP :: Eq a => Vector (a, Kind) -> ValTy uid a -> Polytype uid a
 pattern PolytypeP binders body <- (unPolytype -> (binders, body)) where
   PolytypeP binders body = polytype binders body
 
-lam :: Vector Text -> Tm uid a Text -> Value uid a Text
+lam :: Vector Text -> Tm 'TM uid a Text -> Tm 'VALUE uid a Text
 lam vars body = Lambda vars (abstract (`elemIndex` vars) body)
 
-unlam :: Value uid a Text -> Maybe (Vector Text, Tm uid a Text)
+unlam :: Tm 'VALUE uid a Text -> Maybe (Vector Text, Tm 'TM uid a Text)
 unlam (Lambda binderNames scope) =
   let variables = V <$> binderNames
   in Just (binderNames, instantiate (variables !!) scope)
 unlam _ = Nothing
 
-pattern Lam :: Vector Text -> Tm uid a Text -> Value uid a Text
+pattern Lam :: Vector Text -> Tm 'TM uid a Text -> Tm 'VALUE uid a Text
 pattern Lam names tm <- (unlam -> Just (names, tm)) where
   Lam vars body = lam vars body
 
 case_
   :: IsUid uid
   => uid
-  -> Vector (Vector Text, Tm uid a Text)
-  -> Continuation uid a Text
+  -> Vector (Vector Text, Tm 'TM uid a Text)
+  -> Tm 'CONTINUATION uid a Text
 case_ uid tms =
   let f (vars, tm) = (vars, abstract (`elemIndex` vars) tm)
   in Case uid (f <$> tms)
 
 uncase
-  :: Continuation uid a Text
-  -> Maybe (uid, Vector (Vector Text, Tm uid a Text))
+  :: Tm 'CONTINUATION uid a Text
+  -> Maybe (uid, Vector (Vector Text, Tm 'TM uid a Text))
 uncase (Case uid tms) =
   -- let tms' = (\(vars, tm) -> (vars, let vars' = V <$> vars in instantiate (vars' !!) tm)) <$> tms
   let f (vars, tm) = (vars, let vars' = V <$> vars in instantiate (vars' !!) tm)
@@ -108,8 +110,8 @@ uncase _ = Nothing
 pattern CaseP
   :: IsUid uid
   => uid
-  -> Vector (Vector Text, Tm uid a Text)
-  -> Continuation uid a Text
+  -> Vector (Vector Text, Tm 'TM uid a Text)
+  -> Tm 'CONTINUATION uid a Text
 pattern CaseP uid tms <- (uncase -> Just (uid, tms)) where
   CaseP vars body = case_ vars body
 
@@ -118,9 +120,9 @@ handle
      Eq b
   => Adjustment uid a
   -> Peg uid a
-  -> UIdMap uid (Vector (Vector b, b, Tm uid a b))
-  -> (b, Tm uid a b)
-  -> Continuation uid a b
+  -> UIdMap uid (Vector (Vector b, b, Tm 'TM uid a b))
+  -> (b, Tm 'TM uid a b)
+  -> Tm 'CONTINUATION uid a b
 handle adj peg handlers (bodyVar, body) =
   let abstractor vars kVar var
         | var == kVar = Just Nothing
@@ -134,9 +136,9 @@ handle adj peg handlers (bodyVar, body) =
 let_
   :: Text
   -> Polytype uid a
-  -> Tm uid a Text
-  -> Tm uid a Text
-  -> Tm uid a Text
+  -> Tm 'TM uid a Text
+  -> Tm 'TM uid a Text
+  -> Tm 'TM uid a Text
 let_ name pty rhs body = Cut
   -- Dragons: `rhs` and `body` are in the opposite positions of what you'd
   -- expect because body is the continuation and rhs is the term / value we're
@@ -149,8 +151,8 @@ let_ name pty rhs body = Cut
 letrec
   :: Eq b
   => Vector b
-  -> Vector (Polytype uid a, Value uid a b)
-  -> Tm uid a b
-  -> Tm uid a b
+  -> Vector (Polytype uid a, Tm 'VALUE uid a b)
+  -> Tm 'TM uid a b
+  -> Tm 'TM uid a b
 letrec names binderVals body =
   Letrec binderVals (abstract (`elemIndex` names) body)

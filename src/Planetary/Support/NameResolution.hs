@@ -1,4 +1,6 @@
+{-# language DataKinds #-}
 {-# language FlexibleInstances #-}
+{-# language GADTs #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language LambdaCase #-}
 {-# language MultiParamTypeClasses #-}
@@ -21,7 +23,7 @@ import Control.Monad.State
 import Data.List (elemIndex)
 import Data.Text (Text)
 import Data.Word (Word32)
-import Network.IPLD hiding (Value)
+import Network.IPLD
 
 import Planetary.Core hiding (NotClosed, lookupVar)
 import Planetary.Util
@@ -170,7 +172,7 @@ convertCmd (CommandDeclaration dom codom) = CommandDeclaration
   <$> traverse convertValTy dom
   <*> convertValTy codom
 
-convertTm :: PartiallyConverted Tm -> ResolutionM (FullyConverted Tm)
+convertTm :: PartiallyConverted (Tm 'TM) -> ResolutionM (FullyConverted (Tm 'TM))
 convertTm = \case
   Variable v -> pure (Variable v)
   InstantiatePolyVar tyVar tyArgs -> InstantiatePolyVar tyVar
@@ -179,7 +181,7 @@ convertTm = \case
     <$> convertValue val
     <*> convertValTy valTy
   Value val -> Value <$> convertValue val
-  Cut { cont, scrutinee } -> Cut <$> convertContinuation cont <*> convertTm scrutinee
+  Cut cont scrutinee -> Cut <$> convertContinuation cont <*> convertTm scrutinee
   Letrec defns body ->
         -- we have to be careful here -- the variables the polytype binds also
         -- scope over the term
@@ -191,7 +193,7 @@ convertTm = \case
           pure (pty', val')
     in Letrec <$> mapM convertPolyty defns <*> convertIntScope body
 
-convertValue :: PartiallyConverted Value -> ResolutionM (FullyConverted Value)
+convertValue :: PartiallyConverted (Tm 'VALUE) -> ResolutionM (FullyConverted (Tm 'VALUE))
 convertValue = \case
   Command cid row -> Command
     <$> lookupUid cid
@@ -221,8 +223,8 @@ convertUidMap f umap = do
   pure (uIdMapFromList umap')
 
 convertHandlers
-  :: PartiallyConverted AdjustmentHandlers
-  -> ResolutionM (FullyConverted AdjustmentHandlers)
+  :: PartiallyConverted (Tm 'ADJUSTMENT_HANDLERS)
+  -> ResolutionM (FullyConverted (Tm 'ADJUSTMENT_HANDLERS))
 convertHandlers (AdjustmentHandlers handlers) =
   AdjustmentHandlers <$> convertUidMap convertMaybeScope handlers
 
@@ -237,8 +239,8 @@ convertPolytype (Polytype binders scope) = do
   pure $ Polytype newBinders (abstract Just convertedTy)
 
 convertContinuation
-  :: PartiallyConverted Continuation
-  -> ResolutionM (FullyConverted Continuation)
+  :: PartiallyConverted (Tm 'CONTINUATION)
+  -> ResolutionM (FullyConverted (Tm 'CONTINUATION))
 convertContinuation = \case
   Application spine -> Application <$> mapM convertTm spine
   Case cid handlers -> Case
@@ -253,8 +255,8 @@ convertContinuation = \case
     Let <$> convertPolytype polyty <*> pure name <*> convertUnitScope scope
 
 convertMaybeScope
-  :: Scope (Maybe Int) (Tm Text Text) FreeV
-  -> ResolutionM (Scope (Maybe Int) (Tm Cid Int) FreeV)
+  :: Scope (Maybe Int) (Tm 'TM Text Text) FreeV
+  -> ResolutionM (Scope (Maybe Int) (Tm 'TM Cid Int) FreeV)
 convertMaybeScope scope = do
   unique <- gen
   let makeFree = Variable . (unique,) . \case
@@ -269,8 +271,8 @@ convertMaybeScope scope = do
   pure (abstract closer convertedTm)
 
 convertIntScope
-  :: Scope Int (Tm Text Text) FreeV
-  -> ResolutionM (Scope Int (Tm Cid Int) FreeV)
+  :: Scope Int (Tm 'TM Text Text) FreeV
+  -> ResolutionM (Scope Int (Tm 'TM Cid Int) FreeV)
 convertIntScope scope = do
   unique <- gen
   let tm = instantiate (Variable . (unique,)) scope
@@ -281,8 +283,8 @@ convertIntScope scope = do
   pure (abstract closer convertedTm)
 
 convertUnitScope
-  :: Scope () (Tm Text Text) FreeV
-  -> ResolutionM (Scope () (Tm Cid Int) FreeV)
+  :: Scope () (Tm 'TM Text Text) FreeV
+  -> ResolutionM (Scope () (Tm 'TM Cid Int) FreeV)
 convertUnitScope scope = do
   unique <- gen
   let free = Variable (unique, 0)

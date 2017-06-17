@@ -5,12 +5,13 @@ module Planetary.Core.Typecheck.Test where
 import Bound (closed)
 import Control.Lens
 import Data.ByteString (ByteString)
+import NeatInterpolation
 import Network.IPLD
 import Test.Tasty
 import Test.Tasty.HUnit
 
 import Planetary.Core
-import Planetary.Support.QQ
+import Planetary.Support.Parser
 
 checkTest
   :: String
@@ -114,8 +115,7 @@ unitTests = testGroup "typechecking"
 
         baddAnnF = Annotation f $ SuspendedTy $
           CompTy [ty1, ty1] (Peg emptyAbility resultTy)
-        -- expectedBad = Left (TyUnification ty1 ty2)
-        expectedBad = Left (FailedUnification UnspecifiedFailure)
+        expectedBad = Left $ FailedUnification $ DataTyUnification ty1 ty2
 
         tables = emptyTypingEnv & typingData .~ uIdMapFromList
           [ (dataUid, DataTypeInterface [] [constr1 ty1ty2vals])
@@ -190,7 +190,7 @@ unitTests = testGroup "typechecking"
     , let
           -- simpleTables = _
       in testGroup "check handle"
-        [ let _tm = [tmExp|
+        [ let _tm = forceTm [text|
                 handle abort! : [e , <Abort>]HaskellInt with
                   Abort:
                     | <aborting -> k> -> 1
@@ -199,7 +199,7 @@ unitTests = testGroup "typechecking"
           in testCase "HANDLE (abort)" (pure ())
              -- checkTest "HANDLE (abort)" emptyTypingEnv env tm' expectedTy
 
-        , let _tm = [tmExp|
+        , let _tm = forceTm [text|
                 handle x : peg with
                   Send X:
                     -- TODO: Should we switch to the original syntax?

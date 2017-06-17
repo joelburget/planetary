@@ -126,8 +126,8 @@ parseDataTy = angles $ DataTy
   <?> "Data Ty"
 
 parseTyVar :: MonadicParsing m => m (Text, Kind)
-parseTyVar = (,EffTy) <$> brackets identifier
-         <|> (,ValTy) <$> identifier
+parseTyVar = (,EffTyK) <$> brackets identifier
+         <|> (,ValTyK) <$> identifier
          <?> "Ty Var"
 
 -- 0 | 0,Interfaces | e,Interfaces | Interfaces
@@ -348,7 +348,7 @@ parseHandle = (do
     pure (handlers, adjustment, valueHandler)
 
   let cont = handle adjustment peg effectHandlers valueHandler
-  pure Cut {cont, scrutinee}
+  pure $ Cut cont scrutinee
   ) <?> "handle"
 
 parseTm :: MonadicParsing m => m Tm'
@@ -418,8 +418,9 @@ evalTokenIndentationParserT = evalIndentationParserT . runCoreParser
 
 data ParseLocation = ParseLocation !ByteString !Int64 !Int64
 
-testLocation :: ParseLocation
+testLocation, forceLocation :: ParseLocation
 testLocation = ParseLocation "(test)" 0 0
+forceLocation = ParseLocation "(force)" 0 0
 
 lowLevelRunParse
   :: (t -> IndentationState -> Parser b)
@@ -437,3 +438,13 @@ lowLevelRunParse ev p (ParseLocation filename row col) input
 runTokenParse
   :: CoreParser Token Parser b -> ParseLocation -> Text -> Either String b
 runTokenParse = lowLevelRunParse evalTokenIndentationParserT
+
+forceDeclarations :: Text -> [DeclS]
+forceDeclarations str = case runTokenParse parseDecls forceLocation str of
+  Left err -> error err
+  Right result -> result
+
+forceTm :: Text -> Tm'
+forceTm str = case runTokenParse parseTm forceLocation str of
+  Left err -> error err
+  Right result -> result

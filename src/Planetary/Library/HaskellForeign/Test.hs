@@ -5,6 +5,7 @@ module Planetary.Library.HaskellForeign.Test where
 
 import Control.Lens
 import Data.Text (Text)
+import NeatInterpolation
 import Prelude hiding (not)
 import Test.Tasty
 
@@ -14,8 +15,8 @@ import Planetary.Core.Eval.Test (stepTest)
 import Planetary.Core.Typecheck.Test
   (checkTest, emptyTypingEnv, emptyTypingState)
 import Planetary.Support.Ids
-import Planetary.Support.QQ
 import Planetary.Support.NameResolution
+import Planetary.Support.Parser
 
 -- TODO: this is awfully kludgy:
 -- * ids are duplicated here and in Interplanetary.Ids
@@ -81,7 +82,7 @@ unitTests =
          ]
 
        , testGroup "lfix" $
-         let decls = [declarations|
+         let decls = forceDeclarations [text|
              data ListF a f =
                <nilf>
                | <consf a f>
