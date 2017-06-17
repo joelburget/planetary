@@ -8,14 +8,13 @@
 module Planetary.Core.Unification
   ( HasUnification(..)
   , UnificationError(..)
-  , unifyValTys
-  , unifyAbilities
-  , unifyTyArgs
+  , unify
   , (=:)
   ) where
 
 import Control.Monad.State.Strict
 import qualified Data.HashMap.Lazy as HashMap
+import Network.IPLD (Cid)
 
 import Planetary.Util
 import Planetary.Core.Syntax
@@ -26,7 +25,6 @@ data UnificationError
   | DataTyUnification ValTyI ValTyI
   | AbilityUnification AbilityI AbilityI
   | ValTyLength (Vector ValTyI) (Vector ValTyI)
-  | TyArgUnification TyArgI TyArgI
   | TyArgLength (Vector TyArgI) (Vector TyArgI)
   | UnimplementedEffectUnification PolytypeI
   | UnspecifiedFailure
@@ -45,9 +43,11 @@ class Monad m => HasUnification m where
 {-# INLINE (=:) #-}
 (=:) = bindVar
 
-unifyAbilities ::
-  HasUnification m => AbilityI -> AbilityI -> m AbilityI
-unifyAbilities
+unify
+  :: HasUnification m => Ty tag Cid Int -> Ty tag Cid Int -> m (Ty tag Cid Int)
+unify a@VariableTy{} b = unifyLoop a b
+unify a b@VariableTy{} = unifyLoop a b
+unify
   ab1@(Ability init1 (UIdMap tyArgs1))
   ab2@(Ability init2 (UIdMap tyArgs2)) = do
   let leftOnly  = HashMap.difference tyArgs1 tyArgs2
@@ -56,44 +56,41 @@ unifyAbilities
   boths <- sequence $ HashMap.intersectionWith unifyTyArgVec tyArgs1 tyArgs2
 
   let mergedTyArgs = UIdMap $ HashMap.unions [leftOnly, rightOnly, boths]
+      failure = cantUnify (AbilityUnification ab1 ab2)
+      leftOnly'  = pure $ Ability ClosedAbility (UIdMap tyArgs1)
+      rightOnly' = pure $ Ability ClosedAbility (UIdMap tyArgs2)
 
   case (init1, init2) of
     (OpenAbility, OpenAbility) -> pure $ Ability OpenAbility mergedTyArgs
     (OpenAbility, ClosedAbility) ->
-      if HashMap.null leftOnly
-      then pure $ Ability ClosedAbility (UIdMap tyArgs1)
-      else cantUnify (AbilityUnification ab1 ab2)
+      if HashMap.null leftOnly then leftOnly' else failure
     (ClosedAbility, OpenAbility) ->
-      if HashMap.null rightOnly
-      then pure $ Ability ClosedAbility (UIdMap tyArgs2)
-      else cantUnify (AbilityUnification ab1 ab2)
+      if HashMap.null rightOnly then rightOnly' else failure
     (ClosedAbility, ClosedAbility) ->
-      if tyArgs1 == tyArgs2
-      then pure $ Ability ClosedAbility (UIdMap tyArgs1)
-      else cantUnify (AbilityUnification ab1 ab2)
+      if tyArgs1 == tyArgs2 then leftOnly' else failure
 
-unifyPegs ::
-  HasUnification m => PegI -> PegI -> m PegI
-unifyPegs (Peg ab1 val1) (Peg ab2 val2) = do
-  Peg <$> unifyAbilities ab1 ab2 <*> unifyValTys val1 val2
+unify d1@(DataTy uid1 args1) d2@(DataTy uId2 args2) =
+  if uid1 == uId2
+  then DataTy uid1 <$> unifyTyArgVec args1 args2
+  else cantUnify (DataTyUnification d1 d2)
+unify (SuspendedTy cty1) (SuspendedTy cty2) = SuspendedTy <$> unify cty1 cty2
 
-unifyCompTys :: HasUnification m => CompTyI -> CompTyI -> m CompTyI
-unifyCompTys (CompTy dom1 codom1) (CompTy dom2 codom2) = CompTy
+unify (Peg ab1 val1) (Peg ab2 val2) = Peg <$> unify ab1 ab2 <*> unify val1 val2
+
+unify (CompTy dom1 codom1) (CompTy dom2 codom2) = CompTy
   <$> unifyValTyVec dom1 dom2
-  <*> unifyPegs codom1 codom2
+  <*> unify codom1 codom2
+
+unify (TyArgVal v1) (TyArgVal v2)         = TyArgVal <$> unify v1 v2
+unify (TyArgAbility a1) (TyArgAbility a2) = TyArgAbility <$> unify a1 a2
+unify ty1 ty2                             = cantUnify UnspecifiedFailure
 
 unifyValTyVec
   :: HasUnification m => Vector ValTyI -> Vector ValTyI -> m (Vector ValTyI)
 unifyValTyVec vals1 vals2 =
   if length vals1 == length vals2
-  then zipWithM unifyValTys vals1 vals2
+  then zipWithM unify vals1 vals2
   else cantUnify (ValTyLength vals1 vals2)
-
-unifyTyArgs :: HasUnification m => TyArgI -> TyArgI -> m TyArgI
-unifyTyArgs (TyArgVal v1) (TyArgVal v2) = TyArgVal <$> unifyValTys v1 v2
-unifyTyArgs (TyArgAbility a1) (TyArgAbility a2)
-  = TyArgAbility <$> unifyAbilities a1 a2
-unifyTyArgs arg1 arg2 = cantUnify (TyArgUnification arg1 arg2)
 
 unifyTyArgVec
   :: HasUnification m => Vector TyArgI
@@ -101,7 +98,7 @@ unifyTyArgVec
   -> m (Vector TyArgI)
 unifyTyArgVec args1 args2 =
   if length args1 == length args2
-  then zipWithM unifyTyArgs args1 args2
+  then zipWithM unify args1 args2
   else cantUnify (TyArgLength args1 args2)
 
 -- N.B., this assumes there are no directly-cyclic chains!
@@ -140,15 +137,6 @@ semiprune t0 = return t0
 -- unify :: ValTyI -> ValTyI -> Either UnificationError ValTyI
 -- unify tl0 tr0 = evalStateT (unUnify $ unifyLoop tl0 tr0) IntMap.empty
 
-unifyValTys :: HasUnification m => ValTyI -> ValTyI -> m ValTyI
-unifyValTys d1@(DataTy uid1 args1) d2@(DataTy uId2 args2) =
-  if uid1 == uId2
-  then DataTy uid1 <$> unifyTyArgVec args1 args2
-  else cantUnify (DataTyUnification d1 d2)
-unifyValTys (SuspendedTy cty1) (SuspendedTy cty2)
-  = SuspendedTy <$> unifyCompTys cty1 cty2
-unifyValTys a b = unifyLoop a b -- TODO: is this right?
-
 unifyLoop :: HasUnification m => ValTyI -> ValTyI -> m ValTyI
 unifyLoop tl0' tr0' = do
     tl0 <- semiprune tl0'
@@ -167,7 +155,7 @@ unifyLoop tl0' tr0' = do
                         t <- locally $ do
                             vl `seenAs` tl
                             vr `seenAs` tr
-                            unifyValTys tl tr
+                            unify tl tr
                         vr =: t
                         vl =: tr0
                         return tr0
@@ -179,7 +167,7 @@ unifyLoop tl0' tr0' = do
                     Nothing         -> return tr0
                     Just tl -> locally $ do
                         vl `seenAs` tl
-                        unifyValTys tl tr0
+                        unify tl tr0
             vl =: t
             return tl0
 
@@ -190,11 +178,11 @@ unifyLoop tl0' tr0' = do
                     Nothing         -> return tl0
                     Just tr -> locally $ do
                         vr `seenAs` tr
-                        unifyValTys tl0 tr
+                        unify tl0 tr
             vr =: t
             return tr0
 
-        (_, __) -> unifyValTys tl0 tr0
+        (_, __) -> unify tl0 tr0
 
 _impossible_unify :: String
 {-# NOINLINE _impossible_unify #-}

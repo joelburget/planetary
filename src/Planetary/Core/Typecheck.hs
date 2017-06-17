@@ -136,7 +136,7 @@ infer = \case
   Cut (Application spine) f -> do
     SuspendedTy (CompTy dom (Peg ability retTy)) <- infer f
     ambient <- getAmbient
-    _ <- unifyAbilities ability ambient
+    _ <- unify ability ambient
     _ <- mapM_ (uncurry check) =<< strictZip ApplicationSpineMismatch spine dom
     pure retTy
   -- COERCE
@@ -156,12 +156,12 @@ check (Value (Lambda _binders body))
 check (Value (DataConstructor uid1 row tms)) (DataTy uid2 valTysExp) = do
   assert (DataUIdMismatch uid1 uid2) (uid1 == uid2)
   ConstructorDecl _name argTys valTysAct <- lookupConstructorTy uid1 row
-  mapM_ (uncurry unifyTyArgs) =<< strictZip DataSaturationMismatch valTysAct valTysExp
+  mapM_ (uncurry unify) =<< strictZip DataSaturationMismatch valTysAct valTysExp
   mapM_ (uncurry check) =<< strictZip ConstructorArgMismatch tms argTys
 check (Value (DataConstructor uid row tms)) (VariableTy n) = do
   ConstructorDecl _name argTys valTysAct <- lookupConstructorTy uid row
   let ty = DataTy uid valTysAct
-  n =: ty
+  n =: ty -- TODO doesn't seem like this should escape from unification
 -- CASE
 check (Cut (Case uid1 rows) m) ty = do
   -- args :: (Vector (TyArg a))
@@ -193,7 +193,7 @@ check (Cut (Let pty _name body) val) ty = do
 -- SWITCH
 check m b = do
   a <- infer m
-  _ <- unifyValTys a b
+  _ <- unify a b
   pure ()
 
 dataInterface
