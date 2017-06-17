@@ -1,10 +1,7 @@
 {-# language FlexibleContexts #-}
 {-# language FlexibleInstances #-}
 {-# language GADTs #-}
-{-# language GeneralizedNewtypeDeriving #-}
 {-# language MultiParamTypeClasses #-}
-{-# language StandaloneDeriving #-}
-{-# language ViewPatterns #-}
 module Planetary.Core.Unification
   ( HasUnification(..)
   , UnificationError(..)
@@ -183,7 +180,3 @@ unifyLoop tl0' tr0' = do
             return tr0
 
         (_, __) -> unify tl0 tr0
-
-_impossible_unify :: String
-{-# NOINLINE _impossible_unify #-}
-_impossible_unify = "unify: the impossible happened"

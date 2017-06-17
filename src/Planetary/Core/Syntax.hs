@@ -11,6 +11,7 @@
 {-# language LambdaCase #-}
 {-# language MultiParamTypeClasses #-}
 {-# language NamedFieldPuns #-}
+{-# language OverloadedStrings #-}
 {-# language PatternSynonyms #-}
 {-# language Rank2Types #-}
 {-# language StandaloneDeriving #-}

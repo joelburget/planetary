@@ -2,7 +2,6 @@
 {-# language OverloadedStrings #-}
 {-# language PackageImports #-}
 {-# language PatternSynonyms #-}
-{-# language RecordWildCards #-}
 module Planetary.Support.Parser.Test where
 
 import Data.Text (Text)
