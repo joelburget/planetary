@@ -138,48 +138,43 @@ convertCtr
   :: Raw1 ConstructorDecl -> ResolutionM (Executable1 ConstructorDecl)
 convertCtr (ConstructorDecl name vtys tyArgs)
   = ConstructorDecl name
-    <$> traverse convertValTy vtys
-    <*> traverse convertTyArg tyArgs
+    <$> traverse convertTy vtys
+    <*> traverse convertTy tyArgs
 
-convertValTy :: Raw1 ValTy -> ResolutionM (Executable1 ValTy)
-convertValTy = \case
+convertTy :: FixedTy Text Text -> ResolutionM (FixedTy Cid Int)
+convertTy = \case
   DataTy uid tyargs -> DataTy
     <$> lookupUid uid
-    <*> traverse convertTyArg tyargs
-  SuspendedTy cty   -> SuspendedTy <$> convertCompTy cty
+    <*> traverse convertTy tyargs
+  SuspendedTy cty   -> SuspendedTy <$> convertTy cty
   VariableTy var    -> VariableTy  <$> lookupVar var
 
-convertTyArg :: Raw1 TyArg -> ResolutionM (Executable1 TyArg)
-convertTyArg = \case
-  TyArgVal valTy -> TyArgVal <$> convertValTy valTy
-  TyArgAbility ability -> TyArgAbility <$> convertAbility ability
+  CompTy dom (Peg ab codom) -> CompTy
+    <$> traverse convertTy dom
+    <*> (Peg
+      <$> convertTy ab
+      <*> convertTy codom)
 
-convertCompTy :: Raw1 CompTy -> ResolutionM (Executable1 CompTy)
-convertCompTy (CompTy dom (Peg ab codom)) = CompTy
-  <$> traverse convertValTy dom
-  <*> (Peg
-    <$> convertAbility ab
-    <*> convertValTy codom)
+  TyArgVal valTy -> TyArgVal <$> convertTy valTy
+  TyArgAbility ability -> TyArgAbility <$> convertTy ability
 
-convertAbility :: Raw1 Ability -> ResolutionM (Executable1 Ability)
-convertAbility (Ability initAb umap)
-  = Ability initAb <$> convertUidMap convertTyArg umap
+  Ability initAb umap -> Ability initAb <$> convertUidMap convertTy umap
 
 convertCmd
   :: Raw1 CommandDeclaration
   -> ResolutionM (Executable1 CommandDeclaration)
 convertCmd (CommandDeclaration dom codom) = CommandDeclaration
-  <$> traverse convertValTy dom
-  <*> convertValTy codom
+  <$> traverse convertTy dom
+  <*> convertTy codom
 
 convertTm :: PartiallyConverted (Tm 'TM) -> ResolutionM (FullyConverted (Tm 'TM))
 convertTm = \case
   Variable v -> pure (Variable v)
   InstantiatePolyVar tyVar tyArgs -> InstantiatePolyVar tyVar
-    <$> mapM convertTyArg tyArgs
+    <$> mapM convertTy tyArgs
   Annotation val valTy -> Annotation
     <$> convertValue val
-    <*> convertValTy valTy
+    <*> convertTy valTy
   Value val -> Value <$> convertValue val
   Cut cont scrutinee -> Cut <$> convertContinuation cont <*> convertTm scrutinee
   Letrec defns body ->
@@ -204,13 +199,13 @@ convertValue = \case
     <*> mapM convertTm spine
   ForeignValue tyId sat valId -> ForeignValue
     <$> lookupUid tyId
-    <*> traverse convertValTy sat
+    <*> traverse convertTy sat
     <*> lookupUid valId
   Lambda binderName scope -> Lambda binderName <$> convertIntScope scope
 
 convertAdjustment :: Adjustment' -> ResolutionM AdjustmentI
 convertAdjustment (Adjustment umap)
-  = Adjustment <$> convertUidMap convertTyArg umap
+  = Adjustment <$> convertUidMap convertTy umap
 
 convertUidMap
   :: (a -> ResolutionM b) -> UIdMap Text [a] -> ResolutionM (UIdMap Cid [b])
@@ -235,7 +230,7 @@ convertPolytype (Polytype binders scope) = do
   let newBinders = imap (,) (snd <$> binders)
       names = fst <$> binders
       ty = instantiate (VariableTy . (names !!)) scope
-  convertedTy <- convertValTy ty
+  convertedTy <- convertTy ty
   pure $ Polytype newBinders (abstract Just convertedTy)
 
 convertContinuation
@@ -248,7 +243,7 @@ convertContinuation = \case
     <*> mapMOf (traverse._2) convertIntScope handlers
   Handle adj (Peg ab codom) handlers scope -> Handle
     <$> convertAdjustment adj
-    <*> (Peg <$> convertAbility ab <*> convertValTy codom)
+    <*> (Peg <$> convertTy ab <*> convertTy codom)
     <*> convertHandlers handlers
     <*> convertUnitScope scope
   Let polyty name scope ->

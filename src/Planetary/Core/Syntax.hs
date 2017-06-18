@@ -21,6 +21,8 @@
 {-# language ViewPatterns #-}
 -- I don't want to annotate all the pattern synonyms
 {-# options_ghc -fno-warn-missing-pattern-synonym-signatures #-}
+
+{-# language UndecidableInstances #-}
 module Planetary.Core.Syntax (module Planetary.Core.Syntax) where
 
 import Bound
@@ -60,57 +62,90 @@ type Row = Int
 data InitiateAbility = OpenAbility | ClosedAbility
   deriving (Eq, Show, Ord, Typeable, Generic)
 
-data TyTag
-  = VALTY
-  | COMPTY
-  | PEG
-  | TYARG
-  | ABILITY
-
 data Kind = ValTyK | EffTyK
   deriving (Show, Eq, Ord, Typeable, Generic)
 
-data Ty (tag :: TyTag) uid a where
-  DataTy :: uid -> Vector (TyArg uid a) -> Ty 'VALTY uid a
-  SuspendedTy :: CompTy uid a -> Ty 'VALTY uid a
-  VariableTy :: a -> Ty 'VALTY uid a
+data Ty uid a ty
+  = DataTy_ uid (Vector ty)
+  | SuspendedTy_ ty
+  | VariableTy_ a
 
   -- CompTy
-  CompTy :: Vector (ValTy uid a) -> Peg uid a -> Ty 'COMPTY uid a
-  -- { compDomain :: , compCodomain ::
+  | CompTy_ (Vector ty) ty
 
   -- Peg
-  Peg :: Ability uid a -> ValTy uid a -> Ty 'PEG uid a
+  | Peg_ ty ty
 
   -- TyArg
-  TyArgVal :: ValTy uid a -> Ty 'TYARG uid a
-  TyArgAbility :: Ability uid a -> Ty 'TYARG uid a
+  | TyArgVal_ ty
+  | TyArgAbility_ ty
 
   -- Ability
   -- "For each UID, instantiate it with these args"
-  Ability :: InitiateAbility -> UIdMap uid (Vector (TyArg uid a)) -> Ty 'ABILITY uid a
+  | Ability_ InitiateAbility (UIdMap uid (Vector ty))
+  deriving (Eq, Show, Ord, Typeable, Functor, Foldable, Traversable)
 
-type ValTy   = Ty 'VALTY
-type CompTy  = Ty 'COMPTY
-type Peg     = Ty 'PEG
-type TyArg   = Ty 'TYARG
-type Ability = Ty 'ABILITY
+-- newtype Fix f = Fix { unFix :: f (Fix f) }
+newtype FixTy f uid a = FixTy { unFixTy :: f uid a (FixTy f uid a) }
 
-deriving instance (Show uid, Show a) => Show (Ty tag uid a)
-deriving instance (Eq uid, Eq a) => Eq (Ty tag uid a)
-deriving instance Typeable (Ty tag uid a)
-deriving instance Functor (Ty tag uid)
-deriving instance Foldable (Ty tag uid)
-deriving instance Traversable (Ty tag uid)
+pattern DataTy :: uid -> Vector (FixedTy uid a) -> FixedTy uid a
+pattern DataTy uid args = FixTy (DataTy_ uid args)
+pattern SuspendedTy ty = FixTy (SuspendedTy_ ty)
+pattern VariableTy var = FixTy (VariableTy_ var)
+pattern CompTy dom codom = FixTy (CompTy_ dom codom)
+pattern Peg dom codom = FixTy (Peg_ dom codom)
+pattern TyArgVal ty = FixTy (TyArgVal_ ty)
+pattern TyArgAbility ab = FixTy (TyArgAbility_ ab)
+pattern Ability init args = FixTy (Ability_ init args)
 
-instance (IsUid uid, Ord a) => Ord (Ty tag uid a) where
-  compare = liftCompare compare
+-- This requires UndecidableInstances because the context is larger
+-- than the head and so GHC can't guarantee that the instance safely
+-- terminates. It is in fact safe, however.
+instance (Show (f a b (FixTy f a b))) => Show (FixTy f a b) where
+    showsPrec p (FixTy f) = showsPrec p f
+
+instance (Eq (f a b (FixTy f a b))) => Eq (FixTy f a b) where
+    FixTy x == FixTy y  =  x == y
+    FixTy x /= FixTy y  =  x /= y
+
+instance (Ord (f a b (FixTy f a b))) => Ord (FixTy f a b) where
+    FixTy x `compare` FixTy y  =  x `compare` y
+    FixTy x >  FixTy y         =  x >  y
+    FixTy x >= FixTy y         =  x >= y
+    FixTy x <= FixTy y         =  x <= y
+    FixTy x <  FixTy y         =  x <  y
+    FixTy x `max` FixTy y      =  FixTy (max x y)
+    FixTy x `min` FixTy y      =  FixTy (min x y)
+
+-- instance Eq (FixedTy uid a) where
+-- instance Show (FixedTy uid a) where
+-- instance Ord (FixedTy uid a) where
+instance Functor (FixedTy1 uid) where
+instance Foldable (FixedTy1 uid) where
+instance Traversable (FixedTy1 uid) where
+  -- XXX
+
+type FixedTy uid a = FixTy Ty uid a
+type FixedTy1 uid = FixTy Ty uid
+
+type ValTy uid a = FixedTy uid a
+type TyArg uid a = FixedTy uid a
+type TyArg1 uid = FixedTy1 uid
+type Ability uid a = FixedTy uid a
+type Ability1 uid = FixedTy1 uid
+type CompTy uid a = FixedTy1 uid a
+type CompTy1 uid = FixedTy1 uid
+type Peg uid a = FixedTy uid a
+type Peg1 uid = FixedTy1 uid
+
+-- instance (IsUid uid, Ord a) => Ord (FixedTy uid a) where
+--   compare = liftCompare compare
 
 data Polytype uid a = Polytype
   -- Universally quantify over a bunch of variables
   { polyBinders :: Vector (a, Kind)
   -- resulting in a value type
-  , polyVal :: Scope Int (ValTy uid) a
+  , polyVal :: Scope Int (FixedTy1 uid) a
   } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Generic)
 
 data ConstructorDecl uid a = ConstructorDecl
@@ -281,17 +316,17 @@ extendAbility (Ability initAb uidMap) (Adjustment adj)
 type Executable1 f = f Cid Int
 type Executable2 f = f Cid Int Int
 
-type AbilityI            = Executable1 Ability
+type AbilityI            = Ability Cid Int
 type AdjustmentI         = Executable1 Adjustment
 type CommandDeclarationI = Executable1 CommandDeclaration
-type CompTyI             = Executable1 CompTy
-type PolytypeI           = Executable1 Polytype
-type ValTyI              = Executable1 ValTy
-type TyArgI              = Executable1 TyArg
+type CompTyI             = CompTy Cid Int
+type PolytypeI           = Polytype Cid Int
+type ValTyI              = ValTy Cid Int
+type TyArgI              = TyArg Cid Int
 type DataTypeInterfaceI  = Executable1 DataTypeInterface
 type EffectInterfaceI    = Executable1 EffectInterface
 type ConstructorDeclI    = Executable1 ConstructorDecl
-type PegI                = Executable1 Peg
+type PegI                = Peg Cid Int
 
 type TmI                 = Executable2 (Tm 'TM)
 type ValueI              = Executable2 (Tm 'VALUE)
@@ -306,15 +341,15 @@ type ConstructionI       = TmI
 type Raw1 f = f Text Text
 type Raw2 f = f Text Text Text
 
-type Ability'            = Raw1 Ability
+type Ability'            = Ability Text Text
 type Adjustment'         = Raw1 Adjustment
 type CommandDeclaration' = Raw1 CommandDeclaration
-type CompTy'             = Raw1 CompTy
+type CompTy'             = CompTy Text Text
 type ConstructorDecl'    = Raw1 ConstructorDecl
-type Peg'                = Raw1 Peg
+type Peg'                = Peg Text Text
 type Polytype'           = Raw1 Polytype
-type TyArg'              = Raw1 TyArg
-type ValTy'              = Raw1 ValTy
+type TyArg'              = TyArg Text Text
+type ValTy'              = ValTy Text Text
 
 type Tm'                 = Raw2 (Tm 'TM)
 type Value'              = Raw2 (Tm 'VALUE)
@@ -375,42 +410,25 @@ pattern TyArgValIpld ty         = T1 "TyArgVal" ty
 pattern TyArgAbilityIpld ab     = T1 "TyArgAbility" ab
 pattern AbilityIpld init uidmap = T2 "Ability" init uidmap
 
-instance (IsUid uid, IsIpld a) => IsIpld (Ty 'VALTY uid a) where
+instance (IsUid uid, IsIpld a) => IsIpld (FixedTy uid a) where
   toIpld = \case
-    DataTy uid args -> DataTyIpld uid args
-    SuspendedTy cty -> SuspendedTyIpld cty
-    VariableTy var  -> VariableTyIpld var
+    DataTy uid args  -> DataTyIpld uid args
+    SuspendedTy cty  -> SuspendedTyIpld cty
+    VariableTy var   -> VariableTyIpld var
+    CompTy dom codom -> CompTyIpld dom codom
+    Peg ab ty        -> PegIpld ab ty
+    TyArgVal ty      -> TyArgValIpld ty
+    TyArgAbility ab  -> TyArgAbilityIpld ab
+    Ability i uidmap -> AbilityIpld i uidmap
 
   fromIpld = \case
     DataTyIpld uid args -> Just $ DataTy uid args
     SuspendedTyIpld cty -> Just $ SuspendedTy cty
     VariableTyIpld var  -> Just $ SuspendedTy var
-    _ -> Nothing
-
-instance (IsUid uid, IsIpld a) => IsIpld (Ty 'COMPTY uid a) where
-  toIpld (CompTy dom codom) = CompTyIpld dom codom
-  fromIpld = \case
     CompTyIpld dom codom -> Just $ CompTy dom codom
-    _ -> Nothing
-
-instance (IsUid uid, IsIpld a) => IsIpld (Ty 'PEG uid a) where
-  toIpld (Peg ab ty) = PegIpld ab ty
-  fromIpld = \case
     PegIpld ab ty -> Just $ Peg ab ty
-    _ -> Nothing
-
-instance (IsUid uid, IsIpld a) => IsIpld (Ty 'TYARG uid a) where
-  toIpld = \case
-    TyArgVal ty -> TyArgValIpld ty
-    TyArgAbility ab -> TyArgAbilityIpld ab
-  fromIpld = \case
     TyArgValIpld ty -> Just $ TyArgVal ty
     TyArgAbilityIpld ab -> Just $ TyArgAbility ab
-    _ -> Nothing
-
-instance (IsUid uid, IsIpld a) => IsIpld (Ty 'ABILITY uid a) where
-  toIpld (Ability i uidmap) = AbilityIpld i uidmap
-  fromIpld = \case
     AbilityIpld i uidmap -> Just $ Ability i uidmap
     _ -> Nothing
 
@@ -494,14 +512,14 @@ instance IsIpld (EffectInterface Cid Int)
 
 -- Applicative / Monad
 
-instance Applicative (ValTy uid) where pure = VariableTy; (<*>) = ap
+instance Applicative (FixedTy1 uid) where pure = VariableTy; (<*>) = ap
 
-instance Monad (ValTy uid) where
+instance Monad (FixedTy1 uid) where
   return = VariableTy
   (>>=) = flip bindTy
 
 -- This has a more general type than bind (`Ty 'VALTY uid a`)
-bindTy :: (a -> ValTy uid b) -> Ty tag uid a -> Ty tag uid b
+bindTy :: (a -> FixedTy uid b) -> FixedTy uid a -> FixedTy uid b
 bindTy f = \case
   DataTy uid args -> DataTy uid ((bindTy f) <$> args)
   SuspendedTy (CompTy dom codom) ->
@@ -591,7 +609,7 @@ instance Monad (Tm 'TM uid a) where
 
 -- Eq1
 
-instance IsUid uid => Eq1 (Ty tag uid) where
+instance IsUid uid => Eq1 (FixedTy1 uid) where
   liftEq eq (DataTy uid1 args1) (DataTy uid2 args2)
     = uid1 == uid2 && liftEq (liftEq eq) args1 args2
   liftEq eq (SuspendedTy cty1) (SuspendedTy cty2) = liftEq eq cty1 cty2
@@ -668,7 +686,7 @@ instance (IsUid uid, Eq e) => Eq1 (Tm tag uid e) where
 
 -- Ord1
 
-instance IsUid uid => Ord1 (Ty tag uid) where
+instance IsUid uid => Ord1 (FixedTy1 uid) where
   liftCompare cmp (Ability init1 entries1) (Ability init2 entries2) =
     compare init1 init2 <>
     liftCompare (liftCompare (liftCompare cmp))
@@ -695,7 +713,7 @@ instance IsUid uid => Ord1 (Ty tag uid) where
 
   liftCompare _ l r = compare (ordering l) (ordering r)
     -- This section is rather arbitrary
-    where ordering :: Ty tag uid a -> Int
+    where ordering :: FixedTy uid a -> Int
           ordering = \case
             DataTy{}       -> 0
             SuspendedTy{}  -> 1
@@ -779,7 +797,7 @@ instance (IsUid uid, Ord o) => Ord1 (Tm tag uid o) where
 showSpace :: ShowS
 showSpace = showString " "
 
-instance Show uid => Show1 (ValTy uid) where
+instance Show uid => Show1 (FixedTy1 uid) where
   liftShowsPrec s sl d valTy = showParen (d > 10) $ case valTy of
     DataTy uid tyArgs ->
         showString "DataTy "
@@ -792,8 +810,6 @@ instance Show uid => Show1 (ValTy uid) where
         showString "VariableTy "
       . s 11 a
 
-instance Show uid => Show1 (TyArg uid) where
-  liftShowsPrec s sl d tyArg = showParen (d > 10) $ case tyArg of
     TyArgVal vTy ->
         showString "TyArgVal "
       . liftShowsPrec s sl 11 vTy
@@ -801,26 +817,23 @@ instance Show uid => Show1 (TyArg uid) where
         showString "TyArgAbility "
       . liftShowsPrec s sl 11 ab
 
-instance Show uid => Show1 (Ability uid) where
-  liftShowsPrec s sl d (Ability initAbility uidMap) = showParen (d > 10) $
-      showString "Ability "
-    . shows initAbility
-    . showSpace
-    . liftShowList (liftShowsPrec s sl) (liftShowList s sl) (toList uidMap)
+    Ability initAbility uidMap ->
+        showString "Ability "
+      . shows initAbility
+      . showSpace
+      . liftShowList (liftShowsPrec s sl) (liftShowList s sl) (toList uidMap)
 
-instance Show uid => Show1 (CompTy uid) where
-  liftShowsPrec s sl d (CompTy dom codom) = showParen (d > 10) $
-      showString "CompTy "
-    . liftShowList s sl dom
-    . showSpace
-    . liftShowsPrec s sl 11 codom
+    CompTy dom codom ->
+        showString "CompTy "
+      . liftShowList s sl dom
+      . showSpace
+      . liftShowsPrec s sl 11 codom
 
-instance Show uid => Show1 (Peg uid) where
-  liftShowsPrec s sl d (Peg ab val) = showParen (d > 10) $
-      showString "Peg "
-    . liftShowsPrec s sl 11 ab
-    . showSpace
-    . liftShowsPrec s sl 11 val
+    Peg ab val ->
+        showString "Peg "
+      . liftShowsPrec s sl 11 ab
+      . showSpace
+      . liftShowsPrec s sl 11 val
 
 instance (Show uid, Show a) => Show1 (Tm tag uid a) where
   liftShowsPrec s sl d val = showParen (d > 10) $ case val of
