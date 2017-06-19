@@ -25,7 +25,7 @@ import Data.Text (Text)
 import Data.Word (Word32)
 import Network.IPLD
 
-import Planetary.Core hiding (NotClosed, lookupVar)
+import Planetary.Core hiding (NotClosed)
 import Planetary.Util
 
 data ResolutionErr
@@ -141,19 +141,20 @@ convertCtr (ConstructorDecl name vtys tyArgs)
     <$> traverse convertTy vtys
     <*> traverse convertTy tyArgs
 
-convertTy :: FixedTy Text Text -> ResolutionM (FixedTy Cid Int)
+convertTy :: TyFix Text -> ResolutionM (TyFix Cid)
 convertTy = \case
   DataTy uid tyargs -> DataTy
     <$> lookupUid uid
     <*> traverse convertTy tyargs
   SuspendedTy cty   -> SuspendedTy <$> convertTy cty
-  VariableTy var    -> VariableTy  <$> lookupVar var
+  BoundVariableTy i -> pure $ BoundVariableTy i
+  FreeVariableTy var -> BoundVariableTy <$> lookupVar var
 
-  CompTy dom (Peg ab codom) -> CompTy
+  CompTy dom peg -> CompTy
     <$> traverse convertTy dom
-    <*> (Peg
-      <$> convertTy ab
-      <*> convertTy codom)
+    <*> convertTy peg
+
+  Peg ab codom -> Peg <$> convertTy ab <*> convertTy codom
 
   TyArgVal valTy -> TyArgVal <$> convertTy valTy
   TyArgAbility ability -> TyArgAbility <$> convertTy ability
@@ -188,7 +189,8 @@ convertTm = \case
           pure (pty', val')
     in Letrec <$> mapM convertPolyty defns <*> convertIntScope body
 
-convertValue :: PartiallyConverted (Tm 'VALUE) -> ResolutionM (FullyConverted (Tm 'VALUE))
+convertValue
+  :: PartiallyConverted (Tm 'VALUE) -> ResolutionM (FullyConverted (Tm 'VALUE))
 convertValue = \case
   Command cid row -> Command
     <$> lookupUid cid
@@ -226,12 +228,8 @@ convertHandlers (AdjustmentHandlers handlers) =
 -- Note: this function expects its binding variables to already be pushed. See
 -- `convertTm`
 convertPolytype :: Polytype' -> ResolutionM PolytypeI
-convertPolytype (Polytype binders scope) = do
-  let newBinders = imap (,) (snd <$> binders)
-      names = fst <$> binders
-      ty = instantiate (VariableTy . (names !!)) scope
-  convertedTy <- convertTy ty
-  pure $ Polytype newBinders (abstract Just convertedTy)
+convertPolytype (Polytype binders scope) = withPushedVars (fst <$> binders) $
+  Polytype binders <$> convertTy scope
 
 convertContinuation
   :: PartiallyConverted (Tm 'CONTINUATION)
@@ -246,6 +244,7 @@ convertContinuation = \case
     <*> (Peg <$> convertTy ab <*> convertTy codom)
     <*> convertHandlers handlers
     <*> convertUnitScope scope
+  Handle _ _ _ _ -> error "invalid handle in convertContinuation"
   Let polyty name scope ->
     Let <$> convertPolytype polyty <*> pure name <*> convertUnitScope scope
 

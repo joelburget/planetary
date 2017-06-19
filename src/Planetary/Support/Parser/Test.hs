@@ -29,9 +29,29 @@ parserTest input parser expected = testCase (T.unpack input) $
     Right actual -> expected @=? actual
     Left errMsg -> assertFailure errMsg
 
+data NestedList = NamedList Text [NestedList]
+  deriving (Eq, Show)
+
 unitTests :: TestTree
 unitTests = testGroup "parsing"
-  [ parserTest "X" identifier "X"
+  [ let defn = T.unlines
+          [ "outer:"
+          , "  node1:"
+          , "    node2:"
+          , "  node3:"
+          ]
+        expected = NamedList "outer"
+                     [ NamedList "node1"
+                       [ NamedList "node2" [] ]
+                     , NamedList "node3" []
+                     ]
+
+        parseNested = NamedList
+          <$> identifier <* colon
+          <*> localIndentation Gt (many (absoluteIndentation parseNested))
+    in parserTest defn parseNested expected
+
+  , parserTest "X" identifier "X"
 
   , parserTest "X" parseValTy (VTy"X")
 
@@ -54,15 +74,15 @@ unitTests = testGroup "parsing"
 
   -- also test with args
   -- Bool
-  , parserTest "data Bool = <true> | <false> " parseDataDecl
+  , parserTest "data Bool =\n  | <true>\n  | <false> " parseDataDecl
     (DataDecl "Bool" $ DataTypeInterface []
       [ ConstructorDecl "true" [] []
       , ConstructorDecl "false" [] []
       ])
 
   -- TODO: also test with effect parameter
-  , let ctrResult = [TyArgVal (VariableTy "X"), TyArgVal (VariableTy "Y")]
-    in parserTest "data Either X Y = <left X> | <right Y>" parseDataDecl
+  , let ctrResult = [TyArgVal (FreeVariableTy "X"), TyArgVal (FreeVariableTy "Y")]
+    in parserTest "data Either X Y =\n  | <left X>\n  | <right Y>" parseDataDecl
          (DataDecl "Either" $
            DataTypeInterface [("X", ValTyK), ("Y", ValTyK)]
              [ ConstructorDecl "left" [VTy"X"] ctrResult
@@ -114,20 +134,27 @@ unitTests = testGroup "parsing"
   , parserTest "X" parseValTy (VTy"X")
   , parserTest "(X)" parseValTy (VTy"X")
 
-  , parserTest "foo : X -> X" parseCommandDecl $ CommandDeclaration [VTy"X"] (VTy"X")
+  , parserTest "| foo : X -> X" parseCommandDecl $
+    CommandDeclaration [VTy"X"] (VTy"X")
 
-  , parserTest "interface Iface X Y = foo : X -> Y | bar : Y -> X" parseInterfaceDecl
-    (InterfaceDecl "Iface" (EffectInterface [("X", ValTyK), ("Y", ValTyK)]
-      [ CommandDeclaration [VTy"X"] (VTy"Y")
-      , CommandDeclaration [VTy"Y"] (VTy"X")
-      ]))
+  , let decl = T.unlines
+          [ "interface Iface X Y ="
+          , "  | foo : X -> Y"
+          , "  | bar : Y -> X"
+          ]
+        expected =
+          (InterfaceDecl "Iface" (EffectInterface [("X", ValTyK), ("Y", ValTyK)]
+            [ CommandDeclaration [VTy"X"] (VTy"Y")
+            , CommandDeclaration [VTy"Y"] (VTy"X")
+            ]))
+    in parserTest decl parseInterfaceDecl expected
 
   , parserTest "Z!" parseTm $ Cut (Application []) (V"Z")
   , parserTest "Z Z Z" parseTm $
       Cut (Application [V"Z", V"Z"]) (V"Z")
 
   , parserTest "let Z: forall. X = W in Z" parseLet $
-    let_ "Z" (PolytypeP [] (VTy"X")) (V"W") (V"Z")
+    let_ "Z" (Polytype [] (VTy"X")) (V"W") (V"Z")
 
   , let defn = T.unlines
           [ "let on : forall X Y. {X -> {X -> []Y} -> []Y} ="
@@ -137,7 +164,7 @@ unitTests = testGroup "parsing"
         compCodomain = Peg emptyAbility (VTy"Y")
         polyVal = SuspendedTy (CompTy compDomain compCodomain)
         polyBinders = [("X", ValTyK), ("Y", ValTyK)]
-        pty = PolytypeP polyBinders polyVal
+        pty = Polytype polyBinders polyVal
         expected = let_ "on" pty
           (Value $ Lam ["x", "f"] (Cut (Application [V"x"]) (V"f")))
           (Cut (Application [V"n", Value $ Lam ["x"] (V"body")]) (V"on"))
@@ -169,20 +196,21 @@ unitTests = testGroup "parsing"
          , parserTest defn parseCase expected
          ]
 
-  , let defn = "data Maybe x = <just x> | <nothing>"
-          -- "data Maybe x = Just x | Nothing"
+  -- "data Maybe x = Just x | Nothing"
+  , let defn = "data Maybe x =\n  | <just x>\n  | <nothing>"
 
-        ctrResult = [TyArgVal (VariableTy "x")]
+
+        ctrResult = [TyArgVal (FreeVariableTy "x")]
         expected = DataDecl "Maybe" (DataTypeInterface [("x", ValTyK)]
-          [ ConstructorDecl "just" [VariableTy "x"] ctrResult
+          [ ConstructorDecl "just" [FreeVariableTy "x"] ctrResult
           , ConstructorDecl "nothing" [] ctrResult
           ])
     in parserTest defn parseDataDecl expected
 
-  , let defn = "interface IFace = _ : foo -> bar | _ : baz"
+  , let defn = "interface IFace =\n  | _ : foo -> bar\n  | _ : baz"
         expected = InterfaceDecl "IFace" (EffectInterface []
-          [ CommandDeclaration [VariableTy "foo"] (VariableTy "bar")
-          , CommandDeclaration [] (VariableTy "baz")
+          [ CommandDeclaration [FreeVariableTy "foo"] (FreeVariableTy "bar")
+          , CommandDeclaration [] (FreeVariableTy "baz")
           ])
     in parserTest defn parseInterfaceDecl expected
 
@@ -194,9 +222,10 @@ unitTests = testGroup "parsing"
           ]
         scrutinee = Cut (Application []) (V"y")
         adj = Adjustment (uIdMapFromList
-          [ ("Receive", [TyArgVal (VariableTy"X")])
+          [ ("Receive", [TyArgVal (FreeVariableTy"X")])
           ])
-        peg = Peg (Ability OpenAbility (uIdMapFromList [("Abort", [])])) (VariableTy "Y")
+        peg = Peg (Ability OpenAbility (uIdMapFromList [("Abort", [])]))
+                  (FreeVariableTy "Y")
         handlers =
           [ ("Receive", [([], "r", Cut (Application []) (V"abort"))])
           ]

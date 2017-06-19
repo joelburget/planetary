@@ -8,20 +8,20 @@ import Test.Tasty.HUnit
 import Planetary.Core
 import Planetary.Support.Ids
 
-unitTy :: forall a. ValTy Cid a
+unitTy :: ValTy Cid
 unitTy = DataTy unitId []
 
 unitTests :: TestTree
 unitTests = testGroup "syntax"
   [ testCase "extendAbility 1" $
     let uidMap = uIdMapFromList [(unitId, [TyArgVal unitTy])]
-        actual :: Ability Cid String
+        actual :: Ability Cid
         actual = extendAbility emptyAbility (Adjustment uidMap)
         expected = Ability OpenAbility uidMap
     in expected @?= actual
   , testCase "extendAbility 2" $
     let uidMap = uIdMapFromList [(unitId, [TyArgVal unitTy])]
-        actual :: Ability Cid String
+        actual :: Ability Cid
         actual = extendAbility closedAbility (Adjustment uidMap)
         expected = Ability ClosedAbility uidMap
     in expected @?= actual

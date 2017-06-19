@@ -1,5 +1,6 @@
 {-# language ConstraintKinds #-}
 {-# language DataKinds #-}
+{-# language FlexibleContexts #-}
 {-# language FlexibleInstances #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language NamedFieldPuns #-}
@@ -11,12 +12,15 @@
 module Planetary.Support.Parser where
 
 import Control.Applicative
-import Control.Lens (unsnoc)
+import Control.Monad.State (MonadState, StateT, evalStateT, put)
+import Control.Lens (unsnoc, imap)
 import Data.ByteString (ByteString)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text.Encoding (encodeUtf8)
+import Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
 
 -- TODO: be suspicious of `try`, see where it can be removed
 -- http://blog.ezyang.com/2014/05/parsec-try-a-or-b-considered-harmful/
@@ -79,6 +83,9 @@ bar    = textSymbol "|"
 assign = textSymbol "="
 bang   = textSymbol "!"
 
+indentedBlock :: MonadicParsing m => m a -> m a
+indentedBlock p = localIndentation Gt p
+
 parens :: MonadicParsing m => m a -> m a
 parens = Tok.parens . localIndentation Any
 
@@ -93,12 +100,12 @@ identifier = Tok.ident planetaryStyle
 parseUid :: MonadicParsing m => m Text
 parseUid = identifier <?> "uid"
 
-parseValTy :: MonadicParsing m => m ValTy'
+parseValTy :: MonadicParsing m => m (TyFix Text)
 parseValTy = choice
   [ parseDataTy
   , parens parseValTy
   , SuspendedTy <$> braces parseCompTy
-  , VariableTy  <$> identifier
+  , FreeVariableTy  <$> identifier
   ] <?> "Val Ty"
 
 parseTyArg :: MonadicParsing m => m TyArg'
@@ -108,7 +115,8 @@ parseTyArg = TyArgAbility <$> brackets parseAbilityBody
 
 parseConstructors
   :: MonadicParsing m => Vector TyArg' -> m (Vector ConstructorDecl')
-parseConstructors tyArgs = parseConstructor tyArgs `sepBy` bar <?> "Constructors"
+parseConstructors tyArgs = parseConstructor tyArgs `sepBy` bar
+  <?> "Constructors"
 
 parseConstructor
   :: MonadicParsing m => Vector TyArg' -> m ConstructorDecl'
@@ -185,11 +193,16 @@ parseDataDecl = do
   tyArgs <- many parseTyVar
   _ <- assign
 
+  -- let bindingState = HashMap.fromList $
+  --       imap (\i (name, _kind) -> (name, i)) tyArgs
+
   -- this is the result type each constructor will saturate to
-  let tyArgs' = (\(var, _kind) -> TyArgVal (VariableTy var)) <$> tyArgs
+  let tyArgs' = map (\(name, kind) -> (TyArgVal (FreeVariableTy name))) tyArgs
+      -- tyArgs' = imap (\i _ -> TyArgVal (BoundVariableTy i)) tyArgs
       ctrParser = parseConstructors tyArgs'
 
-  ctrs <- localIndentation Gt (absoluteIndentation ctrParser)
+  -- put bindingState
+  ctrs <- indentedBlock (many (absoluteIndentation (bar *> parseConstructor tyArgs')))
   return (DataDecl name (DataTypeInterface tyArgs ctrs))
 
 -- only value arguments and result type
@@ -204,7 +217,7 @@ parseCommandType = do
   -- maybe empty pure . unsnoc =<< sepBy1 parseValTy arr
 
 parseCommandDecl :: MonadicParsing m => m CommandDeclaration'
-parseCommandDecl = uncurry CommandDeclaration <$> parseCommandType
+parseCommandDecl = bar >> (uncurry CommandDeclaration <$> parseCommandType)
   <?> "Command Decl"
 
 parseInterfaceDecl :: MonadicParsing m => m InterfaceDeclS
@@ -214,7 +227,7 @@ parseInterfaceDecl = (do
   tyVars <- many parseTyVar
   _ <- assign
   -- inBoundTys
-  xs <- localIndentation Gt $ absoluteIndentation $ sepBy1 parseCommandDecl bar
+  xs <- indentedBlock (many (absoluteIndentation parseCommandDecl))
   return (InterfaceDecl name (EffectInterface tyVars xs))
   ) <?> "Interface Decl"
 
@@ -241,7 +254,7 @@ parseLetrec :: MonadicParsing m => m Tm'
 parseLetrec =
   let parser = do
         reserved "letrec"
-        definitions <- localIndentation Gt $ absoluteIndentation $ some $ (,,)
+        definitions <- indentedBlock $ many $ absoluteIndentation $ (,,)
           <$> identifier <* colon
           <*> parsePolyty <* assign
           <*> parseLambda <* dot
@@ -257,7 +270,7 @@ parsePolyty = do
   args <- many parseTyVar
   _ <- dot
   result <- parseValTy
-  pure (PolytypeP args result)
+  pure (Polytype args result)
 
 parseLet :: MonadicParsing m => m Construction
 parseLet =
@@ -315,13 +328,13 @@ parseHandle = (do
   peg <- parsePeg
   _ <- reserved "with"
 
-  (effectHandlers, adjustment, valueHandler) <- localIndentation Gt $ absoluteIndentation $ do
-    effectHandlers <- many $ do
+  (effectHandlers, adjustment, valueHandler) <- indentedBlock $ do
+    effectHandlers <- many $ absoluteIndentation $ do
       uid <- parseUid
       tyArgs <- many parseTyArg
       _ <- colon
 
-      rows <- localIndentation Gt $ absoluteIndentation $ many $ do
+      rows <- indentedBlock $ many $ do
         _ <- bar
         (idents, kVar) <- angles $ (,)
           <$> some identifier <* arr
@@ -333,7 +346,7 @@ parseHandle = (do
 
       pure (uid, tyArgs, rows)
 
-    valueHandler <- do
+    valueHandler <- absoluteIndentation $ do
       _ <- bar
       var <- identifier
       _ <- arr

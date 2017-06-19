@@ -4,6 +4,7 @@
 module Planetary.Library.HaskellForeign.Test where
 
 import Control.Lens
+import Control.Unification (unfreeze)
 import Data.Text (Text)
 import NeatInterpolation
 import Prelude hiding (not)
@@ -12,8 +13,7 @@ import Test.Tasty
 import Planetary.Core
 import Planetary.Library.HaskellForeign
 import Planetary.Core.Eval.Test (stepTest)
-import Planetary.Core.Typecheck.Test
-  (checkTest, emptyTypingEnv, emptyTypingState)
+import Planetary.Core.Typecheck.Test (checkTest, emptyTypingEnv)
 import Planetary.Support.Ids
 import Planetary.Support.NameResolution
 import Planetary.Support.Parser
@@ -70,15 +70,15 @@ unitTests =
          ]
 
        , testGroup "typechecking"
-         [ checkTest "1 : Int" env emptyTypingState one intTy
-         , checkTest "1 + 1 : Int" env emptyTypingState (add [one, one]) intTy
-         , checkTest "\"hello \" <> \"world\" : String" env emptyTypingState (cat [hello, world]) textTy
+         [ checkTest "1 : Int" env one (unfreeze intTy)
+         , checkTest "1 + 1 : Int" env (add [one, one]) (unfreeze intTy)
+         , checkTest "\"hello \" <> \"world\" : String" env (cat [hello, world]) (unfreeze textTy)
          -- , let tm = add [one, hello]
          --       err = TyUnification textTy intTy
 
          --   -- TODO: checkFailTest?
          --   in testCase "1 + \"hello\" /: Int" $
-         --     runTcM env emptyTypingState (check tm intTy) @?= Left err
+         --     runTcM env (check tm intTy) @?= Left err
          ]
 
        , testGroup "lfix" $
@@ -128,8 +128,8 @@ unitTests =
 
              env' = emptyTypingEnv & typingData .~ dtypes
 
-         in [ checkTest "ListF []" env' emptyTypingState lnil intListTy
-            , checkTest "ListF [1]" env' emptyTypingState oneList intListTy
+         in [ checkTest "ListF []" env' lnil (unfreeze intListTy)
+            , checkTest "ListF [1]" env' oneList (unfreeze intListTy)
             ]
       ]
 

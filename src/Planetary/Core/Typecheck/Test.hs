@@ -4,6 +4,8 @@ module Planetary.Core.Typecheck.Test where
 
 import Bound (closed)
 import Control.Lens
+import Control.Unification (freeze, unfreeze)
+import Control.Unification.IntVar
 import Data.ByteString (ByteString)
 import NeatInterpolation
 import Network.IPLD
@@ -16,22 +18,20 @@ import Planetary.Support.Parser
 checkTest
   :: String
   -> TypingEnvI
-  -> TypingStateI
   -> TmI
-  -> ValTyI
+  -> UTy IntVar
   -> TestTree
-checkTest name tables env tm ty = testCase name $
-  runTcM tables env (check tm ty) @?= Right ()
+checkTest name tables tm ty = testCase name $
+  runTcM tables (check tm ty) @?= Right ()
 
 inferTest
   :: String
   -> TypingEnvI
-  -> TypingStateI
   -> TmI
-  -> Either TcErr ValTyI
+  -> Either TcErr (UTy IntVar)
   -> TestTree
-inferTest name tables env tm expected = testCase name $
-  runTcM tables env (infer tm) @?= expected
+inferTest name tables tm expected = testCase name $
+  (freeze <$> runTcM tables (infer tm)) @?= (freeze <$> expected)
 
 exampleInterfaces :: InterfaceTableI
 exampleInterfaces = mempty
@@ -39,14 +39,11 @@ exampleInterfaces = mempty
 dataTypeTable :: DataTypeTableI
 dataTypeTable = mempty
 
-ambientAbility :: AbilityI
-ambientAbility = emptyAbility
+ambientAbility :: UTy IntVar
+ambientAbility = unfreeze emptyAbility
 
 emptyTypingEnv :: TypingEnvI
-emptyTypingEnv = TypingEnv dataTypeTable exampleInterfaces ambientAbility
-
-emptyTypingState :: TypingStateI
-emptyTypingState = TypingState []
+emptyTypingEnv = TypingEnv dataTypeTable exampleInterfaces ambientAbility []
 
 mockCid :: ByteString -> Cid
 mockCid = mkCid
@@ -54,10 +51,10 @@ mockCid = mkCid
 unitTests :: TestTree
 unitTests = testGroup "typechecking"
   [ testGroup "infer variable"
-    [ let ty = VariableTy 787
-          env = TypingState [Left ty]
-      in inferTest "VAR 1" emptyTypingEnv env (V 0) (Right ty)
-    , inferTest "VAR 2" emptyTypingEnv emptyTypingState (V 0) (Left (LookupVarTy 0))
+    [ let ty = FreeVariableTyU "hippo"
+          env = emptyTypingEnv & varTypes .~ [Left ty]
+      in inferTest "VAR 1" env (V 0) (Right ty)
+    , inferTest "VAR 2" emptyTypingEnv (V 0) (Left (LookupVarTy 0))
     ]
 
   , testGroup "TODO: infer polyvar"
@@ -83,14 +80,14 @@ unitTests = testGroup "typechecking"
             ]
 
           tables = emptyTypingEnv & typingInterfaces .~ cmdIfaces
-                                  & typingAbilities .~ ambient
+                                  & typingAbilities .~ unfreeze ambient
 
           cmd = CommandV cmdUid 0
 
-          expected = Right $
+          expected = Right $ unfreeze $
             SuspendedTy $ CompTy [domTy] $ Peg ambient codomTy
 
-      in inferTest "COMMAND" tables emptyTypingState cmd expected
+      in inferTest "COMMAND" tables cmd expected
     ]
 
   , let dataUid = mockCid "dataUid"
@@ -111,11 +108,11 @@ unitTests = testGroup "typechecking"
 
         goodAnnF = Annotation f $ SuspendedTy $
           CompTy [ty1, ty2] (Peg emptyAbility resultTy)
-        expected = Right resultTy
+        expected = Right (unfreeze resultTy)
 
         baddAnnF = Annotation f $ SuspendedTy $
           CompTy [ty1, ty1] (Peg emptyAbility resultTy)
-        expectedBad = Left $ FailedUnification $ DataTyUnification ty1 ty2
+        expectedBad = Left (MismatchFailure undefined undefined)
 
         tables = emptyTypingEnv & typingData .~ uIdMapFromList
           [ (dataUid, DataTypeInterface [] [constr1 ty1ty2vals])
@@ -125,22 +122,22 @@ unitTests = testGroup "typechecking"
 
     in testGroup "(sharing data defns)"
          [ testGroup "infer app"
-           [ inferTest "APP (1)" tables emptyTypingState (Cut app goodAnnF) expected
-           , inferTest "APP (2)" tables emptyTypingState (Cut app baddAnnF) expectedBad
+           [ inferTest "APP (1)" tables (Cut app goodAnnF) expected
+           , inferTest "APP (2)" tables (Cut app baddAnnF) expectedBad
            ]
          , testGroup "check data"
            [ let tables' = emptyTypingEnv & typingData .~ uIdMapFromList
                    [ (v1Id, DataTypeInterface [] [ConstructorDecl "constr" [] []]) ]
-             in checkTest "DATA (simple)" tables' emptyTypingState tm1 ty1
+             in checkTest "DATA (simple)" tables' tm1 (unfreeze ty1)
            , let tm = DataTm dataUid 0 [tm1, tm2]
                  expectedTy = DataTy dataUid ty1ty2vals
-             in checkTest "DATA (args)" tables emptyTypingState tm expectedTy
+             in checkTest "DATA (args)" tables tm (unfreeze expectedTy)
            ]
          ]
 
   , testGroup "infer annotation" []
     -- [ let ty = DataTy (mockCid "ty") []
-    --   inferTest "COERCE" emptyTypingEnv emptyTypingState (Annotation
+    --   inferTest "COERCE" emptyTypingEnv (Annotation
     -- ]
 
   , testGroup "TODO: check lambda" []
@@ -181,10 +178,10 @@ unitTests = testGroup "typechecking"
     , testGroup "check switch"
       [ let tm = V 0
             dataUid = mockCid "dataUid"
-            dataTy = DataTy dataUid []
+            dataTy = unfreeze $ DataTy dataUid []
             expectedTy = dataTy
-            env = TypingState [Left dataTy]
-        in checkTest "SWITCH" emptyTypingEnv env tm expectedTy
+            env = emptyTypingEnv & varTypes .~ [Left dataTy]
+        in checkTest "SWITCH" env tm expectedTy
       ]
 
     , let

@@ -81,13 +81,14 @@ unitTests  =
            (Cut not false)
            (Right true)
            ]
-       , let ty = PolytypeP [] (DataTy boolId [])
+       , let ty :: Polytype Cid
+             ty = Polytype [] (DataTy boolId [])
              -- TODO: remove shadowing
              Just tm = closeVar ("x", 0) $ let_ "x" ty false (V"x")
          in stepTest "let x = false in x" emptyEnv 1 tm (Right false)
 
        , let
-             ty = PolytypeP [] (DataTy boolId [])
+             ty = Polytype [] (DataTy boolId [])
              -- Just tm = cast [tmExp|
              --   let x: forall. bool = false in
              --     let y: forall. bool = not x in

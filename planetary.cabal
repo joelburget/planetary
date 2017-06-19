@@ -19,7 +19,6 @@ library
     -- core
     Planetary.Util
     Planetary.Core
-    Planetary.Core.Unification
 
     -- support
     Planetary.Support.Parser
@@ -66,6 +65,7 @@ library
     monad-gen == 0.3.*,
     mmorph >= 1.0 && < 1.2,
     neat-interpolation == 0.3.*,
+    unification-fd == 0.10.*,
 
     -- testing
     tasty == 0.11.*,

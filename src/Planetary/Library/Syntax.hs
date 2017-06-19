@@ -107,8 +107,8 @@ Right resolvedDecls = nameResolution decls $ uIdMapFromList
 tyId :: Cid
 Just (tyId, _) = namedData "Ty" resolvedDecls
 
-pattern VarTyVal :: a -> TyArg uid a
-pattern VarTyVal a = TyArgVal (VariableTy a)
+pattern VarTyVal :: Int -> TyArg uid
+pattern VarTyVal a = TyArgVal (BoundVariableTy a)
 
 -- TODO: typecheck using this table
 syntaxInterfaceTable :: InterfaceTableI

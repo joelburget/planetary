@@ -21,17 +21,18 @@
 {-# language ViewPatterns #-}
 -- I don't want to annotate all the pattern synonyms
 {-# options_ghc -fno-warn-missing-pattern-synonym-signatures #-}
-
-{-# language UndecidableInstances #-}
 module Planetary.Core.Syntax (module Planetary.Core.Syntax) where
 
 import Bound
 import Control.Lens
 import Control.Lens.TH (makeLenses)
 import Control.Monad (ap)
+import Control.Unification
 import Data.Data
 import Data.Foldable (toList)
 import Data.Functor.Classes
+import Data.Functor.Fixedpoint
+import qualified Data.HashMap.Lazy as HashMap
 import Data.List (find)
 import Data.Monoid ((<>))
 import Data.Text (Text)
@@ -40,6 +41,8 @@ import qualified Data.Vector as V
 import GHC.Generics
 import Network.IPLD hiding (Value, Row)
 import qualified Network.IPLD as IPLD
+
+import Control.Unification.IntVar
 
 import Planetary.Core.Orphans ()
 import Planetary.Core.UIdMap
@@ -65,10 +68,11 @@ data InitiateAbility = OpenAbility | ClosedAbility
 data Kind = ValTyK | EffTyK
   deriving (Show, Eq, Ord, Typeable, Generic)
 
-data Ty uid a ty
+data Ty uid ty
   = DataTy_ uid (Vector ty)
   | SuspendedTy_ ty
-  | VariableTy_ a
+  | BoundVariableTy_ Int
+  | FreeVariableTy_ Text
 
   -- CompTy
   | CompTy_ (Vector ty) ty
@@ -85,75 +89,121 @@ data Ty uid a ty
   | Ability_ InitiateAbility (UIdMap uid (Vector ty))
   deriving (Eq, Show, Ord, Typeable, Functor, Foldable, Traversable)
 
--- newtype Fix f = Fix { unFix :: f (Fix f) }
-newtype FixTy f uid a = FixTy { unFixTy :: f uid a (FixTy f uid a) }
+instance IsUid uid => Unifiable (Ty uid) where
+  zipMatch d1@(DataTy_ uid1 args1) d2@(DataTy_ uId2 args2) =
+    if uid1 == uId2 && length args1 == length args2
+    then Just $ DataTy_ uid1 (Right <$> zip args1 args2)
+    else Nothing
+  zipMatch (SuspendedTy_ cty1) (SuspendedTy_ cty2)
+    = Just (SuspendedTy_ (Right (cty1, cty2)))
 
-pattern DataTy :: uid -> Vector (FixedTy uid a) -> FixedTy uid a
-pattern DataTy uid args = FixTy (DataTy_ uid args)
-pattern SuspendedTy ty = FixTy (SuspendedTy_ ty)
-pattern VariableTy var = FixTy (VariableTy_ var)
-pattern CompTy dom codom = FixTy (CompTy_ dom codom)
-pattern Peg dom codom = FixTy (Peg_ dom codom)
-pattern TyArgVal ty = FixTy (TyArgVal_ ty)
-pattern TyArgAbility ab = FixTy (TyArgAbility_ ab)
-pattern Ability init args = FixTy (Ability_ init args)
+  zipMatch (BoundVariableTy_ a) (BoundVariableTy_ b)
+    = if a == b then Just (BoundVariableTy_ a) else Nothing
 
--- This requires UndecidableInstances because the context is larger
--- than the head and so GHC can't guarantee that the instance safely
--- terminates. It is in fact safe, however.
-instance (Show (f a b (FixTy f a b))) => Show (FixTy f a b) where
-    showsPrec p (FixTy f) = showsPrec p f
+  zipMatch (FreeVariableTy_ a) (FreeVariableTy_ b)
+    = if a == b then Just (FreeVariableTy_ a) else Nothing
 
-instance (Eq (f a b (FixTy f a b))) => Eq (FixTy f a b) where
-    FixTy x == FixTy y  =  x == y
-    FixTy x /= FixTy y  =  x /= y
+  zipMatch (CompTy_ as a) (CompTy_ bs b) =
+    if length as == length bs
+    then Just $ CompTy_ (Right <$> zip as bs) (Right (a, b))
+    else Nothing
 
-instance (Ord (f a b (FixTy f a b))) => Ord (FixTy f a b) where
-    FixTy x `compare` FixTy y  =  x `compare` y
-    FixTy x >  FixTy y         =  x >  y
-    FixTy x >= FixTy y         =  x >= y
-    FixTy x <= FixTy y         =  x <= y
-    FixTy x <  FixTy y         =  x <  y
-    FixTy x `max` FixTy y      =  FixTy (max x y)
-    FixTy x `min` FixTy y      =  FixTy (min x y)
+  zipMatch (Peg_ ty11 ty12) (Peg_ ty21 ty22)
+    = Just (Peg_ (Right (ty11, ty21)) (Right (ty12, ty22)))
 
--- instance Eq (FixedTy uid a) where
--- instance Show (FixedTy uid a) where
--- instance Ord (FixedTy uid a) where
-instance Functor (FixedTy1 uid) where
-instance Foldable (FixedTy1 uid) where
-instance Traversable (FixedTy1 uid) where
-  -- XXX
+  zipMatch (TyArgVal_ ty1) (TyArgVal_ ty2)
+    = Just (TyArgVal_ (Right (ty1, ty2)))
+  zipMatch (TyArgAbility_ ty1) (TyArgAbility_ ty2)
+    = Just (TyArgAbility_ (Right (ty1, ty2)))
 
-type FixedTy uid a = FixTy Ty uid a
-type FixedTy1 uid = FixTy Ty uid
+  zipMatch (Ability_ init1 (UIdMap tyArgs1)) (Ability_ init2 (UIdMap tyArgs2)) = do
+    let onlyInLeft  = HashMap.difference tyArgs1 tyArgs2
+        onlyInRight = HashMap.difference tyArgs2 tyArgs1
+        unifyTyArgVec args1 args2 =
+          if length args1 == length args2
+          then Just $ Right <$> zip args1 args2
+          else Nothing
 
-type ValTy uid a = FixedTy uid a
-type TyArg uid a = FixedTy uid a
-type TyArg1 uid = FixedTy1 uid
-type Ability uid a = FixedTy uid a
-type Ability1 uid = FixedTy1 uid
-type CompTy uid a = FixedTy1 uid a
-type CompTy1 uid = FixedTy1 uid
-type Peg uid a = FixedTy uid a
-type Peg1 uid = FixedTy1 uid
+    boths <- sequence $ HashMap.intersectionWith unifyTyArgVec tyArgs1 tyArgs2
 
--- instance (IsUid uid, Ord a) => Ord (FixedTy uid a) where
---   compare = liftCompare compare
+    let mergedTyArgs = UIdMap $ HashMap.unions
+          [Left <$$> onlyInLeft, Left <$$> onlyInRight, boths]
+        leftOnly  = Just $ Ability_ ClosedAbility (Left <$$> UIdMap tyArgs1)
+        rightOnly = Just $ Ability_ ClosedAbility (Left <$$> UIdMap tyArgs2)
 
-data Polytype uid a = Polytype
+    case (init1, init2) of
+      (OpenAbility, OpenAbility) -> Just $ Ability_ OpenAbility mergedTyArgs
+      (OpenAbility, ClosedAbility) ->
+        if HashMap.null onlyInLeft then leftOnly else Nothing
+      (ClosedAbility, OpenAbility) ->
+        if HashMap.null onlyInRight then rightOnly else Nothing
+      (ClosedAbility, ClosedAbility) ->
+        Just $ Ability_ ClosedAbility (UIdMap boths)
+
+type UTy = UTerm (Ty Cid)
+
+-- The rest of the signatures are similar
+pattern DataTyU :: Cid -> Vector (UTy var) -> UTy var
+pattern DataTyU uid args   = UTerm (DataTy_ uid args)
+pattern SuspendedTyU ty    = UTerm (SuspendedTy_ ty)
+pattern CompTyU dom codom  = UTerm (CompTy_ dom codom)
+pattern PegU dom codom     = UTerm (Peg_ dom codom)
+pattern TyArgValU ty       = UTerm (TyArgVal_ ty)
+pattern TyArgAbilityU ab   = UTerm (TyArgAbility_ ab)
+pattern AbilityU init args = UTerm (Ability_ init args)
+pattern BoundVariableTyU v = UTerm (BoundVariableTy_ v)
+pattern FreeVariableTyU v  = UTerm (FreeVariableTy_ v)
+pattern VariableTyU v      = UVar v
+
+type TyFix uid = Fix (Ty uid)
+type TyFix' = TyFix Cid
+
+type ValTy   uid = TyFix uid
+type TyArg   uid = TyFix uid
+type Ability uid = TyFix uid
+type CompTy  uid = TyFix uid
+type Peg     uid = TyFix uid
+
+-- The rest of the signatures are similar
+pattern DataTy :: uid -> Vector (TyFix uid) -> TyFix uid
+pattern DataTy uid args   = Fix (DataTy_ uid args)
+pattern SuspendedTy ty    = Fix (SuspendedTy_ ty)
+pattern CompTy dom codom  = Fix (CompTy_ dom codom)
+pattern Peg dom codom     = Fix (Peg_ dom codom)
+pattern TyArgVal ty       = Fix (TyArgVal_ ty)
+pattern TyArgAbility ab   = Fix (TyArgAbility_ ab)
+pattern Ability init args = Fix (Ability_ init args)
+pattern BoundVariableTy v = Fix (BoundVariableTy_ v)
+pattern FreeVariableTy v  = Fix (FreeVariableTy_ v)
+
+data Polytype uid = Polytype
   -- Universally quantify over a bunch of variables
-  { polyBinders :: Vector (a, Kind)
+  { polyBinders :: Vector (Text, Kind)
   -- resulting in a value type
-  , polyVal :: Scope Int (FixedTy1 uid) a
-  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Generic)
+  , polyVal :: TyFix uid
+  } deriving (Typeable, Generic)
+
+instance Show uid => Show (Polytype uid) where
+  showsPrec d (Polytype binders val) = showParen (d > 10) $
+      showString "Polytype "
+    . showList binders
+    . showString " "
+    . showsPrec 11 val
+
+instance Eq uid => Eq (Polytype uid) where
+  Polytype binders1 val1 == Polytype binders2 val2
+    = binders1 == binders2 && val1 == val2
+
+instance IsUid uid => Ord (Polytype uid) where
+  compare (Polytype binders1 val1) (Polytype binders2 val2)
+    = compare binders1 binders2 <> compare val1 val2
 
 data ConstructorDecl uid a = ConstructorDecl
   { _constructorName   :: Text
-  , _constructorArgs   :: Vector (ValTy uid a)
-  , _constructorResult :: Vector (TyArg uid a)
+  , _constructorArgs   :: Vector (ValTy uid)
+  , _constructorResult :: Vector (TyArg uid)
   }
-  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Generic)
+  deriving (Show, Eq, Ord, Typeable, Generic)
 
 -- A collection of data constructor signatures (which can refer to bound type /
 -- effect variables).
@@ -162,7 +212,7 @@ data DataTypeInterface uid a = DataTypeInterface
   { _dataBinders :: Vector (Text, Kind)
   -- a collection of constructors taking some arguments
   , _constructors :: Vector (ConstructorDecl uid a)
-  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Generic)
+  } deriving (Show, Eq, Ord, Typeable, Generic)
 
 emptyDataTypeInterface :: DataTypeInterface uid a
 emptyDataTypeInterface = DataTypeInterface [] []
@@ -170,20 +220,21 @@ emptyDataTypeInterface = DataTypeInterface [] []
 -- commands take arguments (possibly including variables) and return a value
 --
 -- TODO: maybe rename this to `Command` if we do reuse it in instantiateAbility
-data CommandDeclaration uid a = CommandDeclaration (Vector (ValTy uid a)) (ValTy uid a)
-  deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Generic)
+data CommandDeclaration uid a = CommandDeclaration (Vector (ValTy uid)) (ValTy uid)
+  deriving (Show, Eq, Ord, Typeable, Generic)
 
 data EffectInterface uid a = EffectInterface
   -- we universally quantify some number of type variables
   { _interfaceBinders :: Vector (a, Kind)
   -- a collection of commands
   , _commands :: Vector (CommandDeclaration uid a)
-  } deriving (Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Generic)
+  } deriving (Show, Eq, Ord, Typeable, Generic)
 
 -- An adjustment is a mapping from effect inferface id to the types it's
 -- applied to. IE a set of saturated interfaces.
-newtype Adjustment uid a = Adjustment (UIdMap uid (Vector (TyArg uid a)))
-  deriving (Monoid, Show, Eq, Ord, Functor, Foldable, Traversable, Typeable, Generic)
+newtype Adjustment uid = Adjustment
+  { unAdjustment :: UIdMap uid (Vector (TyArg uid)) }
+  deriving (Monoid, Show, Eq, Ord, Typeable, Generic)
 
 -- Terms
 
@@ -200,7 +251,7 @@ data Tm (tag :: TmTag) uid a b where
 
   -- construction (checked)
   DataConstructor :: uid -> Row -> Vector (Tm 'TM uid a b) -> Tm 'VALUE uid a b
-  ForeignValue :: uid -> Vector (ValTy uid a) -> uid -> Tm 'VALUE uid a b
+  ForeignValue :: uid -> Vector (ValTy uid) -> uid -> Tm 'VALUE uid a b
   Lambda :: Vector Text -> Scope Int (Tm 'TM uid a) b -> Tm 'VALUE uid a b
 
   -- Continuation:
@@ -213,26 +264,26 @@ data Tm (tag :: TmTag) uid a b where
     -> Vector (Vector Text, Scope Int (Tm 'TM uid a) b)
     -> Tm 'CONTINUATION uid a b
   Handle
-    :: Adjustment uid a
-    -> Peg uid a
+    :: Adjustment uid
+    -> Peg uid
     -> Tm 'ADJUSTMENT_HANDLERS uid a b
     -> Scope () (Tm 'TM uid a) b
     -> Tm 'CONTINUATION uid a b
   Let
-    :: Polytype uid a
+    :: Polytype uid
     -> Text
     -> Scope () (Tm 'TM uid a) b
     -> Tm 'CONTINUATION uid a b
 
   -- Term
   Variable :: b -> Tm 'TM uid a b
-  InstantiatePolyVar :: b -> Vector (TyArg uid a) -> Tm 'TM uid a b
-  Annotation :: Tm 'VALUE uid a b -> ValTy uid a -> Tm 'TM uid a b
+  InstantiatePolyVar :: b -> Vector (TyArg uid) -> Tm 'TM uid a b
+  Annotation :: Tm 'VALUE uid a b -> ValTy uid -> Tm 'TM uid a b
   Value :: Tm 'VALUE uid a b -> Tm 'TM uid a b
   Cut :: Tm 'CONTINUATION uid a b -> Tm 'TM uid a b  -> Tm 'TM uid a b
   Letrec
     -- invariant: each value is a lambda
-    :: Vector (Polytype uid a, Tm 'VALUE uid a b)
+    :: Vector (Polytype uid, Tm 'VALUE uid a b)
     -> Scope Int (Tm 'TM uid a) b
     -> Tm 'TM uid a b
 
@@ -297,17 +348,17 @@ namedInterface name decls = do
 
 -- simple abilities
 
-closedAbility :: IsUid uid => Ability uid a
+closedAbility :: IsUid uid => Ability uid
 closedAbility = Ability ClosedAbility mempty
 
-emptyAbility :: IsUid uid => Ability uid a
+emptyAbility :: IsUid uid => Ability uid
 emptyAbility = Ability OpenAbility mempty
 
 extendAbility
   :: IsUid uid
-  => Ability uid a
-  -> Adjustment uid a
-  -> Ability uid a
+  => Ability uid
+  -> Adjustment uid
+  -> Ability uid
 extendAbility (Ability initAb uidMap) (Adjustment adj)
   = Ability initAb (uidMap `uidMapUnion` adj)
 
@@ -316,17 +367,17 @@ extendAbility (Ability initAb uidMap) (Adjustment adj)
 type Executable1 f = f Cid Int
 type Executable2 f = f Cid Int Int
 
-type AbilityI            = Ability Cid Int
-type AdjustmentI         = Executable1 Adjustment
+type AbilityI            = Ability Cid
+type AdjustmentI         = Adjustment Cid
 type CommandDeclarationI = Executable1 CommandDeclaration
-type CompTyI             = CompTy Cid Int
-type PolytypeI           = Polytype Cid Int
-type ValTyI              = ValTy Cid Int
-type TyArgI              = TyArg Cid Int
+type CompTyI             = CompTy Cid
+type PolytypeI           = Polytype Cid
+type ValTyI              = ValTy Cid
+type TyArgI              = TyArg Cid
 type DataTypeInterfaceI  = Executable1 DataTypeInterface
 type EffectInterfaceI    = Executable1 EffectInterface
 type ConstructorDeclI    = Executable1 ConstructorDecl
-type PegI                = Peg Cid Int
+type PegI                = Peg Cid
 
 type TmI                 = Executable2 (Tm 'TM)
 type ValueI              = Executable2 (Tm 'VALUE)
@@ -341,15 +392,15 @@ type ConstructionI       = TmI
 type Raw1 f = f Text Text
 type Raw2 f = f Text Text Text
 
-type Ability'            = Ability Text Text
-type Adjustment'         = Raw1 Adjustment
+type Ability'            = Ability Text
+type Adjustment'         = Adjustment Text
 type CommandDeclaration' = Raw1 CommandDeclaration
-type CompTy'             = CompTy Text Text
+type CompTy'             = CompTy Text
 type ConstructorDecl'    = Raw1 ConstructorDecl
-type Peg'                = Peg Text Text
-type Polytype'           = Raw1 Polytype
-type TyArg'              = TyArg Text Text
-type ValTy'              = ValTy Text Text
+type Peg'                = Peg Text
+type Polytype'           = Polytype Text
+type TyArg'              = TyArg Text
+type ValTy'              = ValTy Text
 
 type Tm'                 = Raw2 (Tm 'TM)
 type Value'              = Raw2 (Tm 'VALUE)
@@ -403,34 +454,37 @@ pattern T4 tag a b c d <- (DagArray (Vx [fromIpld -> Just tag, fromIpld -> Just 
 
 pattern DataTyIpld uid args     = T2 "DataTy" uid args
 pattern SuspendedTyIpld cty     = T1 "SuspendedTy" cty
-pattern VariableTyIpld var      = T1 "VariableTy" var
+pattern BoundVariableTyIpld var = T1 "BoundVariableTy" var
+pattern FreeVariableTyIpld var  = T1 "FreeVariableTy" var
 pattern CompTyIpld dom codom    = T2 "CompTy" dom codom
 pattern PegIpld ab ty           = T2 "Peg" ab ty
 pattern TyArgValIpld ty         = T1 "TyArgVal" ty
 pattern TyArgAbilityIpld ab     = T1 "TyArgAbility" ab
 pattern AbilityIpld init uidmap = T2 "Ability" init uidmap
 
-instance (IsUid uid, IsIpld a) => IsIpld (FixedTy uid a) where
+instance IsUid uid => IsIpld (TyFix uid) where
   toIpld = \case
-    DataTy uid args  -> DataTyIpld uid args
-    SuspendedTy cty  -> SuspendedTyIpld cty
-    VariableTy var   -> VariableTyIpld var
-    CompTy dom codom -> CompTyIpld dom codom
-    Peg ab ty        -> PegIpld ab ty
-    TyArgVal ty      -> TyArgValIpld ty
-    TyArgAbility ab  -> TyArgAbilityIpld ab
-    Ability i uidmap -> AbilityIpld i uidmap
+    DataTy uid args     -> DataTyIpld uid args
+    SuspendedTy cty     -> SuspendedTyIpld cty
+    BoundVariableTy var -> BoundVariableTyIpld var
+    FreeVariableTy var  -> FreeVariableTyIpld var
+    CompTy dom codom    -> CompTyIpld dom codom
+    Peg ab ty           -> PegIpld ab ty
+    TyArgVal ty         -> TyArgValIpld ty
+    TyArgAbility ab     -> TyArgAbilityIpld ab
+    Ability i uidmap    -> AbilityIpld i uidmap
 
   fromIpld = \case
-    DataTyIpld uid args -> Just $ DataTy uid args
-    SuspendedTyIpld cty -> Just $ SuspendedTy cty
-    VariableTyIpld var  -> Just $ SuspendedTy var
-    CompTyIpld dom codom -> Just $ CompTy dom codom
-    PegIpld ab ty -> Just $ Peg ab ty
-    TyArgValIpld ty -> Just $ TyArgVal ty
-    TyArgAbilityIpld ab -> Just $ TyArgAbility ab
-    AbilityIpld i uidmap -> Just $ Ability i uidmap
-    _ -> Nothing
+    DataTyIpld uid args     -> Just $ DataTy uid args
+    SuspendedTyIpld cty     -> Just $ SuspendedTy cty
+    BoundVariableTyIpld var -> Just $ SuspendedTy var
+    FreeVariableTyIpld var  -> Just $ SuspendedTy var
+    CompTyIpld dom codom    -> Just $ CompTy dom codom
+    PegIpld ab ty           -> Just $ Peg ab ty
+    TyArgValIpld ty         -> Just $ TyArgVal ty
+    TyArgAbilityIpld ab     -> Just $ TyArgAbility ab
+    AbilityIpld i uidmap    -> Just $ Ability i uidmap
+    _                       -> Nothing
 
 pattern CommandIpld uid row             = T2 "Command" uid row
 pattern DataConstructorIpld uid row tms = T3 "DataConstructor" uid row tms
@@ -501,8 +555,8 @@ instance (IsUid uid, IsIpld a, IsIpld b) => IsIpld (Tm 'ADJUSTMENT_HANDLERS uid 
     AdjustmentHandlersIpld uidmap -> Just $ AdjustmentHandlers uidmap
     _                             -> Nothing
 
-instance (IsUid uid, IsIpld a) => IsIpld (Polytype uid a)
-instance (IsUid uid, IsIpld uid, IsIpld a) => IsIpld (Adjustment uid a)
+instance IsUid uid => IsIpld (Polytype uid)
+instance (IsUid uid, IsIpld uid) => IsIpld (Adjustment uid)
 instance (IsUid uid, IsIpld a) => IsIpld (ConstructorDecl uid a)
 instance (IsUid uid, IsIpld a) => IsIpld (CommandDeclaration uid a)
 instance IsIpld InitiateAbility
@@ -512,29 +566,7 @@ instance IsIpld (EffectInterface Cid Int)
 
 -- Applicative / Monad
 
-instance Applicative (FixedTy1 uid) where pure = VariableTy; (<*>) = ap
-
-instance Monad (FixedTy1 uid) where
-  return = VariableTy
-  (>>=) = flip bindTy
-
--- This has a more general type than bind (`Ty 'VALTY uid a`)
-bindTy :: (a -> FixedTy uid b) -> FixedTy uid a -> FixedTy uid b
-bindTy f = \case
-  DataTy uid args -> DataTy uid ((bindTy f) <$> args)
-  SuspendedTy (CompTy dom codom) ->
-    let dom' = (bindTy f) <$> dom
-        codom' = bindTy f codom
-    in SuspendedTy (CompTy dom' codom')
-  VariableTy a -> f a
-  CompTy vals peg -> CompTy (bindTy f <$> vals) (bindTy f peg)
-  TyArgVal a     -> TyArgVal (bindTy f a)
-  TyArgAbility a -> TyArgAbility (bindTy f a)
-  Ability initAbility uidMap ->
-    Ability initAbility ((bindTy f) <$$> uidMap)
-  Peg ab val -> Peg (bindTy f ab) (bindTy f val)
-
--- This has a more general type than bind (`Tm 'TM uid a`)
+-- -- This has a more general type than bind (`Tm 'TM uid a`)
 bindTm :: (a -> Tm 'TM uid c b) -> Tm tag uid c a -> Tm tag uid c b
 bindTm f = \case
   Command uid row -> Command uid row
@@ -609,32 +641,6 @@ instance Monad (Tm 'TM uid a) where
 
 -- Eq1
 
-instance IsUid uid => Eq1 (FixedTy1 uid) where
-  liftEq eq (DataTy uid1 args1) (DataTy uid2 args2)
-    = uid1 == uid2 && liftEq (liftEq eq) args1 args2
-  liftEq eq (SuspendedTy cty1) (SuspendedTy cty2) = liftEq eq cty1 cty2
-  liftEq eq (VariableTy v1) (VariableTy v2) = eq v1 v2
-
-  liftEq eq (CompTy dom1 codom1) (CompTy dom2 codom2)
-    = liftEq (liftEq eq) dom1 dom2 && liftEq eq codom1 codom2
-
-  liftEq eq (Peg ab1 val1) (Peg ab2 val2)
-    = liftEq eq ab1 ab2 && liftEq eq val1 val2
-
-  liftEq eq (TyArgVal val1) (TyArgVal val2) = liftEq eq val1 val2
-  liftEq eq (TyArgAbility ab1) (TyArgAbility ab2) = liftEq eq ab1 ab2
-
-  liftEq eq (Ability init1 entries1) (Ability init2 entries2) =
-    init1 == init2 &&
-    liftEq (liftEq (liftEq eq)) (toList entries1) (toList entries2)
-
-  liftEq _ _ _ = False
-
-instance IsUid uid => Eq1 (Polytype uid) where
-  liftEq eq (Polytype binders1 val1) (Polytype binders2 val2) =
-    let f (a, k1) (b, k2) = eq a b && k1 == k2
-    in liftEq f binders1 binders2 && liftEq eq val1 val2
-
 instance (IsUid uid, Eq e) => Eq1 (Tm tag uid e) where
   liftEq _ (Command uid1 row1) (Command uid2 row2) =
     uid1 == uid2 && row1 == row2
@@ -668,9 +674,9 @@ instance (IsUid uid, Eq e) => Eq1 (Tm tag uid e) where
 
   liftEq eq (Variable a) (Variable b) = eq a b
   liftEq eq (InstantiatePolyVar var1 args1) (InstantiatePolyVar var2 args2)
-    = eq var1 var2 && liftEq (liftEq (==)) args1 args2
+    = eq var1 var2 && liftEq (==) args1 args2
   liftEq eq (Annotation tm1 ty1) (Annotation tm2 ty2)
-    = liftEq eq tm1 tm2 && liftEq (==) ty1 ty2
+    = liftEq eq tm1 tm2 && ty1 == ty2
   liftEq eq (Value v1) (Value v2)
     = liftEq eq v1 v2
   liftEq eq (Cut cont1 val1) (Cut cont2 val2)
@@ -685,44 +691,6 @@ instance (IsUid uid, Eq e) => Eq1 (Tm tag uid e) where
   liftEq _ _ _ = False
 
 -- Ord1
-
-instance IsUid uid => Ord1 (FixedTy1 uid) where
-  liftCompare cmp (Ability init1 entries1) (Ability init2 entries2) =
-    compare init1 init2 <>
-    liftCompare (liftCompare (liftCompare cmp))
-      (toList entries1)
-      (toList entries2)
-
-  liftCompare cmp (Peg ab1 val1) (Peg ab2 val2) =
-    liftCompare cmp ab1 ab2 <>
-    liftCompare cmp val1 val2
-
-  liftCompare cmp (CompTy vt1 p1) (CompTy vt2 p2) =
-    liftCompare (liftCompare cmp) vt1 vt2 <>
-    liftCompare cmp p1 p2
-
-  liftCompare cmp (TyArgVal valTy1) (TyArgVal valTy2)
-    = liftCompare cmp valTy1 valTy2
-  liftCompare cmp (TyArgAbility ability1) (TyArgAbility ability2)
-    = liftCompare cmp ability1 ability2
-
-  liftCompare cmp (DataTy uid1 args1) (DataTy uid2 args2) =
-      compare uid1 uid2 <> liftCompare (liftCompare cmp) args1 args2
-  liftCompare cmp (SuspendedTy cty1) (SuspendedTy cty2) = liftCompare cmp cty1 cty2
-  liftCompare cmp (VariableTy v1) (VariableTy v2) = cmp v1 v2
-
-  liftCompare _ l r = compare (ordering l) (ordering r)
-    -- This section is rather arbitrary
-    where ordering :: FixedTy uid a -> Int
-          ordering = \case
-            DataTy{}       -> 0
-            SuspendedTy{}  -> 1
-            VariableTy{}   -> 2
-            CompTy{}       -> 3
-            Peg{}          -> 4
-            TyArgVal{}     -> 5
-            TyArgAbility{} -> 6
-            Ability{}      -> 7
 
 instance (IsUid uid, Ord o) => Ord1 (Tm tag uid o) where
   liftCompare _cmp (Command uid1 row1) (Command uid2 row2) =
@@ -757,9 +725,9 @@ instance (IsUid uid, Ord o) => Ord1 (Tm tag uid o) where
 
   liftCompare cmp (Variable a) (Variable b) = cmp a b
   liftCompare cmp (InstantiatePolyVar var1 args1) (InstantiatePolyVar var2 args2)
-    = cmp var1 var2 <> liftCompare (liftCompare compare) args1 args2
+    = cmp var1 var2 <> liftCompare compare args1 args2
   liftCompare cmp (Annotation tm1 ty1) (Annotation tm2 ty2)
-    = liftCompare cmp tm1 tm2 <> liftCompare compare ty1 ty2
+    = liftCompare cmp tm1 tm2 <> compare ty1 ty2
   liftCompare cmp (Value v1) (Value v2)
     = liftCompare cmp v1 v2
   liftCompare cmp (Cut cont1 val1) (Cut cont2 val2)
@@ -796,44 +764,6 @@ instance (IsUid uid, Ord o) => Ord1 (Tm tag uid o) where
 
 showSpace :: ShowS
 showSpace = showString " "
-
-instance Show uid => Show1 (FixedTy1 uid) where
-  liftShowsPrec s sl d valTy = showParen (d > 10) $ case valTy of
-    DataTy uid tyArgs ->
-        showString "DataTy "
-      . shows uid
-      . liftShowList s sl tyArgs
-    SuspendedTy compTy ->
-        showString "SuspendedTy "
-      . liftShowsPrec s sl 11 compTy
-    VariableTy a ->
-        showString "VariableTy "
-      . s 11 a
-
-    TyArgVal vTy ->
-        showString "TyArgVal "
-      . liftShowsPrec s sl 11 vTy
-    TyArgAbility ab ->
-        showString "TyArgAbility "
-      . liftShowsPrec s sl 11 ab
-
-    Ability initAbility uidMap ->
-        showString "Ability "
-      . shows initAbility
-      . showSpace
-      . liftShowList (liftShowsPrec s sl) (liftShowList s sl) (toList uidMap)
-
-    CompTy dom codom ->
-        showString "CompTy "
-      . liftShowList s sl dom
-      . showSpace
-      . liftShowsPrec s sl 11 codom
-
-    Peg ab val ->
-        showString "Peg "
-      . liftShowsPrec s sl 11 ab
-      . showSpace
-      . liftShowsPrec s sl 11 val
 
 instance (Show uid, Show a) => Show1 (Tm tag uid a) where
   liftShowsPrec s sl d val = showParen (d > 10) $ case val of

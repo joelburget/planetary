@@ -6,8 +6,7 @@
 -- ghc mistakenly thinks we're not using functions used in patterns
 {-# options_ghc -fno-warn-unused-top-binds #-}
 module Planetary.Core.Syntax.Patterns
-  ( pattern PolytypeP
-  , pattern Lam
+  ( pattern Lam
   , pattern CaseP
 
   -- TODO: convert to patterns?
@@ -33,7 +32,7 @@ import Planetary.Core.Syntax
 import Planetary.Core.UIdMap
 import Planetary.Util
 
-pattern ForeignTm :: uid -> Vector (ValTy uid a) -> uid -> Tm 'TM uid a b
+pattern ForeignTm :: uid -> Vector (ValTy uid) -> uid -> Tm 'TM uid a b
 pattern ForeignTm tyUid tySat valueUid
   = Value (ForeignValue tyUid tySat valueUid)
 
@@ -55,26 +54,11 @@ pattern LambdaV binderNames scope = Value (Lambda binderNames scope)
 pattern DataConstructorV :: uid -> Row -> Vector (Tm 'TM uid a b) -> Tm 'TM uid a b
 pattern DataConstructorV cid row tms = Value (DataConstructor cid row tms)
 
-pattern VTy :: a -> ValTy uid a
-pattern VTy name = VariableTy name
+pattern VTy :: Text -> ValTy uid
+pattern VTy name = FreeVariableTy name
 
 -- patterns
 -- TODO: make these bidirectional
-
-polytype :: Eq a => Vector (a, Kind) -> ValTy uid a -> Polytype uid a
-polytype binders body =
-  -- let (names, _kinds) = unzip binders
-  let names = fst <$> binders
-  in Polytype binders (abstract (`elemIndex` names) body)
-
-unPolytype :: Eq a => Polytype uid a -> (Vector (a, Kind), ValTy uid a)
-unPolytype (Polytype binders scope) =
-  let variables = VariableTy . fst <$> binders
-  in (binders, instantiate (variables !!) scope)
-
-pattern PolytypeP :: Eq a => Vector (a, Kind) -> ValTy uid a -> Polytype uid a
-pattern PolytypeP binders body <- (unPolytype -> (binders, body)) where
-  PolytypeP binders body = polytype binders body
 
 lam :: Vector Text -> Tm 'TM uid a Text -> Tm 'VALUE uid a Text
 lam vars body = Lambda vars (abstract (`elemIndex` vars) body)
@@ -118,8 +102,8 @@ pattern CaseP uid tms <- (uncase -> Just (uid, tms)) where
 handle
   :: forall uid a b.
      Eq b
-  => Adjustment uid a
-  -> Peg uid a
+  => Adjustment uid
+  -> Peg uid
   -> UIdMap uid (Vector (Vector b, b, Tm 'TM uid a b))
   -> (b, Tm 'TM uid a b)
   -> Tm 'CONTINUATION uid a b
@@ -135,7 +119,7 @@ handle adj peg handlers (bodyVar, body) =
 
 let_
   :: Text
-  -> Polytype uid a
+  -> Polytype uid
   -> Tm 'TM uid a Text
   -> Tm 'TM uid a Text
   -> Tm 'TM uid a Text
@@ -151,7 +135,7 @@ let_ name pty rhs body = Cut
 letrec
   :: Eq b
   => Vector b
-  -> Vector (Polytype uid a, Tm 'VALUE uid a b)
+  -> Vector (Polytype uid, Tm 'VALUE uid a b)
   -> Tm 'TM uid a b
   -> Tm 'TM uid a b
 letrec names binderVals body =
