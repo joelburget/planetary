@@ -132,7 +132,7 @@ syntaxInterfaceTable =
         ]
 
   in uIdMapFromList
-    [ (syntaxOpsId, EffectInterface [(uid, ValTyK), (a, ValTyK)]
+    [ (syntaxOpsId, EffectInterface [("uid", ValTyK), ("a", ValTyK)]
       -- Fix :: f (Fix f) -> Fix f
       -- FixTy :: Ty uid a (Fix (Ty uid a)) -> Fix (Ty uid a)
       [ CommandDeclaration [tyTy] fixTy

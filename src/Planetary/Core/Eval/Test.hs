@@ -27,7 +27,7 @@ stepTest name env steps tm expected =
 
     fst result @?= expected
 
-bool :: Int -> Tm 'TM Cid a b
+bool :: Int -> Tm 'TM Cid b
 bool i = DataTm boolId i []
 
 unitTests :: TestTree

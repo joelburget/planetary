@@ -38,7 +38,7 @@ data TcErr
   | ApplicationSpineMismatch [TmI] [UTy IntVar]
   | DataSaturationMismatch [UTy IntVar] [UTy IntVar]
   | ConstructorArgMismatch [TmI] [UTy IntVar]
-  | CaseMismatch [Vector (UTy IntVar)] [(Vector Text, Scope Int (Tm 'TM Cid Int) Int)]
+  | CaseMismatch [Vector (UTy IntVar)] [(Vector Text, Scope Int (Tm 'TM Cid) Int)]
   | FailedDataTypeLookup
   | FailedConstructorLookup Cid Row
   | LookupCommands
@@ -74,39 +74,39 @@ instance Eq TcErr where
   _a == _b = False -- TODO
 
 -- Read-only typing information
-type DataTypeTable  uid a = UIdMap uid (DataTypeInterface uid a)
-type InterfaceTable uid a = UIdMap uid (EffectInterface uid a)
+type DataTypeTable  uid = UIdMap uid (DataTypeInterface uid)
+type InterfaceTable uid = UIdMap uid (EffectInterface uid)
 
 -- * The data type table and interface table are global and never change
 -- * The ability changes as we push in and pop out of rules
-data TypingEnv uid a = TypingEnv
-  { _typingData       :: DataTypeTable  uid a
-  , _typingInterfaces :: InterfaceTable uid a
+data TypingEnv uid = TypingEnv
+  { _typingData       :: DataTypeTable  uid
+  , _typingInterfaces :: InterfaceTable uid
   , _typingAbilities  :: UTy IntVar -- :: Ability
   , _varTypes         :: [Either (UTy IntVar) PolytypeI]
   } deriving Show
 
 makeLenses ''TypingEnv
 
-type DataTypeTableI  = DataTypeTable  Cid Int
-type InterfaceTableI = InterfaceTable Cid Int
-type TypingEnvI      = TypingEnv      Cid Int
-type TcM'            = TcM            Cid Int
+type DataTypeTableI  = DataTypeTable  Cid
+type InterfaceTableI = InterfaceTable Cid
+type TypingEnvI      = TypingEnv      Cid
+type TcM'            = TcM            Cid
 
-newtype TcM uid a b = TcM
-  (ReaderT (TypingEnv uid a)
+newtype TcM uid b = TcM
+  (ReaderT (TypingEnv uid)
     (ExceptT TcErr
       (IntBindingT (Ty Cid)
         Identity))
   b)
   deriving (Functor, Applicative, Monad, MonadError TcErr)
-deriving instance MonadReader (TypingEnv uid a) (TcM uid a)
+deriving instance MonadReader (TypingEnv uid) (TcM uid)
 
 instance Fallible (Ty Cid) IntVar TcErr where
   occursFailure = OccursFailure
   mismatchFailure = MismatchFailure
 
-unify' :: UTy IntVar -> UTy IntVar -> TcM Cid Int ()
+unify' :: UTy IntVar -> UTy IntVar -> TcM Cid ()
 unify' tl tr = TcM . lift $ tl =:= tr >> return ()
 
 runTcM
@@ -216,7 +216,7 @@ extendAbility' ab adj = do
   pure $ unfreeze $ extendAbility ab' (Adjustment adj')
 
 dataInterface
-  :: DataTypeInterface uid a
+  :: DataTypeInterface uid
   -> Vector (Vector (ValTy uid), Vector (TyArg uid))
 dataInterface (DataTypeInterface _ ctors) =
   let f (ConstructorDecl _name args resultArgs) = (args, resultArgs)
@@ -224,7 +224,7 @@ dataInterface (DataTypeInterface _ ctors) =
 
 -- TODO: convert to `fromScope`?
 -- TODO: is the succ necessary?
-succOpen :: Scope () (Tm 'TM Cid Int) Int -> TmI
+succOpen :: Scope () (Tm 'TM Cid) Int -> TmI
 succOpen = (succ <$>) . instantiate1 (V 0)
 
 instantiateAbility :: UTy IntVar -> TcM' (UIdMap Cid [CommandDeclarationI])
@@ -252,7 +252,7 @@ withValTypes tys = local (& varTypes %~ (<> (Left <$> tys)))
 
 withValTypes'
   :: [UTy IntVar]
-  -> Scope Int (Tm 'TM Cid Int) Int
+  -> Scope Int (Tm 'TM Cid) Int
   -> (TmI -> TcM' a)
   -> TcM' a
 withValTypes' tys scope cb =
@@ -260,7 +260,7 @@ withValTypes' tys scope cb =
   in withValTypes tys (cb body)
 
 openAdjustmentHandler
-  :: Scope (Maybe Int) (Tm 'TM Cid Int) Int
+  :: Scope (Maybe Int) (Tm 'TM Cid) Int
   -> [UTy IntVar]
   -> UTy IntVar
   -> (TmI -> TcM' a)

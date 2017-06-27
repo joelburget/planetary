@@ -199,7 +199,7 @@ instance IsUid uid => Ord (Polytype uid) where
   compare (Polytype binders1 val1) (Polytype binders2 val2)
     = compare binders1 binders2 <> compare val1 val2
 
-data ConstructorDecl uid a = ConstructorDecl
+data ConstructorDecl uid = ConstructorDecl
   { _constructorName   :: Text
   , _constructorArgs   :: Vector (ValTy uid)
   , _constructorResult :: Vector (TyArg uid)
@@ -208,27 +208,27 @@ data ConstructorDecl uid a = ConstructorDecl
 
 -- A collection of data constructor signatures (which can refer to bound type /
 -- effect variables).
-data DataTypeInterface uid a = DataTypeInterface
+data DataTypeInterface uid = DataTypeInterface
   -- we universally quantify over some number of type variables
   { _dataBinders :: Vector (Text, Kind)
   -- a collection of constructors taking some arguments
-  , _constructors :: Vector (ConstructorDecl uid a)
+  , _constructors :: Vector (ConstructorDecl uid)
   } deriving (Show, Eq, Ord, Typeable, Generic)
 
-emptyDataTypeInterface :: DataTypeInterface uid a
+emptyDataTypeInterface :: DataTypeInterface uid
 emptyDataTypeInterface = DataTypeInterface [] []
 
 -- commands take arguments (possibly including variables) and return a value
 --
 -- TODO: maybe rename this to `Command` if we do reuse it in instantiateAbility
-data CommandDeclaration uid a = CommandDeclaration (Vector (ValTy uid)) (ValTy uid)
+data CommandDeclaration uid = CommandDeclaration (Vector (ValTy uid)) (ValTy uid)
   deriving (Show, Eq, Ord, Typeable, Generic)
 
-data EffectInterface uid a = EffectInterface
+data EffectInterface uid = EffectInterface
   -- we universally quantify some number of type variables
-  { _interfaceBinders :: Vector (a, Kind)
+  { _interfaceBinders :: Vector (Text, Kind)
   -- a collection of commands
-  , _commands :: Vector (CommandDeclaration uid a)
+  , _commands :: Vector (CommandDeclaration uid)
   } deriving (Show, Eq, Ord, Typeable, Generic)
 
 -- An adjustment is a mapping from effect inferface id to the types it's
@@ -245,48 +245,49 @@ data TmTag
   | TM
   | ADJUSTMENT_HANDLERS
 
-data Tm (tag :: TmTag) uid a b where
+data Tm (tag :: TmTag) uid b where
   -- Term:
   -- use (inferred)
-  Command :: uid -> Row -> Tm 'VALUE uid a b
+  Command :: uid -> Row -> Tm 'VALUE uid b
 
   -- construction (checked)
-  DataConstructor :: uid -> Row -> Vector (Tm 'TM uid a b) -> Tm 'VALUE uid a b
-  ForeignValue :: uid -> Vector (ValTy uid) -> uid -> Tm 'VALUE uid a b
-  Lambda :: Vector Text -> Scope Int (Tm 'TM uid a) b -> Tm 'VALUE uid a b
+  DataConstructor :: uid -> Row -> Vector (Tm 'TM uid b) -> Tm 'VALUE uid b
+  ForeignValue :: uid -> Vector (ValTy uid) -> uid -> Tm 'VALUE uid b
+  Lambda :: Vector Text -> Scope Int (Tm 'TM uid ) b -> Tm 'VALUE uid b
 
   -- Continuation:
   -- use (inferred)
-  Application :: Spine uid a b -> Tm 'CONTINUATION uid a b
+  Application :: Spine uid b -> Tm 'CONTINUATION uid b
 
   -- construction (checked)
   Case
     :: uid
-    -> Vector (Vector Text, Scope Int (Tm 'TM uid a) b)
-    -> Tm 'CONTINUATION uid a b
+    -> Vector (Vector Text, Scope Int (Tm 'TM uid) b)
+    -> Tm 'CONTINUATION uid b
   Handle
     :: Adjustment uid
     -> Peg uid
-    -> Tm 'ADJUSTMENT_HANDLERS uid a b
-    -> Scope () (Tm 'TM uid a) b
-    -> Tm 'CONTINUATION uid a b
+    -> Tm 'ADJUSTMENT_HANDLERS uid b
+    -> Scope () (Tm 'TM uid) b
+    -> Tm 'CONTINUATION uid b
   Let
     :: Polytype uid
     -> Text
-    -> Scope () (Tm 'TM uid a) b
-    -> Tm 'CONTINUATION uid a b
+    -> Scope () (Tm 'TM uid) b
+    -> Tm 'CONTINUATION uid b
 
   -- Term
-  Variable :: b -> Tm 'TM uid a b
-  InstantiatePolyVar :: b -> Vector (TyArg uid) -> Tm 'TM uid a b
-  Annotation :: Tm 'VALUE uid a b -> ValTy uid -> Tm 'TM uid a b
-  Value :: Tm 'VALUE uid a b -> Tm 'TM uid a b
-  Cut :: Tm 'CONTINUATION uid a b -> Tm 'TM uid a b  -> Tm 'TM uid a b
+  Variable :: b -> Tm 'TM uid b
+
+  InstantiatePolyVar :: b -> Vector (TyArg uid) -> Tm 'TM uid b
+  Annotation :: Tm 'VALUE uid b -> ValTy uid -> Tm 'TM uid b
+  Value :: Tm 'VALUE uid b -> Tm 'TM uid b
+  Cut :: Tm 'CONTINUATION uid b -> Tm 'TM uid b  -> Tm 'TM uid b
   Letrec
     -- invariant: each value is a lambda
-    :: Vector (Polytype uid, Tm 'VALUE uid a b)
-    -> Scope Int (Tm 'TM uid a) b
-    -> Tm 'TM uid a b
+    :: Vector (Polytype uid, Tm 'VALUE uid b)
+    -> Scope Int (Tm 'TM uid) b
+    -> Tm 'TM uid b
 
   -- Other
   -- Adjustment handlers are a mapping from effect interface id to the handlers
@@ -295,37 +296,37 @@ data Tm (tag :: TmTag) uid a b where
   -- Encode each constructor argument (x_c) as a `Just Int` and the
   -- continuation (z_c) as `Nothing`.
   AdjustmentHandlers
-    :: UIdMap uid (Vector (Scope (Maybe Int) (Tm 'TM uid a) b))
-    -> Tm 'ADJUSTMENT_HANDLERS uid a b
+    :: UIdMap uid (Vector (Scope (Maybe Int) (Tm 'TM uid) b))
+    -> Tm 'ADJUSTMENT_HANDLERS uid b
 
 -- type? newtype?
-type Spine uid a b = Vector (Tm 'TM uid a b)
+type Spine uid b = Vector (Tm 'TM uid b)
 
-data Decl uid a b
-  = DataDecl_      (DataDecl uid a)
-  | InterfaceDecl_ (InterfaceDecl uid a)
-  | TermDecl_      (TermDecl uid a b)
+data Decl uid b
+  = DataDecl_      (DataDecl uid)
+  | InterfaceDecl_ (InterfaceDecl uid)
+  | TermDecl_      (TermDecl uid b)
   deriving (Eq, Ord, Show, Typeable, Generic)
 
-data DataDecl uid a = DataDecl Text (DataTypeInterface uid a)
+data DataDecl uid = DataDecl Text (DataTypeInterface uid)
   deriving (Eq, Ord, Show, Typeable, Generic)
 
-data InterfaceDecl uid a = InterfaceDecl Text (EffectInterface uid a)
+data InterfaceDecl uid = InterfaceDecl Text (EffectInterface uid)
   deriving (Eq, Ord, Show, Typeable, Generic)
 
-data TermDecl uid a b = TermDecl
-  Text            -- ^ the term's name
-  (Tm 'TM uid a b) -- ^ body
+data TermDecl uid b = TermDecl
+  Text           -- ^ the term's name
+  (Tm 'TM uid b) -- ^ body
   deriving (Typeable, Generic)
 
-deriving instance (IsUid uid, Eq a, Eq b) => Eq (TermDecl uid a b)
-deriving instance (IsUid uid, Ord a, Ord b) => Ord (TermDecl uid a b)
-deriving instance (Show uid, Show a, Show b) => Show (TermDecl uid a b)
+deriving instance (IsUid uid, Eq b) => Eq (TermDecl uid b)
+deriving instance (IsUid uid, Ord b) => Ord (TermDecl uid b)
+deriving instance (Show uid, Show b) => Show (TermDecl uid b)
 
-type DeclS          = Decl          Text Text Text
-type DataDeclS      = DataDecl      Text Text
-type InterfaceDeclS = InterfaceDecl Text Text
-type TermDeclS      = TermDecl      Text Text Text
+type DeclS          = Decl          Text Text
+type DataDeclS      = DataDecl      Text
+type InterfaceDeclS = InterfaceDecl Text
+type TermDeclS      = TermDecl      Text Text
 
 data ResolvedDecls = ResolvedDecls
   { _datatypes  :: UIdMap Cid DataTypeInterfaceI
@@ -366,8 +367,8 @@ extendAbility _ _ = error "extendAbility called with non-ability"
 
 -- executable
 
-type Executable1 f = f Cid Int
-type Executable2 f = f Cid Int Int
+type Executable1 f = f Cid
+type Executable2 f = f Cid Int
 
 type AbilityI            = Ability Cid
 type AdjustmentI         = Adjustment Cid
@@ -385,14 +386,14 @@ type TmI                 = Executable2 (Tm 'TM)
 type ValueI              = Executable2 (Tm 'VALUE)
 type ContinuationI       = Executable2 (Tm 'CONTINUATION)
 type AdjustmentHandlersI = Executable2 (Tm 'ADJUSTMENT_HANDLERS)
-type SpineI              = Spine Cid Int Int
+type SpineI              = Spine Cid Int
 type UseI                = TmI
 type ConstructionI       = TmI
 
 -- raw
 
-type Raw1 f = f Text Text
-type Raw2 f = f Text Text Text
+type Raw1 f = f Text
+type Raw2 f = f Text Text
 
 type Ability'            = Ability Text
 type Adjustment'         = Adjustment Text
@@ -408,7 +409,7 @@ type Tm'                 = Raw2 (Tm 'TM)
 type Value'              = Raw2 (Tm 'VALUE)
 type Continuation'       = Raw2 (Tm 'CONTINUATION)
 type AdjustmentHandlers' = Raw2 (Tm 'ADJUSTMENT_HANDLERS)
-type Spine'              = Spine Text Text Text
+type Spine'              = Spine Text Text
 type Construction        = Tm'
 type Use                 = Tm'
 type Cont'               = Continuation'
@@ -420,7 +421,7 @@ abstract0 :: Monad f => f a -> Scope b f a
 abstract0 = abstract
   (error "abstract0 being used to instantiate > 0 variables")
 
-closeVar :: Eq a => (a, b) -> Tm 'TM uid c a -> Maybe (Tm 'TM uid c b)
+closeVar :: Eq a => (a, b) -> Tm 'TM uid a -> Maybe (Tm 'TM uid b)
 closeVar (a, b) = instantiate1 (Variable b) <$$> closed . abstract1 a
 
 -- closeVars :: (Eq a, Hashable a) => [(a, b)] -> Tm uid c a -> Maybe (Tm uid c b)
@@ -507,7 +508,7 @@ pattern CutIpld cont scrutinee          = T2 "Cut" cont scrutinee
 pattern LetrecIpld defns body           = T2 "Letrec" defns body
 pattern AdjustmentHandlersIpld uidmap   = T1 "AdjustmentHandlers" uidmap
 
-instance (IsUid uid, IsIpld a, IsIpld b) => IsIpld (Tm 'VALUE uid a b) where
+instance (IsUid uid, IsIpld b) => IsIpld (Tm 'VALUE uid b) where
   toIpld = \case
     Command uid row             -> CommandIpld uid row
     DataConstructor uid row tms -> DataConstructorIpld uid row tms
@@ -521,7 +522,7 @@ instance (IsUid uid, IsIpld a, IsIpld b) => IsIpld (Tm 'VALUE uid a b) where
     LambdaIpld body                 -> Just $ Lambda [] body
     _                               -> Nothing
 
-instance (IsUid uid, IsIpld a, IsIpld b) => IsIpld (Tm 'CONTINUATION uid a b) where
+instance (IsUid uid, IsIpld b) => IsIpld (Tm 'CONTINUATION uid b) where
   toIpld = \case
     Application spine -> ApplicationIpld spine
     Case uid branches -> CaseIpld uid branches
@@ -535,7 +536,7 @@ instance (IsUid uid, IsIpld a, IsIpld b) => IsIpld (Tm 'CONTINUATION uid a b) wh
     LetIpld pty scope                      -> Just $ Let pty "" scope
     _                                      -> Nothing
 
-instance (IsUid uid, IsIpld a, IsIpld b) => IsIpld (Tm 'TM uid a b) where
+instance (IsUid uid, IsIpld b) => IsIpld (Tm 'TM uid b) where
   toIpld = \case
     Variable b                -> VariableIpld b
     InstantiatePolyVar b args -> InstantiatePolyVarIpld b args
@@ -553,7 +554,7 @@ instance (IsUid uid, IsIpld a, IsIpld b) => IsIpld (Tm 'TM uid a b) where
     LetrecIpld defns body         -> Just $ Letrec defns body
     _                             -> Nothing
 
-instance (IsUid uid, IsIpld a, IsIpld b) => IsIpld (Tm 'ADJUSTMENT_HANDLERS uid a b) where
+instance (IsUid uid, IsIpld b) => IsIpld (Tm 'ADJUSTMENT_HANDLERS uid b) where
   toIpld (AdjustmentHandlers uidmap) = AdjustmentHandlersIpld uidmap
   fromIpld = \case
     AdjustmentHandlersIpld uidmap -> Just $ AdjustmentHandlers uidmap
@@ -561,17 +562,17 @@ instance (IsUid uid, IsIpld a, IsIpld b) => IsIpld (Tm 'ADJUSTMENT_HANDLERS uid 
 
 instance IsUid uid => IsIpld (Polytype uid)
 instance (IsUid uid, IsIpld uid) => IsIpld (Adjustment uid)
-instance (IsUid uid, IsIpld a) => IsIpld (ConstructorDecl uid a)
-instance (IsUid uid, IsIpld a) => IsIpld (CommandDeclaration uid a)
+instance (IsUid uid) => IsIpld (ConstructorDecl uid)
+instance (IsUid uid) => IsIpld (CommandDeclaration uid)
 instance IsIpld InitiateAbility
 instance IsIpld Kind
-instance IsIpld (DataTypeInterface Cid Int)
-instance IsIpld (EffectInterface Cid Int)
+instance IsIpld (DataTypeInterface Cid)
+instance IsIpld (EffectInterface Cid)
 
 -- Applicative / Monad
 
 -- -- This has a more general type than bind (`Tm 'TM uid a`)
-bindTm :: (a -> Tm 'TM uid c b) -> Tm tag uid c a -> Tm tag uid c b
+bindTm :: (a -> Tm 'TM uid b) -> Tm tag uid a -> Tm tag uid b
 bindTm f = \case
   Command uid row -> Command uid row
   DataConstructor uid row tms ->
@@ -601,10 +602,10 @@ bindTm f = \case
     (body >>>= f)
   AdjustmentHandlers handlers -> AdjustmentHandlers ((>>>= f) <$$> handlers)
 
-instance Functor (Tm tag uid a) where fmap = fmapDefault
-instance Foldable (Tm tag uid a) where foldMap = foldMapDefault
+instance Functor (Tm tag uid) where fmap = fmapDefault
+instance Foldable (Tm tag uid) where foldMap = foldMapDefault
 
-instance Traversable (Tm tag uid a) where
+instance Traversable (Tm tag uid) where
   traverse f = \case
     Command uid row -> pure (Command uid row)
     DataConstructor uid row tms -> DataConstructor uid row <$> (traverse . traverse) f tms
@@ -631,21 +632,21 @@ instance Traversable (Tm tag uid a) where
     AdjustmentHandlers uidmap ->
       AdjustmentHandlers <$> (traverse . traverse . traverse) f uidmap
 
-instance (IsUid uid, Eq a, Eq b) => Eq (Tm tag uid a b) where
+instance (IsUid uid, Eq b) => Eq (Tm tag uid b) where
   (==) = liftEq (==)
-instance (IsUid uid, Ord a, Ord b) => Ord (Tm tag uid a b) where
+instance (IsUid uid, Ord b) => Ord (Tm tag uid b) where
   compare = liftCompare compare
-instance (Show uid, Show a, Show b) => Show (Tm tag uid a b) where
+instance (Show uid, Show b) => Show (Tm tag uid b) where
   showsPrec = liftShowsPrec showsPrec showList
-instance Applicative (Tm 'TM uid a) where pure = Variable; (<*>) = ap
-instance Monad (Tm 'TM uid a) where
+instance Applicative (Tm 'TM uid) where pure = Variable; (<*>) = ap
+instance Monad (Tm 'TM uid) where
   return = Variable
 
   (>>=) = flip bindTm
 
 -- Eq1
 
-instance (IsUid uid, Eq e) => Eq1 (Tm tag uid e) where
+instance (IsUid uid) => Eq1 (Tm tag uid) where
   liftEq _ (Command uid1 row1) (Command uid2 row2) =
     uid1 == uid2 && row1 == row2
   liftEq eq (DataConstructor uid1 row1 app1) (DataConstructor uid2 row2 app2) =
@@ -696,7 +697,7 @@ instance (IsUid uid, Eq e) => Eq1 (Tm tag uid e) where
 
 -- Ord1
 
-instance (IsUid uid, Ord o) => Ord1 (Tm tag uid o) where
+instance (IsUid uid) => Ord1 (Tm tag uid) where
   liftCompare _cmp (Command uid1 row1) (Command uid2 row2) =
     compare uid1 uid2 <>
     compare row1 row2
@@ -746,7 +747,7 @@ instance (IsUid uid, Ord o) => Ord1 (Tm tag uid o) where
         (toList handlers2)
 
   liftCompare _ x y = compare (ordering x) (ordering y) where
-    ordering :: Tm tag uid a b -> Int
+    ordering :: Tm tag uid b -> Int
     ordering = \case
       Command{}            -> 0
       DataConstructor{}    -> 1
@@ -769,7 +770,7 @@ instance (IsUid uid, Ord o) => Ord1 (Tm tag uid o) where
 showSpace :: ShowS
 showSpace = showString " "
 
-instance (Show uid, Show a) => Show1 (Tm tag uid a) where
+instance (Show uid) => Show1 (Tm tag uid) where
   liftShowsPrec s sl d val = showParen (d > 10) $ case val of
     Command uid row ->
         showString "Command "

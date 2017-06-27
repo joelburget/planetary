@@ -15,7 +15,6 @@ module Planetary.Support.NameResolution
 
 import Bound
 import Control.Lens ((&), ix, at, (?~), _2, (^?), (%~), mapMOf)
-import Control.Lens.Indexed (imap)
 import Control.Monad.Except
 import Control.Monad.Gen
 import Control.Monad.Reader
@@ -43,8 +42,8 @@ type LevelIx = Int
 
 type FreeV = (Unique, LevelIx)
 
-type PartiallyConverted f = f Text Text FreeV
-type FullyConverted     f = f Cid  Int  FreeV
+type PartiallyConverted f = f Text FreeV
+type FullyConverted     f = f Cid  FreeV
 
 newtype ResolutionM a = ResolutionM
   (ExceptT ResolutionErr
@@ -128,9 +127,8 @@ convertEi
   -> ResolutionM (Cid, Executable1 EffectInterface)
 convertEi (EffectInterface binders cmds) = do
   let varNames = map fst binders
-      binders' = imap (\i (_, kind) -> (i, kind)) binders
   cmds' <- withPushedVars varNames $ traverse convertCmd cmds
-  let ei = EffectInterface binders' cmds'
+  let ei = EffectInterface binders cmds'
   pure (cidOf ei, ei)
 
 convertCtr
@@ -249,8 +247,8 @@ convertContinuation = \case
     Let <$> convertPolytype polyty <*> pure name <*> convertUnitScope scope
 
 convertMaybeScope
-  :: Scope (Maybe Int) (Tm 'TM Text Text) FreeV
-  -> ResolutionM (Scope (Maybe Int) (Tm 'TM Cid Int) FreeV)
+  :: Scope (Maybe Int) (Tm 'TM Text) FreeV
+  -> ResolutionM (Scope (Maybe Int) (Tm 'TM Cid) FreeV)
 convertMaybeScope scope = do
   unique <- gen
   let makeFree = Variable . (unique,) . \case
@@ -265,8 +263,8 @@ convertMaybeScope scope = do
   pure (abstract closer convertedTm)
 
 convertIntScope
-  :: Scope Int (Tm 'TM Text Text) FreeV
-  -> ResolutionM (Scope Int (Tm 'TM Cid Int) FreeV)
+  :: Scope Int (Tm 'TM Text) FreeV
+  -> ResolutionM (Scope Int (Tm 'TM Cid) FreeV)
 convertIntScope scope = do
   unique <- gen
   let tm = instantiate (Variable . (unique,)) scope
@@ -277,8 +275,8 @@ convertIntScope scope = do
   pure (abstract closer convertedTm)
 
 convertUnitScope
-  :: Scope () (Tm 'TM Text Text) FreeV
-  -> ResolutionM (Scope () (Tm 'TM Cid Int) FreeV)
+  :: Scope () (Tm 'TM Text) FreeV
+  -> ResolutionM (Scope () (Tm 'TM Cid) FreeV)
 convertUnitScope scope = do
   unique <- gen
   let free = Variable (unique, 0)

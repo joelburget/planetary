@@ -56,7 +56,7 @@ type EvalM =
 makeLenses ''EvalEnv
 makeLenses ''EvalState
 
-runHandler :: Cid -> Row -> Spine Cid Int Int -> EvalM TmI
+runHandler :: Cid -> Row -> Spine Cid Int -> EvalM TmI
 runHandler cid row spine = do
   cont <- gets (^? evalEnv . currentHandlers . ix cid . ix row)
     >>= (?? FailedHandlerLookup)

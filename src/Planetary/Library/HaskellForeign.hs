@@ -85,7 +85,7 @@ writeForeign a = do
 -- XXX
 liftBinaryOp
   :: IsIpld s
-  => (s -> s -> s) -> (Spine Cid a b -> ForeignM (Tm 'TM Cid a b))
+  => (s -> s -> s) -> (Spine Cid b -> ForeignM (Tm 'TM Cid b))
 liftBinaryOp op [ForeignTm tyUid tySat uid1, ForeignTm _ _ uid2] = do
   i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
   ForeignTm tyUid tySat <$> writeForeign i
@@ -94,7 +94,7 @@ liftBinaryOp _ _ = throwError FailedForeignFun
 -- XXX
 liftUnaryOp
   :: IsIpld s
-  => (s -> s) -> (Spine Cid a b -> ForeignM (Tm 'TM Cid a b))
+  => (s -> s) -> (Spine Cid b -> ForeignM (Tm 'TM Cid b))
 liftUnaryOp op [ForeignTm tyUid tySat uid] = do
   i <- op <$> lookupForeign uid
   ForeignTm tyUid tySat <$> writeForeign i
