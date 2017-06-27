@@ -13,8 +13,7 @@ module Planetary.Core.Typecheck where
 import Bound
 import Control.Lens hiding ((??), from, to)
 import Control.Monad (forM_)
-import Control.Monad.Error
--- import Control.Monad.Except
+import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Unification
 import Control.Unification.IntVar
@@ -96,16 +95,12 @@ type TcM'            = TcM            Cid Int
 
 newtype TcM uid a b = TcM
   (ReaderT (TypingEnv uid a)
-    (ErrorT TcErr
+    (ExceptT TcErr
       (IntBindingT (Ty Cid)
         Identity))
   b)
   deriving (Functor, Applicative, Monad, MonadError TcErr)
 deriving instance MonadReader (TypingEnv uid a) (TcM uid a)
-
-instance Error TcErr where
-  noMsg  = CheckFailure ""
-  strMsg = CheckFailure
 
 instance Fallible (Ty Cid) IntVar TcErr where
   occursFailure = OccursFailure
@@ -120,7 +115,7 @@ runTcM
   -> Either TcErr a
 runTcM env (TcM action) = runIdentity $
   evalIntBindingT $
-  runErrorT $
+  runExceptT $
   runReaderT action env
 
 infer :: TmI -> TcM' (UTy IntVar)

@@ -12,15 +12,12 @@
 module Planetary.Support.Parser where
 
 import Control.Applicative
-import Control.Monad.State (MonadState, StateT, evalStateT, put)
-import Control.Lens (unsnoc, imap)
+import Control.Lens (unsnoc)
 import Data.ByteString (ByteString)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text.Encoding (encodeUtf8)
-import Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HashMap
 
 -- TODO: be suspicious of `try`, see where it can be removed
 -- http://blog.ezyang.com/2014/05/parsec-try-a-or-b-considered-harmful/
@@ -113,11 +110,6 @@ parseTyArg = TyArgAbility <$> brackets parseAbilityBody
          <|> TyArgVal     <$> parseValTy
          <?> "Ty Arg"
 
-parseConstructors
-  :: MonadicParsing m => Vector TyArg' -> m (Vector ConstructorDecl')
-parseConstructors tyArgs = parseConstructor tyArgs `sepBy` bar
-  <?> "Constructors"
-
 parseConstructor
   :: MonadicParsing m => Vector TyArg' -> m ConstructorDecl'
 parseConstructor tyArgs = angles (ConstructorDecl
@@ -159,11 +151,6 @@ parseAbility = do
   mxs <- optional $ brackets parseAbilityBody
   return $ fromMaybe emptyAbility mxs
 
--- liftClosed :: (Traversable f, Alternative m) => f Text -> m (f Int)
--- liftClosed tm = case closed tm of
---   Nothing -> empty
---   Just tm' -> pure tm'
-
 parsePeg :: MonadicParsing m => m Peg'
 parsePeg = Peg
   <$> parseAbility
@@ -193,16 +180,12 @@ parseDataDecl = do
   tyArgs <- many parseTyVar
   _ <- assign
 
-  -- let bindingState = HashMap.fromList $
-  --       imap (\i (name, _kind) -> (name, i)) tyArgs
-
   -- this is the result type each constructor will saturate to
-  let tyArgs' = map (\(name, kind) -> (TyArgVal (FreeVariableTy name))) tyArgs
-      -- tyArgs' = imap (\i _ -> TyArgVal (BoundVariableTy i)) tyArgs
-      ctrParser = parseConstructors tyArgs'
+  let tyArgs' = map (\(name, _) -> (TyArgVal (FreeVariableTy name))) tyArgs
 
   -- put bindingState
-  ctrs <- indentedBlock (many (absoluteIndentation (bar *> parseConstructor tyArgs')))
+  ctrs <- indentedBlock
+    (many (absoluteIndentation (bar *> parseConstructor tyArgs')))
   return (DataDecl name (DataTypeInterface tyArgs ctrs))
 
 -- only value arguments and result type
@@ -247,20 +230,20 @@ parseTermDecl =
   let parser = TermDecl <$> identifier <* assign <*> parseLetrec
   in parser <?> "definition"
 
-reorgTuple :: (a, b, c) -> (a, (b, c))
-reorgTuple (a, b, c) = (a, (b, c))
-
 parseLetrec :: MonadicParsing m => m Tm'
 parseLetrec =
   let parser = do
         reserved "letrec"
-        definitions <- indentedBlock $ many $ absoluteIndentation $ (,,)
-          <$> identifier <* colon
-          <*> parsePolyty <* assign
-          <*> parseLambda <* dot
+        definitions <- indentedBlock $ many $ absoluteIndentation $ do
+          name <- identifier
+          tyAndDef <- indentedBlock $ absoluteIndentation $ (,)
+            <$> (colon *> parsePolyty)
+            <*> (assign *> parseLambda)
+          pure (name, tyAndDef)
+
         reserved "in"
-        body <- parseTm
-        let (names, binderVals) = unzip (reorgTuple <$> definitions)
+        body <- indentedBlock $ parseTm
+        let (names, binderVals) = unzip definitions
         return $ letrec names binderVals body
   in parser <?> "Letrec"
 
@@ -301,24 +284,25 @@ parseDataConstructor = angles (DataConstructor
   ) <?> "Data constructor"
 
 parseCase :: MonadicParsing m => m Tm'
-parseCase = (do
-  _ <- reserved "case"
-  m <- parseTm
-  _ <- reserved "of"
-  (uid, branches) <- localIndentation Gt $ do
-    uid <- parseUid
-    _ <- colon
+parseCase =
+  let parser = do
+        _ <- reserved "case"
+        m <- parseTm
+        _ <- reserved "of"
+        (uid, branches) <- localIndentation Any $ do
+          uid <- parseUid
+          _ <- colon
 
-    branches <- localIndentation Gt $ absoluteIndentation $ many $ do
-      _ <- bar
-      idents <- angles $ some identifier
-      _ <- arr
-      rhs <- parseTm
-      let name:vars = idents -- TODO!
-      pure (vars, rhs)
-    pure (uid, branches)
-  pure $ Cut (CaseP uid branches) m
-  ) <?> "case"
+          branches <- localIndentation Gt $ absoluteIndentation $ many $ do
+            _ <- bar
+            idents <- angles $ some identifier
+            _ <- arr
+            rhs <- parseTm
+            let name:vars = idents -- TODO!
+            pure (vars, rhs)
+          pure (uid, branches)
+        pure $ Cut (CaseP uid branches) m
+  in parser <?> "case"
 
 parseHandle :: MonadicParsing m => m Tm'
 parseHandle = (do
@@ -454,10 +438,10 @@ runTokenParse = lowLevelRunParse evalTokenIndentationParserT
 
 forceDeclarations :: Text -> [DeclS]
 forceDeclarations str = case runTokenParse parseDecls forceLocation str of
-  Left err -> error err
+  Left bad -> error bad
   Right result -> result
 
 forceTm :: Text -> Tm'
 forceTm str = case runTokenParse parseTm forceLocation str of
-  Left err -> error err
+  Left bad -> error bad
   Right result -> result

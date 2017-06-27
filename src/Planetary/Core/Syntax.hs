@@ -42,8 +42,6 @@ import GHC.Generics
 import Network.IPLD hiding (Value, Row)
 import qualified Network.IPLD as IPLD
 
-import Control.Unification.IntVar
-
 import Planetary.Core.Orphans ()
 import Planetary.Core.UIdMap
 import Planetary.Util
@@ -69,6 +67,7 @@ data Kind = ValTyK | EffTyK
   deriving (Show, Eq, Ord, Typeable, Generic)
 
 data Ty uid ty
+  -- ValTy
   = DataTy_ uid (Vector ty)
   | SuspendedTy_ ty
   | BoundVariableTy_ Int
@@ -90,7 +89,7 @@ data Ty uid ty
   deriving (Eq, Show, Ord, Typeable, Functor, Foldable, Traversable)
 
 instance IsUid uid => Unifiable (Ty uid) where
-  zipMatch d1@(DataTy_ uid1 args1) d2@(DataTy_ uId2 args2) =
+  zipMatch (DataTy_ uid1 args1) (DataTy_ uId2 args2) =
     if uid1 == uId2 && length args1 == length args2
     then Just $ DataTy_ uid1 (Right <$> zip args1 args2)
     else Nothing
@@ -139,6 +138,8 @@ instance IsUid uid => Unifiable (Ty uid) where
         if HashMap.null onlyInRight then rightOnly else Nothing
       (ClosedAbility, ClosedAbility) ->
         Just $ Ability_ ClosedAbility (UIdMap boths)
+
+  zipMatch _ _ = Nothing
 
 type UTy = UTerm (Ty Cid)
 
@@ -361,6 +362,7 @@ extendAbility
   -> Ability uid
 extendAbility (Ability initAb uidMap) (Adjustment adj)
   = Ability initAb (uidMap `uidMapUnion` adj)
+extendAbility _ _ = error "extendAbility called with non-ability"
 
 -- executable
 
@@ -473,6 +475,8 @@ instance IsUid uid => IsIpld (TyFix uid) where
     TyArgVal ty         -> TyArgValIpld ty
     TyArgAbility ab     -> TyArgAbilityIpld ab
     Ability i uidmap    -> AbilityIpld i uidmap
+    _                   -> error
+      "toIpld (FyFix uid) called with impossible value"
 
   fromIpld = \case
     DataTyIpld uid args     -> Just $ DataTy uid args

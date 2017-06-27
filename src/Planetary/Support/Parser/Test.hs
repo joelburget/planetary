@@ -55,7 +55,7 @@ unitTests = testGroup "parsing"
 
   , parserTest "X" parseValTy (VTy"X")
 
-  , parserTest "<_ X> | <_ X Y>" (parseConstructors [])
+  , parserTest "<_ X> | <_ X Y>" (parseConstructor [] `sepBy` bar)
     [ ConstructorDecl "_" [VTy"X"] []
     , ConstructorDecl "_" [VTy"X", VTy"Y"] []
     ]
@@ -133,6 +133,7 @@ unitTests = testGroup "parsing"
     CompTy [VTy"X"] (Peg emptyAbility (VTy"X"))
   , parserTest "X" parseValTy (VTy"X")
   , parserTest "(X)" parseValTy (VTy"X")
+  -- , parserTest "(X Y)" parseValTy (DataTy "X" (VTy"X"))
 
   , parserTest "| foo : X -> X" parseCommandDecl $
     CommandDeclaration [VTy"X"] (VTy"X")

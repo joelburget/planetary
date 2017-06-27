@@ -2,11 +2,11 @@
 module Planetary.Library.Management where
 
 decls = forceDeclarations [text|
-data Expr f =
-  <nat <foreignTm>>
+data ExprF Expr =
+  | <nat <foreignTm>>
   | <str <foreignTm>>
-  | <addExpr f f>
-  | <catExpr f f>
+  | <addExpr Expr Expr>
+  | <catExpr Expr Expr>
 
 semantics = letrec
   eval : forall. {<Expr <Expr>> -> <Syntax <Syntax>>}
@@ -24,8 +24,9 @@ semantics = letrec
 
 predefined :: UIdMap Text Cid
 predefined = uIdMapFromList
-  [ (add, _)
-  , (cat, _)
+  [ ("add", _)
+  , ("cat", _)
   ]
 
+resolved :: ResolvedDecls
 Right resolved = nameResolution decls predefined

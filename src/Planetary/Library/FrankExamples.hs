@@ -1,5 +1,6 @@
 {-# language LambdaCase #-}
 {-# language OverloadedStrings #-}
+{-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
 module Planetary.Library.FrankExamples where
 
@@ -8,11 +9,14 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
 import qualified Data.Text as T
 import System.IO (hFlush, stdout)
+import NeatInterpolation
 import Network.IPLD
 
 import Planetary.Core
 import Planetary.Library.HaskellForeign
 import Planetary.Support.Ids
+import Planetary.Support.NameResolution
+import Planetary.Support.Parser
 
 -- Examples from the Frank paper.
 
@@ -25,8 +29,8 @@ eraseCharLit = mkForeignTm @Text textId [] "\b \b"
 -- TODO: we actually map with a data constructor
 textMap :: SpineI -> ForeignM TmI
 textMap [LambdaV _binderNames body, ForeignTm _ _ uid] = do
-  text <- lookupForeign @Text uid
-  let str = T.unpack text
+  fText <- lookupForeign uid
+  let str = T.unpack fText
   let fun :: Char -> ForeignM Char
       fun char = do
         charPtr <- ForeignTm charId [] <$> writeForeign char
@@ -92,168 +96,165 @@ env = EvalEnv
 -- * fix up textMap
 -- * how is this actually run?
 
--- * inductive data
+decls :: [DeclS]
+decls = forceDeclarations [text|
+data Zero = -- no constructors
 
-charId :: Cid
+data Unit =
+  | <unit>
+
+data Bool =
+  | <tt>
+  | <ff>
+
+data Pair X Y =
+  | <pair X Y>
+
+data NatF Nat =
+  | <zero>
+  | <suc Nat>
+
+data ListF X list =
+  | <nil>
+  | <cons X <list X>>
+
+interface Send X =
+  | send : X -> <Unit>
+
+interface Receive X =
+  | receive : X
+
+-- interface State X =
+--   | get : S
+--   | put : S -> Unit
+
+interface Abort =
+  | aborting : <Zero>
+
+interface LookAhead =
+  | peek : char
+  | accept : <Unit>
+
+interface Console =
+  | inch : char
+  | ouch : char -> <Unit>
+
+-- XXX inductive
+data Log [e] X =
+  | <start {[e]X}>
+  | <inched <Log [e] X> {char -> [e]X}>
+  | <ouched <Log [e] X>>
+
+data Buffer =
+  | <empty>
+  | <hold char>
+
+main = letrec
+  input : forall X. {<Log [<LookAhead>, <Abort>, <Console>] X>
+        -> Buffer
+        -> X
+        -> [Console]X}
+        = \log buffer x -> handle x : X with
+          LookAhead:
+            | <peek -> k> -> case buffer of
+              Buffer:
+                | <hold c> -> input <Buffer.0 c> (k c)
+                | <empty> -> on Console.0! (charHandler1
+                  (rollback l)                                  -- '\b'
+                  (\c -> input <Log.1 l k> <Buffer.0 c> (k c)) -- other char
+                  )
+            | <accept -> k> -> case buffer of
+              Buffer:
+                | <hold c> -> snd (Console.1 c) (input <Log.2 l> empty (k unit))
+                | <empty>  -> input l empty (k unit)
+          Abort:
+            | <aborting -> k> -> rollback log
+          | x -> x
+
+  rollback : forall X. {<Log [<LookAhead>, <Abort>, <Console>] X> -> [<Console>]X}
+           = \x -> case x of
+    Log:
+      | <start p> -> parse p
+      | <ouched l> -> snd (textMap Console.1 eraseCharLit) (rollback l)
+      | <inched l k> -> input l empty (k LookAhead.0!)
+
+  parse : forall X. {{[<LookAhead>, <Abort>, <Console>]X} -> [<Console>]X}
+        = \p -> input <Log.0 p> empty p!
+
+  on : forall X Y. {X -> {X -> Y} -> Y}
+     = \x f -> f x
+
+  snd : forall X Y. {X -> Y -> X}
+      = \x y -> y
+
+  zeros : forall. {Int -> [<LookAhead>, <Abort>]Int}
+        = \n -> on LookAhead.0! (charHandler2
+          (snd LookAhead.1! (zeros (add n 1))) -- '0'
+          (snd LookAhead.1! n)                 -- ' '
+          (abort!)                             -- other char
+        )
+
+-- in (parse (zeros zero) : [<Console>]Int)
+in parse (zeros zero)
+
+-- is this a module?
+fns = letrec
+  fst : forall X Y. {X -> Y -> X}
+      = \x y -> x
+
+  if_ : forall X. {<Bool> -> {X} -> {X} -> X}
+      = \val t f -> case val of
+        Bool:
+          | <tt> -> t!
+          | <ff> -> f!
+
+  -- TODO: consider why Abort doesn't appear in the signature
+  -- catch : forall X. {<Abort>X -> {X} -> X}
+  catch : forall X. {X -> {X} -> X}
+        = \x h -> handle x : X with
+          Abort:
+            | <aborting -> _> -> h! -- handle the abort
+
+          -- TODO: we require renaming the value here?
+          | x -> x -- it returned a value, pass on
+
+in catch
+
+pipe = letrec
+  pipe : forall [e] X Y. {
+         {{[e, <Abort>, <Send X>] Unit} -> [e, <Abort>, <Receive X>] Y}
+       -> [e, <Abort>] Y}
+       -- TODO change the lambda delimiter from `->` to `.` like the paper?
+       = \x y -> handle y! : [e, <Abort>] Y with
+         Send X:
+           | <send x -> s> -> handle y! : [e, <Abort>] Y with
+             Receive X:
+               | <receive -> r> -> pipe (s unit) (r x)
+             | y -> y
+         | x -> case x of
+           Unit:
+             | <unit> -> handle y! : [e, <Abort>] Y with
+               Receive X:
+                 | <aborting -> r> -> abort!
+               | y -> y
+in pipe
+|]
+
+-- TODO
+charId, eraseCharLitId, addId, zeroId :: Cid
 charId = undefined
+eraseCharLitId = undefined
+addId = undefined
+zeroId = undefined
 
--- [declarations|
--- data Zero = -- no constructors
+predefined :: UIdMap Text Cid
+predefined = uIdMapFromList
+  [ ("char", charId)
+  , ("eraseCharLit", eraseCharLitId)
+  , ("Int", intId)
+  , ("add", addId)
+  , ("zero", zeroId)
+  ]
 
--- data Unit =
---   <unit>
-
--- data Bool =
---   <tt>
---   | <ff>
-
--- data Pair X Y =
---   <pair X Y>
-
--- -- TODO: we can't do inductive data
--- -- data Nat =
--- --   | <zero>
--- --   | <suc Nat>
-
--- -- data List =
--- --   | <nil>
--- --   | <cons X (List X)>
-
--- interface Send X =
---   send : X -> <Unit>
--- interface Receive X =
---   receive : X
--- -- interface State X =
--- --   | get : S
--- --   | put : S -> Unit
--- interface Abort =
---   aborting : <Zero>
-
--- interface LookAhead =
---   peek : char
---   | accept : <Unit>
-
--- interface Console =
---   inch : char
---   | ouch : char -> <Unit>
-
--- -- XXX inductive
--- data Log [e] X =
---   <start {[e]X}>
---   | <inched <Log [e] X> {char -> [e]X}>
---   | <ouched <Log [e] X>>
-
--- data Buffer =
---   <empty>
---   | <hold char>
-
--- main = letrec
---   input : forall X. {<Log [<LookAhead>, <Abort>, <Console>] X>
---         -> Buffer
---         -> X
---         -> [Console]X}
---         = \log buffer x -> handle x : X with
---           LookAhead:
---             | <peek -> k> -> case buffer of
---               Buffer:
---                 | <hold c> -> input <Buffer.0 c> (k c)
---                 | <empty> -> on Console.0! (charHandler1
---                   (rollback l)                                  -- '\b'
---                   (\c -> input <Log.1 l k> <Buffer.0 c> (k c)) -- other char
---                   )
---             | <accept -> k> -> case buffer of
---               Buffer:
---                 | <hold c> -> snd (Console.1 c) (input <Log.2 l> empty (k unit))
---                 | <empty>  -> input l empty (k unit)
---           Abort:
---             | <aborting -> k> -> rollback log
---           | x -> x
---   .
-
---   rollback : forall X. {<Log [<LookAhead>, <Abort>, <Console>] X> -> [<Console>]X}
---            = \x -> case x of
---     Log:
---       | <start p> -> parse p
---       | <ouched l> -> snd (textMap Console.1 eraseCharLit) (rollback l)
---       | <inched l k> -> input l empty (k LookAhead.0!)
---   .
-
---   parse : forall X. {{[<LookAhead>, <Abort>, <Console>]X} -> [<Console>]X}
---         = \p -> input <Log.0 p> empty p!
---   .
-
---   on : forall X Y. {X -> {X -> Y} -> Y}
---      = \x f -> f x
---   .
-
---   snd : forall X Y. {X -> Y -> X}
---       = \x y -> y
---   .
-
---   zeros : forall. {Int -> [<LookAhead>, <Abort>]Int}
---         = \n -> on LookAhead.0! (charHandler2
---       (snd LookAhead.1! (zeros (add n 1))) -- '0'
---       (snd LookAhead.1! n)                  -- ' '
---       (abort!)                        -- other char
---     )
---   .
-
--- -- in (parse (zeros zero) : [<Console>]Int)
--- in parse (zeros zero)
-
--- -- is this a module?
--- fns = letrec
---   fst : forall X Y. {X -> Y -> X}
---       = \x y -> x
---       .
-
---   if_ : forall X. {<Bool> -> {X} -> {X} -> X}
---       = \val t f -> case val of
---         Bool:
---           <tt> -> t!
---           <ff> -> f!
---         .
-
---   -- TODO: consider why Abort doesn't appear in the signature
---   -- catch : forall X. {<Abort>X -> {X} -> X}
---   catch : forall X. {X -> {X} -> X}
---         = \x h -> handle x : X with
---           Abort:
---             <aborting -> _> -> h! -- handle the abort
-
---           -- TODO: we require renaming the value here?
---           | x -> x -- it returned a value, pass on
---           .
-
--- in catch
-
--- -- TODO
--- -- * syntax for data constructors
--- -- * remove duplicate mention of adjustments / effects handled
-
--- -- pipe = letrec
--- --   pipe : forall [e] X Y. {{[e, Abort, Send X] Unit} -> [e, Abort, Receive X] Y} -> [e, Abort] Y}
--- --        -- TODO change the lambda delimiter from `->` to `.` like the paper?
--- --        = \x y -> handle y! : [e | <Abort>] Y with
--- --          Send X:
--- --            | x -> s -> handle y! : [e, Abort] Y with
--- --              Receive X:
--- --                | <receive -> r> -> pipe (s unit) (r x)
--- --              | y -> y
--- --          | x -> case x of
--- --            Unit:
--- --              | <unit> -> handle y! : [e, Abort] Y with
--- --                Receive X:
--- --                  | <aborting -> r> -> abort!
--- --                | y -> y
--- --        .
--- -- in pipe
-
--- |]
-
-  -- [ ("char", char)
-  -- , ("eraseCharLit", eraseCharLit)
-  -- , ("Int", int)
-  -- , ("add", add)
-  -- , ("zero", zero)
-  -- ]
+resolvedDecls :: ResolvedDecls
+Right resolvedDecls = nameResolution decls predefined

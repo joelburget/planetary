@@ -119,7 +119,6 @@ convertDti
   -> ResolutionM (Cid, Executable1 DataTypeInterface)
 convertDti (DataTypeInterface binders ctrs) = do
   let varNames = map fst binders
-      -- binders' = imap (\i (_, kind) -> (i, kind)) binders
   ctrs' <- withPushedVars varNames $ traverse convertCtr ctrs
   let dti = DataTypeInterface binders ctrs'
   pure (cidOf dti, dti)
@@ -160,6 +159,7 @@ convertTy = \case
   TyArgAbility ability -> TyArgAbility <$> convertTy ability
 
   Ability initAb umap -> Ability initAb <$> convertUidMap convertTy umap
+  _ -> error "impossible pattern match"
 
 convertCmd
   :: Raw1 CommandDeclaration
@@ -228,7 +228,7 @@ convertHandlers (AdjustmentHandlers handlers) =
 -- Note: this function expects its binding variables to already be pushed. See
 -- `convertTm`
 convertPolytype :: Polytype' -> ResolutionM PolytypeI
-convertPolytype (Polytype binders scope) = withPushedVars (fst <$> binders) $
+convertPolytype (Polytype binders scope) =
   Polytype binders <$> convertTy scope
 
 convertContinuation

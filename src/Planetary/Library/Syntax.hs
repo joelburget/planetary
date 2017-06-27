@@ -28,12 +28,12 @@ lfixIdStr   = cidText lfixId
 decls :: [DeclS]
 decls = forceDeclarations [text|
 data InitiateAbility =
-  <openAbility>
+  | <openAbility>
   | <closedAbility>
 
 -- mutually recursive family of data types
 data TyFamily =
-  <valTy>
+  | <valTy>
   | <compTy>
   | <peg>
   | <tyArg>
@@ -42,24 +42,24 @@ data TyFamily =
 -- TODO: GADT like syntax?
 -- | dataTy : uid -> <vector ty> -> Ty ValTy uid a ty
 
-data Ty uid a ty =
+data TyF uid a Ty =
   -- ValTy
-  <dataTy uid <vector ty>>
-  | <suspendedTy ty>
+  | <dataTy uid <vector Ty>>
+  | <suspendedTy Ty>
   | <variableTy a>
 
   -- CompTy
-  | <compTy <vector ty> ty>
+  | <compTy <vector Ty> Ty>
 
   -- Peg
-  | <peg ty ty>
+  | <peg Ty Ty>
 
   -- TyArg
-  | <tyArgVal ty>
-  | <tyArgAbility ty>
+  | <tyArgVal Ty>
+  | <tyArgAbility Ty>
 
   -- Ability
-  | <ability InitiateAbility <uidMap uid ty>>
+  | <ability InitiateAbility <uidMap uid Ty>>
 
 data Adjustment uid a =
  <adjustment <uidMap uid <lfix <Ty uid a>>>>
@@ -74,19 +74,19 @@ data Tm uid tyvar tmvar tm =
   -- Value
   <command uid row>
   | <dataConstructor uid row <vector tm>>
-  | <foreignValue uid <vector <ty uid tyvar>> uid>
+  | <foreignValue uid <vector <Ty uid tyvar>> uid>
   | <lambda <vector text> tm>
 
   -- Continuation
   | <application <vector tm>
   | <case uid <vector <tuple <vector text> tm>>
-  | <handle <adjustment uid tyvar> <ty uid tyvar> <tm uid tyvar tmvar> tm>
+  | <handle <adjustment uid tyvar> <Ty uid tyvar> <tm uid tyvar tmvar> tm>
   | <let <polytype uid tyvar> text tm>
 
   -- Tm
   | <variable tmvar>
   | <instantiatePolyvar tmvar <vector <tyArg uid tyvar>>
-  | <annotation tm <ty uid tyvar>
+  | <annotation tm <Ty uid tyvar>
   | <value <tm>>
   | <cut <tm> <tm>>
   | <letrec <vector <tuple <polytype uid tyvar> <tm>>> tm>
