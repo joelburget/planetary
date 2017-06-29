@@ -35,7 +35,6 @@ module Planetary.Support.Ids
   , charHandlerId
   , vectorId
   , uidMapId
-  , lfixId
   , syntaxOpsId
   , rowId
   , tupleId
@@ -88,7 +87,6 @@ intId
   : charHandlerId
   : vectorId
   : uidMapId
-  : lfixId
   : syntaxOpsId
   : rowId
   : tupleId

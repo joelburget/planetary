@@ -17,6 +17,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Unification
 import Control.Unification.IntVar
+import Data.Functor.Fixedpoint
 import Data.HashMap.Lazy (intersectionWith)
 import Data.Monoid ((<>))
 import Data.Text (Text)
@@ -49,6 +50,7 @@ data TcErr
   | OccursFailure IntVar (UTerm (Ty Cid) IntVar)
   | MismatchFailure (Ty Cid UTy') (Ty Cid UTy')
   | CheckFailure String
+  | LfixShape
   deriving Show
 
 instance Eq TcErr where
@@ -63,6 +65,7 @@ instance Eq TcErr where
   NotClosed == NotClosed = True
   CheckFailure a == CheckFailure b = a == b
   CantInfer a == CantInfer b = a == b
+  LfixShape == LfixShape = True
 
   -- cheat on the eq instance for these since we're just using it for testing
   ApplicationSpineMismatch _ _ == ApplicationSpineMismatch _ _ = True
@@ -102,6 +105,11 @@ newtype TcM uid b = TcM
   deriving (Functor, Applicative, Monad, MonadError TcErr)
 deriving instance MonadReader (TypingEnv uid) (TcM uid)
 
+instance BindingMonad (Ty Cid) IntVar (TcM Cid) where
+  lookupVar = TcM . lift . lift . lookupVar
+  freeVar = TcM $ lift $ lift freeVar
+  bindVar v tm = TcM $ lift $ lift $ bindVar v tm
+
 instance Fallible (Ty Cid) IntVar TcErr where
   occursFailure = OccursFailure
   mismatchFailure = MismatchFailure
@@ -117,6 +125,9 @@ runTcM env (TcM action) = runIdentity $
   evalIntBindingT $
   runExceptT $
   runReaderT action env
+
+lfixId :: Cid
+lfixId = mkCid "lfix"
 
 infer :: TmI -> TcM' (UTy IntVar)
 infer = \case
@@ -157,13 +168,39 @@ check (Value (Lambda _binders body))
     withAbility ability $
       check body' codom
 -- DATA
-check (Value (DataConstructor uid1 row tms)) (DataTyU uid2 valTysExp) = do
+check (Value dc@(DataConstructor uid1 row tms)) (DataTyU uid2 valTysExp)
+  -- Lfix extension to vanilla core frank
+  --
+  -- maybe this can be of help:
+  -- https://www.chargueraud.org/research/2009/fixwf/fixwf.pdf
+  --
+  -- Example of what we're typing:
+  --
+  --          nilf : Listf a f
+  --     ----------------------------
+  --     lfix nilf : Lfix (Listf Int)
+  | uid1 == lfixId = do
   assert (DataUIdMismatch uid1 uid2) (uid1 == uid2)
-  ConstructorDecl _name argTys valTysAct <- lookupConstructorTy uid1 row
-  let argTys' = unfreeze <$> argTys
-      valTysAct' = unfreeze <$> valTysAct
-  mapM_ (uncurry unify') =<< strictZip DataSaturationMismatch valTysAct' valTysExp
-  mapM_ (uncurry check) =<< strictZip ConstructorArgMismatch tms argTys'
+  assert LfixShape (row == 0 && length tms == 1 && length valTysExp == 1)
+  let [tm] = tms
+      [TyArgValU (DataTyU uid args)] = valTysExp
+  v <- freeVar
+  check tm (DataTyU uid (args ++ [UVar v]))
+
+  -- Back to vanilla core frank
+  | otherwise = do
+  assert (DataUIdMismatch uid1 uid2) (uid1 == uid2)
+  (argTys, valTysAct) <- lookupConstructorTy uid1 row
+
+  mapM_ (uncurry unify') =<< strictZip DataSaturationMismatch valTysAct valTysExp
+  mapM_ (uncurry check) =<< strictZip ConstructorArgMismatch tms argTys
+
+check (Value (DataConstructor uid row tms)) (UVar i) = do
+  -- Make a variable for each subterm and solve for all of them.
+  vars <- UVar <$$> replicateM (length tms) freeVar
+  mapM_ (uncurry check) (zip tms vars)
+  bindVar i (DataTyU uid vars)
+
 -- check (Value (DataConstructor uid row tms)) (VariableTy n) = do
 --   ConstructorDecl _name argTys valTysAct <- lookupConstructorTy uid row
 --   let ty = DataTy uid valTysAct
@@ -234,9 +271,6 @@ instantiateAbility (AbilityU _ uidmap) =
     --   -- TODO should we be unifying the args and as? what's wrong here?
     --   todo "instantiateAbility" tyArgs as b
 
-instantiateWithEnv :: PolytypeI -> TcM' (UTy IntVar)
-instantiateWithEnv = todo "instantiateWithEnv"
-
 uidZip
   :: MonadError TcErr m
   => UIdMap Cid [a]
@@ -275,6 +309,9 @@ openAdjustmentHandler handler argTys handlerTy cb = do
   local (& varTypes .~ envTys') (cb (instantiate instantiator handler))
   -- withState' envAdj (cb (instantiate instantiator handler))
 
+instantiateWithEnv :: PolytypeI -> TcM' (UTy IntVar)
+instantiateWithEnv = todo "instantiateWithEnv"
+
 withPolyty :: PolytypeI -> TcM' a -> TcM' a
 withPolyty pty = local (& varTypes %~ (<> [Right pty]))
 
@@ -287,10 +324,20 @@ lookupDataType uid
   = asks (^? typingData . ix uid)
     >>= (?? FailedDataTypeLookup)
 
-lookupConstructorTy :: Cid -> Row -> TcM' ConstructorDeclI
-lookupConstructorTy uid row =
-  asks (^? typingData . ix uid . constructors . ix row)
+lookupConstructorTy :: Cid -> Row -> TcM' ([UTy IntVar], [UTy IntVar])
+lookupConstructorTy uid row = do
+  DataTypeInterface binders ctrs <- asks (^? typingData . ix uid)
     >>= (?? FailedConstructorLookup uid row)
+  ConstructorDecl _name argTys valTys
+    <- (ctrs ^? ix row) ?? FailedConstructorLookup uid row
+  -- bind all the names in valTys
+  boundVars <- replicateM (length binders) freeVar
+  pure (modTm boundVars <$> argTys, modTm boundVars <$> valTys)
+
+modTm :: [IntVar] -> TyFix' -> UTy IntVar
+modTm vars = cata $ \case
+  BoundVariableTy_ i -> UVar (vars !! i)
+  other -> UTerm other
 
 lookupCommands :: Cid -> TcM' [CommandDeclarationI]
 lookupCommands uid

@@ -84,7 +84,7 @@ unitTests =
        , testGroup "lfix" $
          let decls = forceDeclarations [text|
              data ListF a f =
-               <nilf>
+               | <nilf>
                | <consf a f>
              |]
 
@@ -105,21 +105,20 @@ unitTests =
              oneList :: TmI
              oneList = lcons one lnil
 
+             listTy :: ValTyI -> ValTyI
+             listTy a = lfixTy (listfTy1 a)
+
              intListTy :: ValTyI
-             intListTy = lfixTy (listfTy1 intTy)
+             intListTy = listTy intTy
 
              -- f = ListF a
              -- =>
              -- data FixListF a = Fix (ListF a (Fix (ListF a)))
-             --
-             -- Declare Fix @ListF
-             -- a = VariableTy 0
              specialDecl = DataTypeInterface []
                [ ConstructorDecl
                    "FixListF"
-                   -- [listfTy2 intTy intListTy]
-                   [listfTy2 intTy (listfTy1 intTy)]
-                   [TyArgVal intListTy]
+                   [listfTy2 intTy intListTy]
+                   [TyArgVal (listfTy1 intTy)]
                ]
              specialDecl' = uIdMapFromList [(lfixId, specialDecl)]
 
