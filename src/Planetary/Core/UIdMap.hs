@@ -7,7 +7,6 @@
 {-# language FlexibleInstances #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language MultiParamTypeClasses #-}
-{-# language TupleSections #-}
 {-# language TypeFamilies #-}
 module Planetary.Core.UIdMap where
 

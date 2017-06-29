@@ -3,7 +3,10 @@
 {-# language LambdaCase #-}
 {-# language NamedFieldPuns #-}
 {-# language TemplateHaskell #-}
-module Planetary.Core.Eval where
+module Planetary.Core.Eval
+  ( Err(..)
+  , run
+  ) where
 
 import Bound
 import Control.Lens hiding ((??))

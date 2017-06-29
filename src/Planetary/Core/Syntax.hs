@@ -603,8 +603,7 @@ bindTm f = \case
   Value v -> Value (bindTm f v)
   Cut neg pos -> Cut (bindTm f neg) (pos >>= f)
   Letrec defns body -> Letrec
-    -- (defns & traverse._2 (bindTm f))
-    ((\(pty, tm) -> (pty, bindTm f tm)) <$> defns)
+    (defns & traverse._2 %~ bindTm f)
     (body >>>= f)
   AdjustmentHandlers handlers -> AdjustmentHandlers ((>>>= f) <$$> handlers)
 
@@ -616,7 +615,7 @@ instance Traversable (Tm tag uid) where
     Command uid row -> pure (Command uid row)
     DataConstructor uid row tms -> DataConstructor uid row <$> (traverse . traverse) f tms
     ForeignValue uid1 tys uid2 -> pure (ForeignValue uid1 tys uid2)
-    Lambda names body -> Lambda names <$> (traverse) f body
+    Lambda names body -> Lambda names <$> traverse f body
 
     Application spine -> Application <$> (traverse . traverse) f spine
     Case uid branches ->

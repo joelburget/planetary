@@ -144,10 +144,10 @@ unitTests = testGroup "parsing"
           , "  | bar : Y -> X"
           ]
         expected =
-          (InterfaceDecl "Iface" (EffectInterface [("X", ValTyK), ("Y", ValTyK)]
+          InterfaceDecl "Iface" (EffectInterface [("X", ValTyK), ("Y", ValTyK)]
             [ CommandDeclaration "foo" [VTy"X"] (VTy"Y")
             , CommandDeclaration "bar" [VTy"Y"] (VTy"X")
-            ]))
+            ])
     in parserTest decl parseInterfaceDecl expected
 
   , parserTest "Z!" parseTm $ Cut (Application []) (V"Z")

@@ -242,7 +242,7 @@ convertContinuation = \case
     <*> (Peg <$> convertTy ab <*> convertTy codom)
     <*> convertHandlers handlers
     <*> convertUnitScope scope
-  Handle _ _ _ _ -> error "invalid handle in convertContinuation"
+  Handle{} -> error "invalid handle in convertContinuation"
   Let polyty name scope ->
     Let <$> convertPolytype polyty <*> pure name <*> convertUnitScope scope
 

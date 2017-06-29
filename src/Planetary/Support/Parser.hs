@@ -81,7 +81,7 @@ assign = textSymbol "="
 bang   = textSymbol "!"
 
 indentedBlock :: MonadicParsing m => m a -> m a
-indentedBlock p = localIndentation Gt p
+indentedBlock = localIndentation Gt
 
 parens :: MonadicParsing m => m a -> m a
 parens = Tok.parens . localIndentation Any
@@ -242,7 +242,7 @@ parseLetrec =
           pure (name, tyAndDef)
 
         reserved "in"
-        body <- indentedBlock $ parseTm
+        body <- indentedBlock parseTm
         let (names, binderVals) = unzip definitions
         return $ letrec names binderVals body
   in parser <?> "Letrec"

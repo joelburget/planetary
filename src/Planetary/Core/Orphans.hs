@@ -1,7 +1,7 @@
 {-# language FlexibleInstances #-}
 {-# language UndecidableInstances #-}
 {-# options_ghc -fno-warn-orphans #-}
-module Planetary.Core.Orphans where
+module Planetary.Core.Orphans () where
 
 import Bound
 import Network.IPLD
