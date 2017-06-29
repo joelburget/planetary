@@ -139,7 +139,7 @@ infer = \case
     -- pure $ instantiate (polyVarInstantiator tys) p
   -- COMMAND
   Value (Command uid row) -> do
-    CommandDeclaration from to <- lookupCommandTy uid row
+    CommandDeclaration _name from to <- lookupCommandTy uid row
     let from' = unfreeze <$> from
         to' = unfreeze to
     ambient <- getAmbient
@@ -226,7 +226,8 @@ check (Cut (Handle adj peg (AdjustmentHandlers handlers) fallthrough) val) ty = 
   valTy <- withAbility adjustedAmbient (infer val)
   cmds <- instantiateAbility adjustedEmpty
   pairs <- uidZip handlers cmds
-  forMOf_ (traverse . traverse) pairs $ \(handler, CommandDeclaration as b) ->
+  forMOf_ (traverse . traverse) pairs $
+    \(handler, CommandDeclaration _name as b) ->
     let cTy = CompTyU [unfreeze b] (PegU ambient valTy)
         as' = unfreeze <$> as
     in openAdjustmentHandler handler as' cTy $ \tm ->

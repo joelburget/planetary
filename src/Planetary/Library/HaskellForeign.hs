@@ -52,19 +52,19 @@ haskellDataTypes = uIdMapFromList
 interfaceTable :: InterfaceTableI
 interfaceTable = uIdMapFromList
   [ (intOpsId, EffectInterface []
-    [ CommandDeclaration [intTy, intTy] intTy -- +
-    , CommandDeclaration [intTy, intTy] intTy -- -
+    [ CommandDeclaration "+" [intTy, intTy] intTy -- +
+    , CommandDeclaration "-" [intTy, intTy] intTy -- -
     ])
   , (boolOpsId, EffectInterface []
-    [ CommandDeclaration [boolTy, boolTy] boolTy -- &&
-    , CommandDeclaration [boolTy, boolTy] boolTy -- ||
-    , CommandDeclaration [boolTy]         boolTy -- not
+    [ CommandDeclaration "&&" [boolTy, boolTy] boolTy -- &&
+    , CommandDeclaration "||" [boolTy, boolTy] boolTy -- ||
+    , CommandDeclaration "not" [boolTy]         boolTy -- not
     ])
   , (textOpsId, EffectInterface []
-    [ CommandDeclaration [textTy, textTy] textTy -- concat
+    [ CommandDeclaration "concat" [textTy, textTy] textTy -- concat
     ])
   , (uidOpsId, EffectInterface []
-    [ CommandDeclaration [] uidTy -- generateUid
+    [ CommandDeclaration "generateUid" [] uidTy -- generateUid
     ])
   ]
 

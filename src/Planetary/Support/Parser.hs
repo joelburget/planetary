@@ -181,7 +181,7 @@ parseDataDecl = do
   _ <- assign
 
   -- this is the result type each constructor will saturate to
-  let tyArgs' = map (\(name, _) -> (TyArgVal (FreeVariableTy name))) tyArgs
+  let tyArgs' = map (\(name', _) -> (TyArgVal (FreeVariableTy name'))) tyArgs
 
   -- put bindingState
   ctrs <- indentedBlock
@@ -191,16 +191,16 @@ parseDataDecl = do
 -- only value arguments and result type
 parseCommandType
   :: MonadicParsing m
-  => m (Vector ValTy', ValTy')
+  => m (Text, Vector ValTy', ValTy')
 parseCommandType = do
-  name <- identifier -- TODO!
+  name <- identifier
   _ <- colon
   vs <- sepBy1 parseValTy arr
-  maybe empty pure (unsnoc vs)
-  -- maybe empty pure . unsnoc =<< sepBy1 parseValTy arr
+  (args, result) <- maybe empty pure (unsnoc vs)
+  pure (name, args, result)
 
 parseCommandDecl :: MonadicParsing m => m CommandDeclaration'
-parseCommandDecl = bar >> (uncurry CommandDeclaration <$> parseCommandType)
+parseCommandDecl = bar >> (uncurry3 CommandDeclaration <$> parseCommandType)
   <?> "Command Decl"
 
 parseInterfaceDecl :: MonadicParsing m => m InterfaceDeclS
@@ -298,7 +298,7 @@ parseCase =
             idents <- angles $ some identifier
             _ <- arr
             rhs <- parseTm
-            let name:vars = idents -- TODO!
+            let _uncheckedName:vars = idents
             pure (vars, rhs)
           pure (uid, branches)
         pure $ Cut (CaseP uid branches) m
@@ -325,7 +325,7 @@ parseHandle = (do
           <*> identifier
         _ <- arr
         rhs <- parseTm
-        let name:vars = idents -- TODO!
+        let _uncheckedName:vars = idents
         pure (vars, kVar, rhs)
 
       pure (uid, tyArgs, rows)

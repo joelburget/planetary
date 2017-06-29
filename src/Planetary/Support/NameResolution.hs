@@ -162,7 +162,7 @@ convertTy = \case
 convertCmd
   :: Raw1 CommandDeclaration
   -> ResolutionM (Executable1 CommandDeclaration)
-convertCmd (CommandDeclaration dom codom) = CommandDeclaration
+convertCmd (CommandDeclaration name dom codom) = CommandDeclaration name
   <$> traverse convertTy dom
   <*> convertTy codom
 

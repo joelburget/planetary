@@ -12,6 +12,7 @@ module Planetary.Util
   , (<$$>)
   , (<$$$>)
   , over2
+  , uncurry3
   ) where
 
 import Control.Monad.State.Strict
@@ -82,3 +83,6 @@ over2
   :: (Newtype n o, Newtype n' o')
   => (o -> n) -> (o -> o -> o') -> (n -> n -> n')
 over2 _newtype f n1 n2 = pack (f (unpack n1) (unpack n2))
+
+uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
+uncurry3 f (a, b, c) = f a b c

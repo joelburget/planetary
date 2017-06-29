@@ -135,11 +135,10 @@ syntaxInterfaceTable =
     [ (syntaxOpsId, EffectInterface [("uid", ValTyK), ("a", ValTyK)]
       -- Fix :: f (Fix f) -> Fix f
       -- FixTy :: Ty uid a (Fix (Ty uid a)) -> Fix (Ty uid a)
-      [ CommandDeclaration [tyTy] fixTy
+      -- XXX
+      [ CommandDeclaration "fix" [tyTy] fixTy
       -- unFix :: Fix f  -> f (Fix f)
       -- unFixTy :: Fix (Ty uid a) -> Ty uid a (Fix (Ty uid a))
-      , CommandDeclaration [fixTy] tyTy
+      , CommandDeclaration "unfix" [fixTy] tyTy
       ])
     ]
-
-

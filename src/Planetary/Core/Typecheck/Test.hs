@@ -69,7 +69,7 @@ unitTests = testGroup "typechecking"
           -- TODO: this duplication between ambient and interfaces is so bad
           cmdIfaces = uIdMapFromList
             [ (cmdUid, EffectInterface []
-                [CommandDeclaration [domTy] codomTy]
+                [CommandDeclaration "fire missiles" [domTy] codomTy]
               )
             ]
 

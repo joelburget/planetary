@@ -222,7 +222,8 @@ emptyDataTypeInterface = DataTypeInterface [] []
 --
 -- TODO: maybe rename this to `Command` if we do reuse it in instantiateAbility
 data CommandDeclaration uid = CommandDeclaration
-  { _commandArgs :: !(Vector (ValTy uid))
+  { _commandName :: !Text
+  , _commandArgs :: !(Vector (ValTy uid))
   , _commandRet :: !(ValTy uid)
   } deriving (Show, Eq, Ord, Typeable, Generic)
 

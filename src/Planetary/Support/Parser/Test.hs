@@ -136,7 +136,7 @@ unitTests = testGroup "parsing"
   -- , parserTest "(X Y)" parseValTy (DataTy "X" (VTy"X"))
 
   , parserTest "| foo : X -> X" parseCommandDecl $
-    CommandDeclaration [VTy"X"] (VTy"X")
+    CommandDeclaration "foo" [VTy"X"] (VTy"X")
 
   , let decl = T.unlines
           [ "interface Iface X Y ="
@@ -145,8 +145,8 @@ unitTests = testGroup "parsing"
           ]
         expected =
           (InterfaceDecl "Iface" (EffectInterface [("X", ValTyK), ("Y", ValTyK)]
-            [ CommandDeclaration [VTy"X"] (VTy"Y")
-            , CommandDeclaration [VTy"Y"] (VTy"X")
+            [ CommandDeclaration "foo" [VTy"X"] (VTy"Y")
+            , CommandDeclaration "bar" [VTy"Y"] (VTy"X")
             ]))
     in parserTest decl parseInterfaceDecl expected
 
@@ -210,8 +210,8 @@ unitTests = testGroup "parsing"
 
   , let defn = "interface IFace =\n  | _ : foo -> bar\n  | _ : baz"
         expected = InterfaceDecl "IFace" (EffectInterface []
-          [ CommandDeclaration [FreeVariableTy "foo"] (FreeVariableTy "bar")
-          , CommandDeclaration [] (FreeVariableTy "baz")
+          [ CommandDeclaration "_" [FreeVariableTy "foo"] (FreeVariableTy "bar")
+          , CommandDeclaration "_" [] (FreeVariableTy "baz")
           ])
     in parserTest defn parseInterfaceDecl expected
 
