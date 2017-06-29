@@ -32,7 +32,7 @@ import Data.Data
 import Data.Foldable (toList)
 import Data.Functor.Classes
 import Data.Functor.Fixedpoint
-import qualified Data.HashMap.Lazy as HashMap
+import qualified Data.HashMap.Strict as HashMap
 import Data.List (find)
 import Data.Monoid ((<>))
 import Data.Text (Text)
@@ -68,24 +68,24 @@ data Kind = ValTyK | EffTyK
 
 data Ty uid ty
   -- ValTy
-  = DataTy_ uid (Vector ty)
-  | SuspendedTy_ ty
-  | BoundVariableTy_ Int
-  | FreeVariableTy_ Text
+  = DataTy_ !uid !(Vector ty)
+  | SuspendedTy_ !ty
+  | BoundVariableTy_ !Int
+  | FreeVariableTy_ !Text
 
   -- CompTy
-  | CompTy_ (Vector ty) ty
+  | CompTy_ !(Vector ty) !ty
 
   -- Peg
-  | Peg_ ty ty
+  | Peg_ !ty !ty
 
   -- TyArg
-  | TyArgVal_ ty
-  | TyArgAbility_ ty
+  | TyArgVal_ !ty
+  | TyArgAbility_ !ty
 
   -- Ability
   -- "For each UID, instantiate it with these args"
-  | Ability_ InitiateAbility (UIdMap uid (Vector ty))
+  | Ability_ !InitiateAbility !(UIdMap uid (Vector ty))
   deriving (Eq, Show, Ord, Typeable, Functor, Foldable, Traversable)
 
 instance IsUid uid => Unifiable (Ty uid) where
@@ -179,9 +179,9 @@ pattern FreeVariableTy v  = Fix (FreeVariableTy_ v)
 
 data Polytype uid = Polytype
   -- Universally quantify over a bunch of variables
-  { polyBinders :: Vector (Text, Kind)
+  { polyBinders :: !(Vector (Text, Kind))
   -- resulting in a value type
-  , polyVal :: TyFix uid
+  , polyVal :: !(TyFix uid)
   } deriving (Typeable, Generic)
 
 instance Show uid => Show (Polytype uid) where
@@ -200,9 +200,9 @@ instance IsUid uid => Ord (Polytype uid) where
     = compare binders1 binders2 <> compare val1 val2
 
 data ConstructorDecl uid = ConstructorDecl
-  { _constructorName   :: Text
-  , _constructorArgs   :: Vector (ValTy uid)
-  , _constructorResult :: Vector (TyArg uid)
+  { _constructorName   :: !Text
+  , _constructorArgs   :: !(Vector (ValTy uid))
+  , _constructorResult :: !(Vector (TyArg uid))
   }
   deriving (Show, Eq, Ord, Typeable, Generic)
 
@@ -210,9 +210,9 @@ data ConstructorDecl uid = ConstructorDecl
 -- effect variables).
 data DataTypeInterface uid = DataTypeInterface
   -- we universally quantify over some number of type variables
-  { _dataBinders :: Vector (Text, Kind)
+  { _dataBinders :: !(Vector (Text, Kind))
   -- a collection of constructors taking some arguments
-  , _constructors :: Vector (ConstructorDecl uid)
+  , _constructors :: !(Vector (ConstructorDecl uid))
   } deriving (Show, Eq, Ord, Typeable, Generic)
 
 emptyDataTypeInterface :: DataTypeInterface uid
@@ -221,14 +221,16 @@ emptyDataTypeInterface = DataTypeInterface [] []
 -- commands take arguments (possibly including variables) and return a value
 --
 -- TODO: maybe rename this to `Command` if we do reuse it in instantiateAbility
-data CommandDeclaration uid = CommandDeclaration (Vector (ValTy uid)) (ValTy uid)
-  deriving (Show, Eq, Ord, Typeable, Generic)
+data CommandDeclaration uid = CommandDeclaration
+  { _commandArgs :: !(Vector (ValTy uid))
+  , _commandRet :: !(ValTy uid)
+  } deriving (Show, Eq, Ord, Typeable, Generic)
 
 data EffectInterface uid = EffectInterface
   -- we universally quantify some number of type variables
-  { _interfaceBinders :: Vector (Text, Kind)
+  { _interfaceBinders :: !(Vector (Text, Kind))
   -- a collection of commands
-  , _commands :: Vector (CommandDeclaration uid)
+  , _commands :: !(Vector (CommandDeclaration uid))
   } deriving (Show, Eq, Ord, Typeable, Generic)
 
 -- An adjustment is a mapping from effect inferface id to the types it's
@@ -248,45 +250,48 @@ data TmTag
 data Tm (tag :: TmTag) uid b where
   -- Term:
   -- use (inferred)
-  Command :: uid -> Row -> Tm 'VALUE uid b
+  Command :: !uid -> !Row -> Tm 'VALUE uid b
 
   -- construction (checked)
-  DataConstructor :: uid -> Row -> Vector (Tm 'TM uid b) -> Tm 'VALUE uid b
-  ForeignValue :: uid -> Vector (ValTy uid) -> uid -> Tm 'VALUE uid b
-  Lambda :: Vector Text -> Scope Int (Tm 'TM uid ) b -> Tm 'VALUE uid b
+  DataConstructor
+    :: !uid
+    -> !Row
+    -> !(Vector (Tm 'TM uid b)) -> Tm 'VALUE uid b
+  ForeignValue :: !uid -> !(Vector (ValTy uid)) -> !uid -> Tm 'VALUE uid b
+  Lambda :: !(Vector Text) -> !(Scope Int (Tm 'TM uid ) b) -> Tm 'VALUE uid b
 
   -- Continuation:
   -- use (inferred)
-  Application :: Spine uid b -> Tm 'CONTINUATION uid b
+  Application :: !(Spine uid b) -> Tm 'CONTINUATION uid b
 
   -- construction (checked)
   Case
-    :: uid
-    -> Vector (Vector Text, Scope Int (Tm 'TM uid) b)
+    :: !uid
+    -> !(Vector (Vector Text, Scope Int (Tm 'TM uid) b))
     -> Tm 'CONTINUATION uid b
   Handle
-    :: Adjustment uid
-    -> Peg uid
-    -> Tm 'ADJUSTMENT_HANDLERS uid b
-    -> Scope () (Tm 'TM uid) b
+    :: !(Adjustment uid)
+    -> !(Peg uid)
+    -> !(Tm 'ADJUSTMENT_HANDLERS uid b)
+    -> !(Scope () (Tm 'TM uid) b)
     -> Tm 'CONTINUATION uid b
   Let
-    :: Polytype uid
-    -> Text
-    -> Scope () (Tm 'TM uid) b
+    :: !(Polytype uid)
+    -> !Text
+    -> !(Scope () (Tm 'TM uid) b)
     -> Tm 'CONTINUATION uid b
 
   -- Term
-  Variable :: b -> Tm 'TM uid b
+  Variable :: !b -> Tm 'TM uid b
 
-  InstantiatePolyVar :: b -> Vector (TyArg uid) -> Tm 'TM uid b
-  Annotation :: Tm 'VALUE uid b -> ValTy uid -> Tm 'TM uid b
-  Value :: Tm 'VALUE uid b -> Tm 'TM uid b
-  Cut :: Tm 'CONTINUATION uid b -> Tm 'TM uid b  -> Tm 'TM uid b
+  InstantiatePolyVar :: !b -> !(Vector (TyArg uid)) -> Tm 'TM uid b
+  Annotation :: !(Tm 'VALUE uid b) -> !(ValTy uid) -> Tm 'TM uid b
+  Value :: !(Tm 'VALUE uid b) -> Tm 'TM uid b
+  Cut :: !(Tm 'CONTINUATION uid b) -> !(Tm 'TM uid b) -> Tm 'TM uid b
   Letrec
     -- invariant: each value is a lambda
-    :: Vector (Polytype uid, Tm 'VALUE uid b)
-    -> Scope Int (Tm 'TM uid) b
+    :: !(Vector (Polytype uid, Tm 'VALUE uid b))
+    -> !(Scope Int (Tm 'TM uid) b)
     -> Tm 'TM uid b
 
   -- Other
@@ -296,27 +301,27 @@ data Tm (tag :: TmTag) uid b where
   -- Encode each constructor argument (x_c) as a `Just Int` and the
   -- continuation (z_c) as `Nothing`.
   AdjustmentHandlers
-    :: UIdMap uid (Vector (Scope (Maybe Int) (Tm 'TM uid) b))
+    :: !(UIdMap uid (Vector (Scope (Maybe Int) (Tm 'TM uid) b)))
     -> Tm 'ADJUSTMENT_HANDLERS uid b
 
 -- type? newtype?
 type Spine uid b = Vector (Tm 'TM uid b)
 
 data Decl uid b
-  = DataDecl_      (DataDecl uid)
-  | InterfaceDecl_ (InterfaceDecl uid)
-  | TermDecl_      (TermDecl uid b)
+  = DataDecl_      !(DataDecl uid)
+  | InterfaceDecl_ !(InterfaceDecl uid)
+  | TermDecl_      !(TermDecl uid b)
   deriving (Eq, Ord, Show, Typeable, Generic)
 
-data DataDecl uid = DataDecl Text (DataTypeInterface uid)
+data DataDecl uid = DataDecl !Text !(DataTypeInterface uid)
   deriving (Eq, Ord, Show, Typeable, Generic)
 
-data InterfaceDecl uid = InterfaceDecl Text (EffectInterface uid)
+data InterfaceDecl uid = InterfaceDecl !Text !(EffectInterface uid)
   deriving (Eq, Ord, Show, Typeable, Generic)
 
 data TermDecl uid b = TermDecl
-  Text           -- ^ the term's name
-  (Tm 'TM uid b) -- ^ body
+  !Text           -- ^ the term's name
+  !(Tm 'TM uid b) -- ^ body
   deriving (Typeable, Generic)
 
 deriving instance (IsUid uid, Eq b) => Eq (TermDecl uid b)
@@ -329,10 +334,10 @@ type InterfaceDeclS = InterfaceDecl Text
 type TermDeclS      = TermDecl      Text Text
 
 data ResolvedDecls = ResolvedDecls
-  { _datatypes  :: UIdMap Cid DataTypeInterfaceI
-  , _interfaces :: UIdMap Cid EffectInterfaceI
-  , _globalCids :: [(Text, Cid)]
-  , _terms      :: [Executable2 TermDecl]
+  { _datatypes  :: !(UIdMap Cid DataTypeInterfaceI)
+  , _interfaces :: !(UIdMap Cid EffectInterfaceI)
+  , _globalCids :: ![(Text, Cid)]
+  , _terms      :: ![Executable2 TermDecl]
   } deriving Show
 
 -- TODO: make traversals

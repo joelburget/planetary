@@ -18,7 +18,7 @@ import Control.Monad.Reader
 import Control.Unification
 import Control.Unification.IntVar
 import Data.Functor.Fixedpoint
-import Data.HashMap.Lazy (intersectionWith)
+import Data.HashMap.Strict (intersectionWith)
 import Data.Monoid ((<>))
 import Data.Text (Text)
 import Network.IPLD hiding (Row)

@@ -21,8 +21,8 @@ import Control.Newtype
 import Data.Data
 import Data.Foldable (toList)
 import Data.Hashable (Hashable)
-import Data.HashMap.Lazy (HashMap)
-import qualified Data.HashMap.Lazy as HashMap
+import Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
 import GHC.Generics
 import Network.IPLD
 
