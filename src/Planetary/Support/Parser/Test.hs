@@ -2,7 +2,7 @@
 {-# language OverloadedStrings #-}
 {-# language PackageImports #-}
 {-# language PatternSynonyms #-}
-module Planetary.Support.Parser.Test where
+module Planetary.Support.Parser.Test (runParserTests, unitTests) where
 
 import Data.Text (Text)
 import qualified Data.Text as T

@@ -1,7 +1,10 @@
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
-module Planetary.Library.HaskellForeign.Test where
+module Planetary.Library.HaskellForeign.Test
+  ( unitTests
+  , runHaskellForeignTests
+  ) where
 
 import Control.Lens
 import Control.Unification (unfreeze)

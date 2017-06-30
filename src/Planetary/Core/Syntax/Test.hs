@@ -1,5 +1,5 @@
 {-# language Rank2Types #-}
-module Planetary.Core.Syntax.Test where
+module Planetary.Core.Syntax.Test (unitTests) where
 
 import Network.IPLD
 import Test.Tasty

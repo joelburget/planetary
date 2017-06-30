@@ -4,11 +4,26 @@
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language MultiParamTypeClasses #-}
 {-# language LambdaCase #-}
+{-# language OverloadedStrings #-}
 {-# language StandaloneDeriving #-}
 {-# language TemplateHaskell #-}
 {-# language TypeOperators #-}
 {-# language TypeFamilies #-}
-module Planetary.Core.Typecheck where
+module Planetary.Core.Typecheck
+  ( TcErr(..)
+  , TypingEnv(..)
+  , DataTypeTableI
+  , InterfaceTableI
+  , TypingEnvI
+  , lfixId
+  , varTypes
+  , typingData
+  , runTcM
+  , check
+  , infer
+  , typingAbilities
+  , typingInterfaces
+  ) where
 
 import Bound
 import Control.Lens hiding ((??), from, to)
@@ -168,7 +183,7 @@ check (Value (Lambda _binders body))
     withAbility ability $
       check body' codom
 -- DATA
-check (Value dc@(DataConstructor uid1 row tms)) (DataTyU uid2 valTysExp)
+check (DataTm uid1 row tms) (DataTyU uid2 valTysExp)
   -- Lfix extension to vanilla core frank
   --
   -- maybe this can be of help:
@@ -195,7 +210,7 @@ check (Value dc@(DataConstructor uid1 row tms)) (DataTyU uid2 valTysExp)
   mapM_ (uncurry unify') =<< strictZip DataSaturationMismatch valTysAct valTysExp
   mapM_ (uncurry check) =<< strictZip ConstructorArgMismatch tms argTys
 
-check (Value (DataConstructor uid row tms)) (UVar i) = do
+check (DataTm uid row tms) (UVar i) = do
   -- Make a variable for each subterm and solve for all of them.
   vars <- UVar <$$> replicateM (length tms) freeVar
   mapM_ (uncurry check) (zip tms vars)

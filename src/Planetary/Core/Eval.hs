@@ -5,7 +5,12 @@
 {-# language TemplateHaskell #-}
 module Planetary.Core.Eval
   ( Err(..)
+  , EvalEnv(..)
+  , ForeignM
+  , CurrentHandlers
+  , step
   , run
+  , runEvalM
   ) where
 
 import Bound

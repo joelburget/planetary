@@ -3,7 +3,7 @@
 {-# language PatternSynonyms #-}
 {-# language QuasiQuotes #-}
 {-# language ScopedTypeVariables #-}
-module Planetary.Library.Syntax where
+module Planetary.Library.Syntax () where
 
 import Data.Text (Text)
 import NeatInterpolation

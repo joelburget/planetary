@@ -8,7 +8,13 @@
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language MultiParamTypeClasses #-}
 {-# language TypeFamilies #-}
-module Planetary.Core.UIdMap where
+module Planetary.Core.UIdMap
+  ( UIdMap(..)
+  , IsUid
+  , uIdMapFromList
+  , uIdMapToList
+  , uidMapUnion
+  ) where
 
 import Control.Lens (
   FunctorWithIndex(..),

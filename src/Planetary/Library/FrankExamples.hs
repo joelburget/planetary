@@ -2,7 +2,9 @@
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
-module Planetary.Library.FrankExamples where
+module Planetary.Library.FrankExamples
+  (
+  ) where
 
 import Control.Monad.Except
 import Control.Monad.IO.Class (liftIO)

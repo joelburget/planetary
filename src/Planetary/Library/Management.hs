@@ -1,5 +1,5 @@
 {-# language QuasiQuotes #-}
-module Planetary.Library.Management where
+module Planetary.Library.Management () where
 
 decls = forceDeclarations [text|
 data LanguageDiff =

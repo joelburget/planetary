@@ -1,6 +1,21 @@
 {-# language DataKinds #-}
+{-# language OverloadedStrings #-}
 {-# language TypeApplications #-}
-module Planetary.Library.HaskellForeign where
+module Planetary.Library.HaskellForeign
+  ( mkForeign
+  , mkForeignTm
+  , lookupForeign
+  , writeForeign
+  , haskellOracles
+  , interfaceTable
+  , intTy
+  , textTy
+  , uidTy
+  , haskellDataTypes
+  , vector
+  , uidMap
+  -- , lfix
+  ) where
 
 import Control.Lens hiding ((??), op)
 import Control.Monad.Except

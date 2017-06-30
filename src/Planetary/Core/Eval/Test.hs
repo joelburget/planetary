@@ -1,6 +1,6 @@
 {-# language DataKinds #-}
 {-# language OverloadedStrings #-}
-module Planetary.Core.Eval.Test where
+module Planetary.Core.Eval.Test (unitTests, runEvalTests, stepTest) where
 
 import Bound (closed)
 import Prelude hiding (not)
