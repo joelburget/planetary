@@ -1,3 +1,5 @@
+{-# language FlexibleContexts #-}
+{-# language GADTs #-}
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
 module Planetary.Core.Typecheck.Test
@@ -7,7 +9,7 @@ module Planetary.Core.Typecheck.Test
   , emptyTypingEnv
   ) where
 
-import Bound (closed)
+import Bound (closed, substitute)
 import Control.Lens
 import Control.Unification (freeze, unfreeze)
 import Control.Unification.IntVar
@@ -18,6 +20,7 @@ import Test.Tasty
 import Test.Tasty.HUnit
 
 import Planetary.Core
+import Planetary.Support.NameResolution
 import Planetary.Support.Parser
 
 checkTest
@@ -140,45 +143,50 @@ unitTests = testGroup "typechecking"
            ]
          ]
 
-  , testGroup "infer annotation" []
-    -- [ let ty = DataTy (mockCid "ty") []
-    --   inferTest "COERCE" emptyTypingEnv (Annotation
-    -- ]
+  , testGroup "infer annotation"
+    [ let cid = mockCid "ty"
+          ty = DataTy cid []
+          tm = Annotation (DataConstructor cid 0 []) ty
+      in inferTest "COERCE" emptyTypingEnv tm (Right (unfreeze ty))
+    ]
 
   , testGroup "TODO: check lambda" []
 
-    -- , testGroup "check case"
-    --   [ let abcdUid = mockCid "abcd"
-    --         abcdTy = DataTy abcdUid []
-    --         abcdVal = DataTm abcdUid 0 []
-    --         otherUid = mockCid "123424321432"
-    --         val = DataTm otherUid 1 [abcdVal, abcdVal]
-    --         tm = -- closed $ substitute "val" val $
-    --           [tmExp|
-    --             case val of
-    --               123424321432:
-    --                 | x y z -> x
-    --                 | y z -> z
-    --           |]
-    --         -- Just (dataTys, _) = [declarations|
-    --         --     data =
-    --         --       |
-    --         --     data =
-    --         --       |
-    --         --   |]
-    --         tables = emptyTypingEnv & typingData .~ uIdMapFromList
-    --           [ (abcdUid, [[]])
-    --           , (otherUid,
-    --             [ [abcdTy, abcdTy, abcdTy]
-    --             , [abcdTy, abcdTy]
-    --             ])
-    --           ]
-    --         expectedTy = abcdTy
-    --         env = TypingState
-    --           [
-    --           ]
-    --     in checkTest "CASE" tables env tm expectedTy
-    --   ]
+    , testGroup "check case"
+      [ let abcdUid = mockCid "abcd"
+            defgUid = mockCid "123424321432"
+            abcdTy = DataTy abcdUid []
+            abcdVal = DataTm abcdUid 0 []
+            val = DataTm defgUid 1 [abcdVal, abcdVal]
+            resolutionState = mempty
+              & ix "abcd" .~ abcdUid
+              & ix "defg" .~ defgUid
+            Right tm = resolveTm resolutionState $ forceTm [text|
+              case val of
+                defg:
+                  | <_ x y z> -> x
+                  | <_ y z> -> z
+            |]
+            tm' = substitute 0 val tm
+            -- decls = forceDeclarations [text|
+            --     data abcd =
+            --       | <abcd>
+            --     data defg =
+            --       | <defg1 abcd abcd abcd>
+            --       | <defg2 abcd abcd>
+            --   |]
+            env = emptyTypingEnv & typingData .~ uIdMapFromList
+              [ (abcdUid, DataTypeInterface []
+                [ ConstructorDecl "abcd" [] []
+                ])
+              , (defgUid, DataTypeInterface []
+                [ ConstructorDecl "defg1" [abcdTy, abcdTy, abcdTy] []
+                , ConstructorDecl "defg2" [abcdTy, abcdTy]         []
+                ])
+              ]
+            expectedTy = unfreeze abcdTy
+        in checkTest "CASE" env tm expectedTy
+      ]
 
     , testGroup "check switch"
       [ let tm = V 0
@@ -189,30 +197,34 @@ unitTests = testGroup "typechecking"
         in checkTest "SWITCH" env tm expectedTy
       ]
 
-    , let
-          -- simpleTables = _
+          -- TODO: extend with Abort, Send, Receive
+    , let env = emptyTypingEnv
+          resolutionState = mempty
       in testGroup "check handle"
-        [ let _tm = forceTm [text|
+        [ let Right tm = resolveTm resolutionState $ forceTm [text|
                 handle abort! : [e , <Abort>]HaskellInt with
                   Abort:
                     | <aborting -> k> -> 1
                   | v -> 2
               |]
-          in testCase "HANDLE (abort)" (pure ())
-             -- checkTest "HANDLE (abort)" emptyTypingEnv env tm' expectedTy
+              expectedTy = unfreeze $ DataTy (mockCid "XXX") []
+          in checkTest "HANDLE (abort)" env tm expectedTy
 
-        , let _tm = forceTm [text|
+        , let Right tm = resolveTm resolutionState $ forceTm [text|
                 handle x : peg with
                   Send X:
-                    -- TODO: Should we switch to the original syntax?
-                    -- <send y -> s>
                     | <send y -> s> -> 1
                   Receive Y:
                     | <receive -> r> -> 2
                   | v -> 3
               |]
-          in testCase "HANDLE (multi)" (pure ())
-             -- checkTest "HANDLE (multi)" simpleTables env tm expectedTy
+              expectedTy = unfreeze $ DataTy (mockCid "XXX") []
+          in checkTest "HANDLE (multi)" env tm expectedTy
+        ]
+
+    , let
+      in testGroup "polyvar instantiation"
+        [
         ]
 
   ]

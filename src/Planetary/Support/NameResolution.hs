@@ -10,8 +10,10 @@
 {-# language TypeSynonymInstances #-}
 {-# language TupleSections #-}
 module Planetary.Support.NameResolution
-  (nameResolution, ResolutionErr(..))
-  where
+  ( resolveDecls
+  , resolveTm
+  , ResolutionErr(..)
+  ) where
 
 import Bound
 import Control.Lens ((&), ix, at, (?~), _2, (^?), (%~), mapMOf)
@@ -60,6 +62,17 @@ newtype ResolutionM a = ResolutionM
            )
 deriving instance MonadState ResolutionState ResolutionM
 
+resolveTm
+  :: ResolutionState
+  -> Tm 'TM Text Text
+  -> Either ResolutionErr (Tm 'TM Cid Int)
+resolveTm state tm =
+  let ResolutionM action = do
+        tm' <- closed tm ?? NotClosed
+        tm'' <- (closed <$> convertTm tm') >>= (?? NotClosed)
+        pure tm''
+  in runGen (evalStateT (runReaderT (runExceptT action) []) state)
+
 -- For each declaration, in order:
 -- * Close the term and type levels (convert Text free vars to Int)
 --   (there should be no free variables!)
@@ -69,11 +82,11 @@ deriving instance MonadState ResolutionState ResolutionM
 --
 -- Term conversions can spawn child type conversions (at the places where terms
 -- hold types).
-nameResolution
+resolveDecls
   :: [DeclS]
   -> ResolutionState
   -> Either ResolutionErr ResolvedDecls
-nameResolution xs initState =
+resolveDecls xs initState =
   let ResolutionM action = nameResolutionM xs
   in runGen (evalStateT (runReaderT (runExceptT action) []) initState)
 

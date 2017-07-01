@@ -29,4 +29,4 @@ predefined = uIdMapFromList
   ]
 
 resolved :: ResolvedDecls
-Right resolved = nameResolution decls predefined
+Right resolved = resolveDecls decls predefined

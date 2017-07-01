@@ -96,7 +96,7 @@ data Tm uid tyvar tmvar tm =
 |]
 
 resolvedDecls :: ResolvedDecls
-Right resolvedDecls = nameResolution decls $ uIdMapFromList
+Right resolvedDecls = resolveDecls decls $ uIdMapFromList
   [ ("vector", vectorId)
   , ("uidMap", uidMapId)
   , ("lfix", lfixId)

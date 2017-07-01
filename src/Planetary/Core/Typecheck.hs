@@ -60,6 +60,7 @@ data TcErr
   | LookupCommands
   | LookupCommandTy
   | LookupVarTy Int
+  | LookupPolyVarTy Int
   | CantInfer TmI
   | NotClosed
   | OccursFailure IntVar (UTerm (Ty Cid) IntVar)
@@ -77,6 +78,7 @@ instance Eq TcErr where
   LookupCommands == LookupCommands = True
   LookupCommandTy == LookupCommandTy = True
   LookupVarTy a == LookupVarTy b = a == b
+  LookupPolyVarTy a == LookupPolyVarTy b = a == b
   NotClosed == NotClosed = True
   CheckFailure a == CheckFailure b = a == b
   CantInfer a == CantInfer b = a == b
@@ -149,9 +151,10 @@ infer = \case
   -- VAR
   Variable v -> lookupVarTy v
   -- POLYVAR
-  InstantiatePolyVar _v _tys -> todo "infer polyvar"
-    -- p <- lookupPolyVarTy v
-    -- pure $ instantiate (polyVarInstantiator tys) p
+  InstantiatePolyVar v tys -> do
+    Polytype binders ty' <- lookupPolyVarTy v
+    boundVars <- replicateM (length binders) freeVar
+    pure (modTm boundVars ty')
   -- COMMAND
   Value (Command uid row) -> do
     CommandDeclaration _name from to <- lookupCommandTy uid row
@@ -371,11 +374,9 @@ withAbility ability = local (& typingAbilities .~ ability)
 getAmbient :: TcM' (UTy IntVar) -- AbilityI
 getAmbient = asks (^?! typingAbilities)
 
--- polyVarInstantiator :: [TyArg a] -> Int -> ValTy IntVar
--- polyVarInstantiator = _
-
--- lookupPolyVarTy :: v -> TcM' (Scope Int ValTy v)
--- lookupPolyVarTy = _
+lookupPolyVarTy :: Int -> TcM' PolytypeI
+lookupPolyVarTy v =
+  asks (^? varTypes . ix v . _Right) >>= (?? LookupPolyVarTy v)
 
 lookupVarTy :: Int -> TcM' (UTy IntVar)
 lookupVarTy v =

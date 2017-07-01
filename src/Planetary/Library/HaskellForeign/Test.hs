@@ -91,7 +91,7 @@ unitTests =
                | <consf a f>
              |]
 
-             Right resolved = nameResolution decls mempty
+             Right resolved = resolveDecls decls mempty
              listFDecl = resolved ^. datatypes
 
              Just (listfId, _) = namedData "ListF" resolved
