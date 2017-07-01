@@ -101,6 +101,7 @@ run env stack = \case
 halt :: EvalM a
 halt = throwError Halt
 
+-- TODO: have a `terminal` judgement
 step :: TmI -> EvalM TmI
 step v@(Value _) = pure v -- ?
 step (Cut cont scrutinee) = stepCut cont scrutinee
@@ -110,7 +111,7 @@ step (Cut cont scrutinee) = stepCut cont scrutinee
   --     modify (cont:)
   --     pure scrutinee
 step Variable{}           = halt
-step InstantiatePolyVar{} = halt
+step InstantiatePolyVar{} = halt -- XXX
 step Annotation{}         = halt
 step Letrec{} = todo "step letrec"
 
