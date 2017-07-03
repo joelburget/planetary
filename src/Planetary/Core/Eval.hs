@@ -28,7 +28,6 @@ import Planetary.Util
 data Err
   = RowBound
   | IndexErr
-  | Halt
   | FailedHandlerLookup
   | FailedIpldConversion
   | FailedForeignFun
@@ -89,30 +88,23 @@ runEvalM env stack action = runStateT
 
 run
   :: EvalEnv -> Stack ContinuationI -> TmI
-  -> IO (Either Err ValueI, EvalState)
-run env stack = \case
-  Value v -> pure (Right v, EvalState stack env)
-  tm -> do
+  -> IO (Either Err TmI, EvalState)
+run env stack tm
+  | isValue tm = pure (Right tm, EvalState stack env)
+  | otherwise = do
     (eitherTm, evst@(EvalState stack' env')) <- runEvalM env stack (step tm)
     case eitherTm of
       Left err -> pure (Left err, evst)
       Right tm' -> run env' stack' tm'
 
-halt :: EvalM a
-halt = throwError Halt
-
--- TODO: have a `terminal` judgement
 step :: TmI -> EvalM TmI
-step v@(Value _) = pure v -- ?
+step x | isValue x = pure x
 step (Cut cont scrutinee) = stepCut cont scrutinee
   -- case scrutinee of
   --   Value v -> stepCut cont v
   --   _other -> do
   --     modify (cont:)
   --     pure scrutinee
-step Variable{}           = halt
-step InstantiatePolyVar{} = halt -- XXX
-step Annotation{}         = halt
 step Letrec{} = todo "step letrec"
 
 stepCut :: ContinuationI -> TmI -> EvalM TmI
