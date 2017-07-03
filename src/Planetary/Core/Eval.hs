@@ -1,3 +1,4 @@
+{-# language DataKinds #-}
 {-# language FlexibleContexts #-}
 {-# language GADTs #-}
 {-# language LambdaCase #-}
@@ -13,7 +14,6 @@ module Planetary.Core.Eval
   , runEvalM
   ) where
 
-import Bound
 import Control.Lens hiding ((??))
 import Control.Monad.Except
 import Control.Monad.State
@@ -63,7 +63,7 @@ type EvalM =
 makeLenses ''EvalEnv
 makeLenses ''EvalState
 
-runHandler :: Cid -> Row -> Spine Cid Int -> EvalM TmI
+runHandler :: Cid -> Row -> Spine Cid -> EvalM TmI
 runHandler cid row spine = do
   cont <- gets (^? evalEnv . currentHandlers . ix cid . ix row)
     >>= (?? FailedHandlerLookup)
@@ -119,6 +119,9 @@ stepCut (Case _uid1 rows) (DataConstructorV _uid2 rowNum args) = do
   (_, row) <- rows ^? ix rowNum ?? IndexErr
   -- TODO: maybe we need to evaluate the args to a value first
   pure (instantiate (args !!) row)
+-- stepCut (Handle _adj _peg handlers _handleValue) (Command uid row) = do
+--   let AdjustmentHandlers uidmap = handlers
+--   handler <- (uidmap ^? ix uid . ix row) >>= (??
 stepCut (Handle _adj _peg _handlers handleValue) v@Value{} =
   pure $ instantiate1 v handleValue
 
@@ -134,17 +137,18 @@ handleCommand
   -> Row
   -> SpineI
   -- -> TmI
-  -> AdjustmentHandlersI
+  -> UIdMap Cid (Vector TmI)
   -> EvalM TmI
-handleCommand uid row spine (AdjustmentHandlers (UIdMap handlers)) = do
+handleCommand uid row spine (UIdMap handlers) = do
   -- look up n_c (handler)
   -- TODO this should actually just fall through not error
   handlers' <- handlers  ^? ix uid ?? IndexErr
   handler   <- handlers' ^? ix row ?? IndexErr
 
-  let instantiator = \case
-        Nothing -> LambdaV (todo "XXX") (todo "command instantiator")
-        Just i -> spine !! i
+  let instantiator = todo "handleCommand instantiator"
+    -- \case
+    --     Nothing -> LambdaV (todo "XXX") (todo "command instantiator")
+    --     Just i -> spine !! i
   -- \case
   --       -- XXX really not sure this is right
   --       Nothing -> Value (Lambda (abstract Just val))

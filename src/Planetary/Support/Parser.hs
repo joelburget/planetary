@@ -255,7 +255,7 @@ parsePolyty = do
   result <- parseValTy
   pure (Polytype args result)
 
-parseLet :: MonadicParsing m => m Construction
+parseLet :: MonadicParsing m => m Tm'
 parseLet =
   let parser = do
         reserved "let"
@@ -396,7 +396,7 @@ parseCommandOrIdent = do
 
   -- TODO: named commands
   pure $ case dotRow of
-    Nothing -> Variable name
+    Nothing -> FV name
     -- TODO application of terms
     Just row -> Cut (Application []) (Command name (fromIntegral row))
 

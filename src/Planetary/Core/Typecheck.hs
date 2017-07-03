@@ -25,7 +25,6 @@ module Planetary.Core.Typecheck
   , typingInterfaces
   ) where
 
-import Bound
 import Control.Lens hiding ((??), from, to)
 import Control.Monad (forM_)
 import Control.Monad.Except
@@ -54,7 +53,7 @@ data TcErr
   | ApplicationSpineMismatch [TmI] [UTy IntVar]
   | DataSaturationMismatch [UTy IntVar] [UTy IntVar]
   | ConstructorArgMismatch [TmI] [UTy IntVar]
-  | CaseMismatch [Vector (UTy IntVar)] [(Vector Text, Scope Int (Tm 'TM Cid) Int)]
+  | CaseMismatch [Vector (UTy IntVar)] [(Vector Text, Tm Cid)]
   | FailedDataTypeLookup
   | FailedConstructorLookup Cid Row
   | LookupCommands
@@ -151,9 +150,10 @@ lfixId = mkCid "lfix"
 infer :: TmI -> TcM' (UTy IntVar)
 infer = \case
   -- VAR
-  Variable v -> lookupVarTy v
+  BoundVariable v -> lookupVarTy v
+  FreeVariable v -> todo "lookup free var ty" -- lookupVarTy v
   -- POLYVAR
-  InstantiatePolyVar v tys -> do
+  InstantiatePolyVar (BoundVariable v) tys -> do
     Polytype binders ty' <- lookupPolyVarTy v
     boundVars <- replicateM (length binders) freeVar
     pure (modTm boundVars ty')
@@ -238,7 +238,7 @@ check (Cut (Case uid1 rows) m) ty = do
   forM_ zipped $ \(dataConTys, (_, rhs)) ->
     withValTypes' dataConTys rhs (`check` ty)
 -- HANDLE
-check (Cut (Handle adj peg (AdjustmentHandlers handlers) fallthrough) val) ty = do
+check (Cut (Handle adj peg handlers fallthrough) val) ty = do
   ambient <- getAmbient
   let adj' = unfreeze <$$> unAdjustment adj
   Just adjustedAmbient <- pure $ extendAbility' ambient adj'
@@ -266,6 +266,9 @@ check m b = do
   _ <- unify' a b
   pure ()
 
+succOpen :: Tm Cid -> Tm Cid
+succOpen = todo "succOpen"
+
 extendAbility'
   :: UTy IntVar -> UIdMap Cid (Vector (UTy IntVar)) -> Maybe (UTy IntVar)
 extendAbility' ab adj = do
@@ -279,11 +282,6 @@ dataInterface
 dataInterface (DataTypeInterface _ ctors) =
   let f (ConstructorDecl _name args resultArgs) = (args, resultArgs)
   in f <$> ctors
-
--- TODO: convert to `fromScope`?
--- TODO: is the succ necessary?
-succOpen :: Scope () (Tm 'TM Cid) Int -> TmI
-succOpen = (succ <$>) . instantiate1 (V 0)
 
 instantiateAbility :: UTy IntVar -> TcM' (UIdMap Cid [CommandDeclarationI])
 instantiateAbility (AbilityU _ uidmap) =
@@ -307,15 +305,15 @@ withValTypes tys = local (& varTypes %~ (<> (Left <$> tys)))
 
 withValTypes'
   :: [UTy IntVar]
-  -> Scope Int (Tm 'TM Cid) Int
+  -> Tm Cid
   -> (TmI -> TcM' a)
   -> TcM' a
 withValTypes' tys scope cb =
-  let body = instantiate V scope
+  let body = instantiate BV scope
   in withValTypes tys (cb body)
 
 openAdjustmentHandler
-  :: Scope (Maybe Int) (Tm 'TM Cid) Int
+  :: Tm Cid
   -> [UTy IntVar]
   -> UTy IntVar
   -> (TmI -> TcM' a)
@@ -324,8 +322,9 @@ openAdjustmentHandler handler argTys handlerTy cb = do
   TypingEnv _ _ _ envTys <- ask
   let envTys' = (Left <$> argTys) <> ((Left $ SuspendedTyU handlerTy):envTys)
 
-      instantiator Nothing  = V 0
-      instantiator (Just i) = V (length argTys + 1)
+      instantiator = todo "openAdjustmentHandler instantiator"
+      -- instantiator Nothing  = BV 0
+      -- instantiator (Just i) = BV (length argTys + 1)
 
   local (& varTypes .~ envTys') (cb (instantiate instantiator handler))
   -- withState' envAdj (cb (instantiate instantiator handler))

@@ -9,7 +9,6 @@ module Planetary.Core.Typecheck.Test
   , emptyTypingEnv
   ) where
 
-import Bound (closed, substitute)
 import Control.Lens
 import Control.Unification (freeze, unfreeze)
 import Control.Unification.IntVar
@@ -61,8 +60,8 @@ unitTests = testGroup "typechecking"
   [ testGroup "infer variable"
     [ let ty = FreeVariableTyU "hippo"
           env = emptyTypingEnv & varTypes .~ [Left ty]
-      in inferTest "VAR 1" env (V 0) (Right ty)
-    , inferTest "VAR 2" emptyTypingEnv (V 0) (Left (LookupVarTy 0))
+      in inferTest "VAR 1" env (BV 0) (Right ty)
+    , inferTest "VAR 2" emptyTypingEnv (BV 0) (Left (LookupVarTy 0))
     ]
 
   , testGroup "TODO: infer polyvar"
@@ -110,8 +109,7 @@ unitTests = testGroup "typechecking"
         constr2 = ConstructorDecl "constr2" []
 
         app = Application [tm1, tm2]
-        Just f = closed $ Lam ["x", "y"] $
-          DataTm dataUid 0 [V"x", V"y"]
+        f = Lam ["x", "y"] $ DataTm dataUid 0 [FV"x", FV"y"]
         resultTy = DataTy dataUid ty1ty2vals
 
         goodAnnF = Annotation f $ SuspendedTy $
@@ -167,7 +165,7 @@ unitTests = testGroup "typechecking"
                   | <_ x y z> -> x
                   | <_ y z> -> z
             |]
-            tm' = substitute 0 val tm
+            tm' = substitute "val" val tm
             -- decls = forceDeclarations [text|
             --     data abcd =
             --       | <abcd>
@@ -189,7 +187,7 @@ unitTests = testGroup "typechecking"
       ]
 
     , testGroup "check switch"
-      [ let tm = V 0
+      [ let tm = BV 0
             dataUid = mockCid "dataUid"
             dataTy = unfreeze $ DataTy dataUid []
             expectedTy = dataTy

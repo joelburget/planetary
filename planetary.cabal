@@ -40,7 +40,6 @@ library
 
   other-modules:
     Planetary.Core.Eval
-    Planetary.Core.Orphans
     Planetary.Core.Syntax
     Planetary.Core.Syntax.Patterns
     Planetary.Core.Typecheck
@@ -59,7 +58,6 @@ library
     parsers == 0.12.*,
     trifecta == 1.6.*,
     indentation-trifecta,
-    bound == 2,
     byteable >= 0.1 && < 1.0,
     cryptohash == 0.11.*,
     bytestring == 0.10.*,

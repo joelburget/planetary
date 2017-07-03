@@ -23,10 +23,8 @@
 {-# options_ghc -fno-warn-missing-pattern-synonym-signatures #-}
 module Planetary.Core.Syntax (module Planetary.Core.Syntax) where
 
-import Bound
 import Control.Lens
 import Control.Lens.TH (makeLenses)
-import Control.Monad (ap)
 import Control.Unification
 import Data.Data
 import Data.Foldable (toList)
@@ -42,13 +40,10 @@ import GHC.Generics
 import Network.IPLD hiding (Value, Row)
 import qualified Network.IPLD as IPLD
 
-import Planetary.Core.Orphans ()
 import Planetary.Core.UIdMap
 import Planetary.Util
 
 -- TODO:
--- * Right now we use an extremely simple form of unification -- switch to
---   logict or something
 -- * Be more granular about the capabilities each function needs instead of
 --   hardcoding its monad.
 -- * Error messaging is pitiful
@@ -242,72 +237,46 @@ newtype Adjustment uid = Adjustment
 
 -- Terms
 
-data TmTag
-  = VALUE
-  | CONTINUATION
-  | TM
-  | ADJUSTMENT_HANDLERS
-
-data Tm (tag :: TmTag) uid b where
-  -- Value:
-  DataConstructor
-    :: !uid
-    -> !Row
-    -> !(Vector (Tm 'TM uid b)) -> Tm 'VALUE uid b
-  ForeignValue :: !uid -> !(Vector (ValTy uid)) -> !uid -> Tm 'VALUE uid b
-  Lambda :: !(Vector Text) -> !(Scope Int (Tm 'TM uid ) b) -> Tm 'VALUE uid b
+data Tm uid
+  = DataConstructor !uid !Row !(Vector (Tm uid))
+  | ForeignValue !uid !(Vector (ValTy uid)) !uid
+  | Lambda !(Vector Text) !(Tm uid)
 
   -- Continuation:
   --
   -- We pair each of these with 'Cut' to produce a computation. We also push
   -- these on a stack for a (call-by-push-value-esque) evaluation.
-  Application :: !(Spine uid b) -> Tm 'CONTINUATION uid b
-  Case
-    :: !uid
-    -> !(Vector (Vector Text, Scope Int (Tm 'TM uid) b))
-    -> Tm 'CONTINUATION uid b
-  Handle
-    :: !(Adjustment uid)
-    -> !(Peg uid)
-    -> !(Tm 'ADJUSTMENT_HANDLERS uid b)
-    -> !(Scope () (Tm 'TM uid) b)
-    -> Tm 'CONTINUATION uid b
-  Let
-    :: !(Polytype uid)
-    -> !Text
-    -> !(Scope () (Tm 'TM uid) b)
-    -> Tm 'CONTINUATION uid b
+  | Application !(Spine uid)
+  | Case !uid !(Vector (Vector Text, Tm uid))
+  | Handle
+    !(Adjustment uid)
+    !(Peg uid)
+    !(UIdMap uid (Vector (Tm uid)))
+    !(Tm uid)
+  | Let !(Polytype uid) !Text !(Tm uid)
 
   -- Term
-  Variable :: !b -> Tm 'TM uid b
-  InstantiatePolyVar :: !b -> !(Vector (TyArg uid)) -> Tm 'TM uid b
-  Command :: !uid -> !Row -> Tm 'TM uid b
-  Annotation :: !(Tm 'VALUE uid b) -> !(ValTy uid) -> Tm 'TM uid b
-  Value :: !(Tm 'VALUE uid b) -> Tm 'TM uid b
-  Cut :: !(Tm 'CONTINUATION uid b) -> !(Tm 'TM uid b) -> Tm 'TM uid b
-  Letrec
-    -- invariant: each value is a lambda
-    :: !(Vector (Polytype uid, Tm 'VALUE uid b))
-    -> !(Scope Int (Tm 'TM uid) b)
-    -> Tm 'TM uid b
+  | FreeVariable !Text
+  | BoundVariable !Int
 
-  -- Other
-  -- Adjustment handlers are a mapping from effect interface id to the handlers
-  -- for each of that interface's constructors.
-  --
-  -- Encode each constructor argument (x_c) as a `Just Int` and the
-  -- continuation (z_c) as `Nothing`.
-  AdjustmentHandlers
-    :: !(UIdMap uid (Vector (Scope (Maybe Int) (Tm 'TM uid) b)))
-    -> Tm 'ADJUSTMENT_HANDLERS uid b
+  -- Either free or bound variable
+  | InstantiatePolyVar !(Tm uid) !(Vector (TyArg uid))
+  | Command !uid !Row
+  | Annotation !(Tm uid) !(ValTy uid)
+  -- TODO: remove this
+  | Value !(Tm uid)
+  | Cut !(Tm uid) !(Tm uid)
+    -- invariant: each value is a lambda
+  | Letrec !(Vector (Polytype uid, Tm uid)) !(Tm uid)
+  deriving (Eq, Ord, Show, Typeable, Generic)
 
 -- type? newtype?
-type Spine uid b = Vector (Tm 'TM uid b)
+type Spine uid = Vector (Tm uid)
 
-data Decl uid b
+data Decl uid
   = DataDecl_      !(DataDecl uid)
   | InterfaceDecl_ !(InterfaceDecl uid)
-  | TermDecl_      !(TermDecl uid b)
+  | TermDecl_      !(TermDecl uid)
   deriving (Eq, Ord, Show, Typeable, Generic)
 
 data DataDecl uid = DataDecl !Text !(DataTypeInterface uid)
@@ -316,25 +285,21 @@ data DataDecl uid = DataDecl !Text !(DataTypeInterface uid)
 data InterfaceDecl uid = InterfaceDecl !Text !(EffectInterface uid)
   deriving (Eq, Ord, Show, Typeable, Generic)
 
-data TermDecl uid b = TermDecl
-  !Text           -- ^ the term's name
-  !(Tm 'TM uid b) -- ^ body
-  deriving (Typeable, Generic)
+data TermDecl uid = TermDecl
+  !Text     -- ^ the term's name
+  !(Tm uid) -- ^ body
+  deriving (Eq, Ord, Show, Typeable, Generic)
 
-deriving instance (IsUid uid, Eq b) => Eq (TermDecl uid b)
-deriving instance (IsUid uid, Ord b) => Ord (TermDecl uid b)
-deriving instance (Show uid, Show b) => Show (TermDecl uid b)
-
-type DeclS          = Decl          Text Text
+type DeclS          = Decl          Text
 type DataDeclS      = DataDecl      Text
 type InterfaceDeclS = InterfaceDecl Text
-type TermDeclS      = TermDecl      Text Text
+type TermDeclS      = TermDecl      Text
 
 data ResolvedDecls = ResolvedDecls
   { _datatypes  :: !(UIdMap Cid DataTypeInterfaceI)
   , _interfaces :: !(UIdMap Cid EffectInterfaceI)
   , _globalCids :: ![(Text, Cid)]
-  , _terms      :: ![Executable2 TermDecl]
+  , _terms      :: ![Resolved TermDecl]
   } deriving Show
 
 -- TODO: make traversals
@@ -369,79 +334,64 @@ extendAbility _ _ = error "extendAbility called with non-ability"
 
 -- executable
 
-type Executable1 f = f Cid
-type Executable2 f = f Cid Int
+type Resolved f = f Cid
 
-type AbilityI            = Ability Cid
-type AdjustmentI         = Adjustment Cid
-type CommandDeclarationI = Executable1 CommandDeclaration
-type CompTyI             = CompTy Cid
+type CommandDeclarationI = Resolved CommandDeclaration
 type PolytypeI           = Polytype Cid
 type ValTyI              = ValTy Cid
 type TyArgI              = TyArg Cid
-type DataTypeInterfaceI  = Executable1 DataTypeInterface
-type EffectInterfaceI    = Executable1 EffectInterface
-type ConstructorDeclI    = Executable1 ConstructorDecl
-type PegI                = Peg Cid
+type DataTypeInterfaceI  = Resolved DataTypeInterface
+type EffectInterfaceI    = Resolved EffectInterface
+type ConstructorDeclI    = Resolved ConstructorDecl
 
-type TmI                 = Executable2 (Tm 'TM)
-type ValueI              = Executable2 (Tm 'VALUE)
-type ContinuationI       = Executable2 (Tm 'CONTINUATION)
-type AdjustmentHandlersI = Executable2 (Tm 'ADJUSTMENT_HANDLERS)
-type SpineI              = Spine Cid Int
-type UseI                = TmI
-type ConstructionI       = TmI
+type TmI                 = Resolved Tm
+type ContinuationI       = Resolved Tm
+type SpineI              = Spine Cid
 
 -- raw
 
-type Raw1 f = f Text
-type Raw2 f = f Text Text
+type Unresolved f = f Text
 
 type Ability'            = Ability Text
-type Adjustment'         = Adjustment Text
-type CommandDeclaration' = Raw1 CommandDeclaration
+type CommandDeclaration' = Unresolved CommandDeclaration
 type CompTy'             = CompTy Text
-type ConstructorDecl'    = Raw1 ConstructorDecl
+type ConstructorDecl'    = Unresolved ConstructorDecl
 type Peg'                = Peg Text
 type Polytype'           = Polytype Text
 type TyArg'              = TyArg Text
 type ValTy'              = ValTy Text
 
-type Tm'                 = Raw2 (Tm 'TM)
-type Value'              = Raw2 (Tm 'VALUE)
-type Continuation'       = Raw2 (Tm 'CONTINUATION)
-type AdjustmentHandlers' = Raw2 (Tm 'ADJUSTMENT_HANDLERS)
-type Spine'              = Spine Text Text
-type Construction        = Tm'
-type Use                 = Tm'
-type Cont'               = Continuation'
+type Tm'                 = Unresolved Tm
+type Value'              = Unresolved Tm
 
 -- $ Judgements
 
 -- TODO: this is odd -- why are the first four not value constructors?
-isValue :: Tm 'TM b c -> Bool
-isValue Variable{}           = True
+isValue :: Tm a -> Bool
+isValue BoundVariable{}      = True
+isValue FreeVariable{}       = True
 isValue InstantiatePolyVar{} = True
 isValue Command{}            = True
 isValue Annotation{}         = True
 isValue Value{}              = True
 isValue _                    = False
 
-isComputation :: Tm a b c -> Bool
+isComputation :: Tm a -> Bool
 isComputation Command{}            = True
 isComputation Cut{}                = True
 isComputation Letrec{}             = True
 isComputation _                    = False
 
-isUse :: Tm a b c -> Bool
-isUse Variable{}              = True
+isUse :: Tm a -> Bool
+isUse BoundVariable{}         = True
+isUse FreeVariable{}          = True
 isUse InstantiatePolyVar{}    = True
 isUse Command{}               = True
 isUse (Cut (Application{}) _) = True
 isUse Annotation{}            = True
 isUse _                       = False
 
-isConstruction :: Tm a b c -> Bool
+isConstruction :: Tm a -> Bool
 isConstruction Value{}           = True
 isConstruction DataConstructor{} = True
 isConstruction ForeignValue{}    = True
@@ -452,20 +402,23 @@ isConstruction _                 = False
 
 -- utils:
 
--- | abstract 0 variables
-abstract0 :: Monad f => f a -> Scope b f a
-abstract0 = abstract
-  (error "abstract0 being used to instantiate > 0 variables")
+closeVar :: (Text, Int) -> Tm uid -> Maybe (Tm uid)
+closeVar (a, b) = todo "closeVar" -- instantiate1 (Variable b) <$$> closed . abstract1 a
 
-closeVar :: Eq a => (a, b) -> Tm 'TM uid a -> Maybe (Tm 'TM uid b)
-closeVar (a, b) = instantiate1 (Variable b) <$$> closed . abstract1 a
+abstract :: (Text -> Maybe Int) -> Tm uid -> Tm uid
+abstract = todo "abstract"
 
--- closeVars :: (Eq a, Hashable a) => [(a, b)] -> Tm uid c a -> Maybe (Tm uid c b)
--- closeVars vars =
---   let mapping = HashMap.fromList vars
---       abstractor k = HashMap.lookup k mapping
---   in instantiate Variable <$$> closed . abstract abstractor
+abstract1 :: Text -> Tm uid -> Tm uid
+abstract1 = todo "abstract1"
 
+instantiate :: (Int -> Tm uid) -> Tm uid -> Tm uid
+instantiate = todo "instantiate"
+
+instantiate1 :: Tm uid -> Tm uid -> Tm uid
+instantiate1 = todo "instantiate1"
+
+substitute :: Text -> Tm uid -> Tm uid -> Tm uid
+substitute = todo "substitute"
 
 -- Instance Hell:
 
@@ -544,35 +497,18 @@ pattern CutIpld cont scrutinee          = T2 "Cut" cont scrutinee
 pattern LetrecIpld defns body           = T2 "Letrec" defns body
 pattern AdjustmentHandlersIpld uidmap   = T1 "AdjustmentHandlers" uidmap
 
-instance (IsUid uid, IsIpld b) => IsIpld (Tm 'VALUE uid b) where
+instance IsUid uid => IsIpld (Tm uid) where
   toIpld = \case
     DataConstructor uid row tms -> DataConstructorIpld uid row tms
     ForeignValue uid1 tys uid2  -> ForeignValueIpld uid1 tys uid2
     Lambda _names body          -> LambdaIpld body
-
-  fromIpld = \case
-    DataConstructorIpld uid row tms -> Just $ DataConstructor uid row tms
-    ForeignValueIpld uid1 tys uid2  -> Just $ ForeignValue uid1 tys uid2
-    LambdaIpld body                 -> Just $ Lambda [] body
-    _                               -> Nothing
-
-instance (IsUid uid, IsIpld b) => IsIpld (Tm 'CONTINUATION uid b) where
-  toIpld = \case
     Application spine -> ApplicationIpld spine
     Case uid branches -> CaseIpld uid branches
     Handle adj peg handlers valHandler -> HandleIpld adj peg handlers valHandler
     Let pty _name scope -> LetIpld pty scope
-  fromIpld = \case
-    ApplicationIpld spine                  -> Just $ Application spine
-    CaseIpld uid branches                  -> Just $ Case uid branches
-    HandleIpld adj peg handlers valHandler -> Just $
-      Handle adj peg handlers valHandler
-    LetIpld pty scope                      -> Just $ Let pty "" scope
-    _                                      -> Nothing
-
-instance (IsUid uid, IsIpld b) => IsIpld (Tm 'TM uid b) where
-  toIpld = \case
-    Variable b                -> VariableIpld b
+    -- XXX
+    -- BoundVariable v           -> VariableIpld (DagNumber (fromIntegral v))
+    -- FreeVariable v            -> VariableIpld (TextValue v)
     InstantiatePolyVar b args -> InstantiatePolyVarIpld b args
     Command uid row           -> CommandIpld uid row
     Annotation tm ty          -> AnnotationIpld tm ty
@@ -581,20 +517,24 @@ instance (IsUid uid, IsIpld b) => IsIpld (Tm 'TM uid b) where
     Letrec defns body         -> LetrecIpld defns body
 
   fromIpld = \case
-    VariableIpld b                -> Just $ Variable b
+    DataConstructorIpld uid row tms -> Just $ DataConstructor uid row tms
+    ForeignValueIpld uid1 tys uid2  -> Just $ ForeignValue uid1 tys uid2
+    LambdaIpld body                 -> Just $ Lambda [] body
+    ApplicationIpld spine                  -> Just $ Application spine
+    CaseIpld uid branches                  -> Just $ Case uid branches
+    HandleIpld adj peg handlers valHandler -> Just $
+      Handle adj peg handlers valHandler
+    LetIpld pty scope                      -> Just $ Let pty "" scope
+    -- XXX
+    -- VariableIpld (TextValue b                -> Just $ Variable b
+    -- VariableIpld (TextValue b                -> Just $ Variable b
     InstantiatePolyVarIpld b args -> Just $ InstantiatePolyVar b args
     CommandIpld uid row           -> Just $ Command uid row
     AnnotationIpld tm ty          -> Just $ Annotation tm ty
     ValueIpld tm                  -> Just $ Value tm
     CutIpld cont scrutinee        -> Just $ Cut cont scrutinee
     LetrecIpld defns body         -> Just $ Letrec defns body
-    _                             -> Nothing
-
-instance (IsUid uid, IsIpld b) => IsIpld (Tm 'ADJUSTMENT_HANDLERS uid b) where
-  toIpld (AdjustmentHandlers uidmap) = AdjustmentHandlersIpld uidmap
-  fromIpld = \case
-    AdjustmentHandlersIpld uidmap -> Just $ AdjustmentHandlers uidmap
-    _                             -> Nothing
+    _                               -> Nothing
 
 instance IsUid uid => IsIpld (Polytype uid)
 instance (IsUid uid, IsIpld uid) => IsIpld (Adjustment uid)
@@ -604,288 +544,6 @@ instance IsIpld InitiateAbility
 instance IsIpld Kind
 instance IsIpld (DataTypeInterface Cid)
 instance IsIpld (EffectInterface Cid)
-
--- Applicative / Monad
-
--- -- This has a more general type than bind (`Tm 'TM uid a`)
-bindTm :: (a -> Tm 'TM uid b) -> Tm tag uid a -> Tm tag uid b
-bindTm f = \case
-  Command uid row -> Command uid row
-  DataConstructor uid row tms ->
-    DataConstructor uid row ((>>= f) <$> tms)
-  ForeignValue tyuid tysat valuid -> ForeignValue tyuid tysat valuid
-  Lambda binderNames body -> Lambda binderNames (body >>>= f)
-
-  Application spine -> Application ((>>= f) <$> spine)
-  Case uid branches ->
-    let bindBranch (binders, body) = (binders, body >>>= f)
-    in Case uid (bindBranch <$> branches)
-  Handle adj peg handlers rhs -> Handle
-    adj
-    peg
-    (bindTm f handlers)
-    (rhs >>>= f)
-  Let poly name rhs -> Let poly name (rhs >>>= f)
-
-  Variable a -> f a
-  InstantiatePolyVar a _ -> f a
-  Annotation val ty -> Annotation (bindTm f val) ty
-  Value v -> Value (bindTm f v)
-  Cut neg pos -> Cut (bindTm f neg) (pos >>= f)
-  Letrec defns body -> Letrec
-    (defns & traverse._2 %~ bindTm f)
-    (body >>>= f)
-  AdjustmentHandlers handlers -> AdjustmentHandlers ((>>>= f) <$$> handlers)
-
-instance Functor (Tm tag uid) where fmap = fmapDefault
-instance Foldable (Tm tag uid) where foldMap = foldMapDefault
-
-instance Traversable (Tm tag uid) where
-  traverse f = \case
-    Command uid row -> pure (Command uid row)
-    DataConstructor uid row tms -> DataConstructor uid row <$> (traverse . traverse) f tms
-    ForeignValue uid1 tys uid2 -> pure (ForeignValue uid1 tys uid2)
-    Lambda names body -> Lambda names <$> traverse f body
-
-    Application spine -> Application <$> (traverse . traverse) f spine
-    Case uid branches ->
-      let f' (names, scope) = (names,) <$> traverse f scope
-      in Case uid <$> traverse f' branches
-    Handle adj peg handlers valHandler -> Handle adj peg
-      <$> traverse f handlers <*> traverse f valHandler
-    Let pty name body -> Let pty name <$> traverse f body
-
-    Variable var -> Variable <$> f var
-    InstantiatePolyVar var tys -> InstantiatePolyVar <$> f var <*> pure tys
-    Annotation tm ty -> Annotation <$> traverse f tm <*> pure ty
-    Value val -> Value <$> traverse f val
-    Cut cont scrutinee -> Cut <$> traverse f cont <*> traverse f scrutinee
-    Letrec defns body ->
-      let f' (pty, defn) = (pty,) <$> traverse f defn
-      in Letrec <$> traverse f' defns <*> traverse f body
-
-    AdjustmentHandlers uidmap ->
-      AdjustmentHandlers <$> (traverse . traverse . traverse) f uidmap
-
-instance (IsUid uid, Eq b) => Eq (Tm tag uid b) where
-  (==) = liftEq (==)
-instance (IsUid uid, Ord b) => Ord (Tm tag uid b) where
-  compare = liftCompare compare
-instance (Show uid, Show b) => Show (Tm tag uid b) where
-  showsPrec = liftShowsPrec showsPrec showList
-instance Applicative (Tm 'TM uid) where pure = Variable; (<*>) = ap
-instance Monad (Tm 'TM uid) where
-  return = Variable
-
-  (>>=) = flip bindTm
-
--- Eq1
-
-instance (IsUid uid) => Eq1 (Tm tag uid) where
-  liftEq _ (Command uid1 row1) (Command uid2 row2) =
-    uid1 == uid2 && row1 == row2
-  liftEq eq (DataConstructor uid1 row1 app1) (DataConstructor uid2 row2 app2) =
-    uid1 == uid2 && row1 == row2 && liftEq (liftEq eq) app1 app2
-  liftEq _
-    (ForeignValue tyuid1 sat1 valuid1)
-    (ForeignValue tyuid2 sat2 valuid2) =
-    tyuid1 == tyuid2 &&
-    sat1 == sat2 &&
-    valuid1 == valuid2
-  liftEq eq (Lambda binderNames1 body1) (Lambda binderNames2 body2) =
-    binderNames1 == binderNames2 &&
-    liftEq eq body1 body2
-
-  liftEq eq (Application spine1) (Application spine2) =
-     liftEq (liftEq eq) spine1 spine2
-  liftEq eq (Case uid1 rows1) (Case uid2 rows2) =
-     let f (binders1, body1) (binders2, body2) =
-           binders1 == binders2 &&
-           liftEq eq body1 body2
-     in uid1 == uid2 &&
-        liftEq f (toList rows1) (toList rows2)
-  liftEq eq (Handle adj1 peg1 handlers1 body1) (Handle adj2 peg2 handlers2 body2) =
-     adj1 == adj2 &&
-     peg1 == peg2 &&
-     liftEq eq handlers1 handlers2 &&
-     liftEq eq body1 body2
-  liftEq eq (Let pty1 name1 body1) (Let pty2 name2 body2) =
-     pty1 == pty2 && name1 == name2 && liftEq eq body1 body2
-
-  liftEq eq (Variable a) (Variable b) = eq a b
-  liftEq eq (InstantiatePolyVar var1 args1) (InstantiatePolyVar var2 args2)
-    = eq var1 var2 && liftEq (==) args1 args2
-  liftEq eq (Annotation tm1 ty1) (Annotation tm2 ty2)
-    = liftEq eq tm1 tm2 && ty1 == ty2
-  liftEq eq (Value v1) (Value v2)
-    = liftEq eq v1 v2
-  liftEq eq (Cut cont1 val1) (Cut cont2 val2)
-    = liftEq eq cont1 cont2 && liftEq eq val1 val2
-  liftEq eq (Letrec binders1 body1) (Letrec binders2 body2) =
-    liftEq (liftEq (liftEq eq)) binders1 binders2 &&
-    liftEq eq body1 body2
-
-  liftEq eq (AdjustmentHandlers handlers1) (AdjustmentHandlers handlers2) =
-    liftEq (liftEq (liftEq eq)) (toList handlers1) (toList handlers2)
-
-  liftEq _ _ _ = False
-
--- Ord1
-
-instance (IsUid uid) => Ord1 (Tm tag uid) where
-  liftCompare _cmp (Command uid1 row1) (Command uid2 row2) =
-    compare uid1 uid2 <>
-    compare row1 row2
-  liftCompare cmp (DataConstructor uid1 row1 app1) (DataConstructor uid2 row2 app2) =
-    compare uid1 uid2 <>
-    compare row1 row2 <>
-    liftCompare (liftCompare cmp) app1 app2
-  liftCompare _cmp (ForeignValue tyuid1 sat1 valuid1) (ForeignValue tyuid2 sat2 valuid2) =
-    compare tyuid1 tyuid2 <>
-    compare sat1 sat2 <>
-    compare valuid1 valuid2
-  liftCompare cmp (Lambda binderNames1 body1) (Lambda binderNames2 body2) =
-    compare binderNames1 binderNames2 <>
-    liftCompare cmp body1 body2
-
-  liftCompare cmp (Application spine1) (Application spine2) =
-    liftCompare (liftCompare cmp) spine1 spine2
-  liftCompare cmp (Case uid1 rows1) (Case uid2 rows2) =
-    let f (binders1, body1) (binders2, body2) =
-          compare binders1 binders2 <> liftCompare cmp body1 body2
-    in compare uid1 uid2 <>
-       liftCompare f (toList rows1) (toList rows2)
-  liftCompare cmp (Handle adj1 peg1 handlers1 body1) (Handle adj2 peg2 handlers2 body2) =
-    compare adj1 adj2 <>
-    compare peg1 peg2 <>
-    liftCompare cmp handlers1 handlers2 <>
-    liftCompare cmp body1 body2
-  liftCompare cmp (Let pty1 name1 body1) (Let pty2 name2 body2) =
-    compare pty1 pty2 <> compare name1 name2 <> liftCompare cmp body1 body2
-
-  liftCompare cmp (Variable a) (Variable b) = cmp a b
-  liftCompare cmp (InstantiatePolyVar var1 args1) (InstantiatePolyVar var2 args2)
-    = cmp var1 var2 <> liftCompare compare args1 args2
-  liftCompare cmp (Annotation tm1 ty1) (Annotation tm2 ty2)
-    = liftCompare cmp tm1 tm2 <> compare ty1 ty2
-  liftCompare cmp (Value v1) (Value v2)
-    = liftCompare cmp v1 v2
-  liftCompare cmp (Cut cont1 val1) (Cut cont2 val2)
-    = liftCompare cmp cont1 cont2 <> liftCompare cmp val1 val2
-  liftCompare cmp (Letrec binders1 body1) (Letrec binders2 body2)
-    = liftCompare (liftCompare (liftCompare cmp)) binders1 binders2 <>
-      liftCompare cmp body1 body2
-
-  liftCompare cmp (AdjustmentHandlers handlers1) (AdjustmentHandlers handlers2)
-    = liftCompare (liftCompare (liftCompare cmp))
-        (toList handlers1)
-        (toList handlers2)
-
-  liftCompare _ x y = compare (ordering x) (ordering y) where
-    ordering :: Tm tag uid b -> Int
-    ordering = \case
-      Command{}            -> 0
-      DataConstructor{}    -> 1
-      ForeignValue{}       -> 2
-      Lambda{}             -> 3
-      Application{}        -> 4
-      Case{}               -> 5
-      Handle{}             -> 6
-      Let{}                -> 7
-      Variable{}           -> 8
-      InstantiatePolyVar{} -> 9
-      Annotation{}         -> 10
-      Value{}              -> 11
-      Cut{}                -> 12
-      Letrec{}             -> 13
-      AdjustmentHandlers{} -> 14
-
--- Show1
-
-showSpace :: ShowS
-showSpace = showString " "
-
-instance (Show uid) => Show1 (Tm tag uid) where
-  liftShowsPrec s sl d val = showParen (d > 10) $ case val of
-    Command uid row ->
-        showString "Command "
-      . shows uid
-      . showSpace
-      . shows row
-    DataConstructor uid row tms ->
-        showString "DataConstructor "
-      . shows uid
-      . showSpace
-      . shows row
-      . showSpace
-      . liftShowList s sl tms
-    ForeignValue tyuid sat valuid ->
-        showString "ForeignValue "
-      . shows tyuid
-      . showSpace
-      . showList sat
-      . showSpace
-      . shows valuid
-    Lambda binderNames scope ->
-        showString "Lambda "
-      . showList binderNames
-      . liftShowsPrec s sl 11 scope
-    Application spine ->
-        showString "Application "
-      . liftShowList s sl spine
-    Case uid branches ->
-        showString "Case "
-      . shows uid
-      . showSpace
-      . liftShowList s sl (snd <$> branches)
-    Handle adj peg handlers body ->
-        showString "Handle "
-      . showsPrec 11 adj
-      . showSpace
-      . showsPrec 11 peg
-      . showSpace
-      . liftShowsPrec s sl 11 handlers
-      . showSpace
-      . liftShowsPrec s sl 11 body
-    Let pty name body ->
-        showString "Let"
-      . showsPrec 11 pty
-      . showSpace
-      . shows name
-      . showSpace
-      . liftShowsPrec s sl 11 body
-    Variable b ->
-        showString "Variable "
-      . s 11 b
-    InstantiatePolyVar b tys ->
-        showString "InstantiatePolyVar "
-      . s 11 b
-      . showSpace
-      . shows tys
-    Annotation tm valTy ->
-        showString "Annotation "
-      . liftShowsPrec s sl 11 tm
-      . showSpace
-      . showsPrec 11 valTy
-    Value val' ->
-        showString "Value "
-      . liftShowsPrec s sl 11 val'
-    Cut cont scrutinee ->
-        showString "Cut "
-      . liftShowsPrec s sl 11 cont
-      . showSpace
-      . liftShowsPrec s sl 11 scrutinee
-    Letrec defns body ->
-        showString "Letrec "
-      . liftShowList (liftShowsPrec s sl) (liftShowList s sl) defns
-      . showSpace
-      . liftShowsPrec s sl 11 body
-
-    AdjustmentHandlers uidMap ->
-        showString "AdjustmentHandlers "
-      . liftShowList (liftShowsPrec s sl) (liftShowList s sl) (toList uidMap)
-
--- Lens Hell:
 
 makeLenses ''EffectInterface
 makeLenses ''ResolvedDecls
