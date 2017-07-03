@@ -184,6 +184,9 @@ convertTm = \case
   Variable v -> pure (Variable v)
   InstantiatePolyVar tyVar tyArgs -> InstantiatePolyVar tyVar
     <$> mapM convertTy tyArgs
+  Command cid row -> Command
+    <$> lookupUid cid
+    <*> pure row
   Annotation val valTy -> Annotation
     <$> convertValue val
     <*> convertTy valTy
@@ -203,9 +206,6 @@ convertTm = \case
 convertValue
   :: PartiallyConverted (Tm 'VALUE) -> ResolutionM (FullyConverted (Tm 'VALUE))
 convertValue = \case
-  Command cid row -> Command
-    <$> lookupUid cid
-    <*> pure row
   DataConstructor cid row spine -> DataConstructor
     <$> lookupUid cid
     <*> pure row

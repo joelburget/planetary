@@ -90,7 +90,7 @@ unitTests = testGroup "typechecking"
           tables = emptyTypingEnv & typingInterfaces .~ cmdIfaces
                                   & typingAbilities .~ unfreeze ambient
 
-          cmd = CommandV cmdUid 0
+          cmd = Command cmdUid 0
 
           expected = Right $ unfreeze $
             SuspendedTy $ CompTy [domTy] $ Peg ambient codomTy

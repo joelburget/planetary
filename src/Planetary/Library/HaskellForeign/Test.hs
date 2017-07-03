@@ -49,9 +49,9 @@ unitTests =
       world = mkForeignTm @Text textId [] "world"
       helloWorld = mkForeignTm @Text textId [] "hello world"
 
-      add spine = Cut (Application spine) (CommandV intOpsId 0)
-      sub spine = Cut (Application spine) (CommandV intOpsId 1)
-      cat spine = Cut (Application spine) (CommandV textOpsId 0)
+      add spine = Cut (Application spine) (Command intOpsId 0)
+      sub spine = Cut (Application spine) (Command intOpsId 1)
+      cat spine = Cut (Application spine) (Command textOpsId 0)
 
       env = emptyTypingEnv & typingInterfaces .~ interfaceTable
 

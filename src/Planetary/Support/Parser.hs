@@ -398,7 +398,7 @@ parseCommandOrIdent = do
   pure $ case dotRow of
     Nothing -> Variable name
     -- TODO application of terms
-    Just row -> Cut (Application []) (CommandV name (fromIntegral row))
+    Just row -> Cut (Application []) (Command name (fromIntegral row))
 
 parseLambda :: MonadicParsing m => m Value'
 parseLambda = Lam

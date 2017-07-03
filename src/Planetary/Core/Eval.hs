@@ -119,7 +119,7 @@ stepCut :: ContinuationI -> TmI -> EvalM TmI
 stepCut (Application spine) (LambdaV _names scope)
   -- TODO: safe
   = pure $ instantiate (spine !!) scope
-stepCut (Application spine) (CommandV uid row) =
+stepCut (Application spine) (Command uid row) =
   -- handler <- findHandler
   runHandler uid row spine
   -- handleCommand cid row spine handlers

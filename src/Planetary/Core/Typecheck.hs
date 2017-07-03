@@ -156,7 +156,7 @@ infer = \case
     boundVars <- replicateM (length binders) freeVar
     pure (modTm boundVars ty')
   -- COMMAND
-  Value (Command uid row) -> do
+  Command uid row -> do
     CommandDeclaration _name from to <- lookupCommandTy uid row
     let from' = unfreeze <$> from
         to' = unfreeze to

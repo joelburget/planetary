@@ -17,7 +17,6 @@ module Planetary.Core.Syntax.Patterns
   , pattern ForeignTm
   , pattern DataTm
   , pattern V
-  , pattern CommandV
   , pattern ConstructV
   , pattern LambdaV
   , pattern DataConstructorV
@@ -41,9 +40,6 @@ pattern DataTm uid row vals = Value (DataConstructor uid row vals)
 
 pattern V :: b -> Tm 'TM uid b
 pattern V name = Variable name
-
-pattern CommandV :: uid -> Row -> Tm 'TM uid b
-pattern CommandV uid row = Value (Command uid row )
 
 pattern ConstructV :: uid -> Row -> Vector (Tm 'TM uid b) -> Tm 'TM uid b
 pattern ConstructV uId row args = Value (DataConstructor uId row args)

@@ -249,11 +249,7 @@ data TmTag
   | ADJUSTMENT_HANDLERS
 
 data Tm (tag :: TmTag) uid b where
-  -- Term:
-  -- use (inferred)
-  Command :: !uid -> !Row -> Tm 'VALUE uid b
-
-  -- construction (checked)
+  -- Value:
   DataConstructor
     :: !uid
     -> !Row
@@ -262,10 +258,10 @@ data Tm (tag :: TmTag) uid b where
   Lambda :: !(Vector Text) -> !(Scope Int (Tm 'TM uid ) b) -> Tm 'VALUE uid b
 
   -- Continuation:
-  -- use (inferred)
+  --
+  -- We pair each of these with 'Cut' to produce a computation. We also push
+  -- these on a stack for a call-by-push-value-esque evaluation.
   Application :: !(Spine uid b) -> Tm 'CONTINUATION uid b
-
-  -- construction (checked)
   Case
     :: !uid
     -> !(Vector (Vector Text, Scope Int (Tm 'TM uid) b))
@@ -284,8 +280,8 @@ data Tm (tag :: TmTag) uid b where
 
   -- Term
   Variable :: !b -> Tm 'TM uid b
-
   InstantiatePolyVar :: !b -> !(Vector (TyArg uid)) -> Tm 'TM uid b
+  Command :: !uid -> !Row -> Tm 'TM uid b
   Annotation :: !(Tm 'VALUE uid b) -> !(ValTy uid) -> Tm 'TM uid b
   Value :: !(Tm 'VALUE uid b) -> Tm 'TM uid b
   Cut :: !(Tm 'CONTINUATION uid b) -> !(Tm 'TM uid b) -> Tm 'TM uid b
@@ -516,13 +512,11 @@ pattern AdjustmentHandlersIpld uidmap   = T1 "AdjustmentHandlers" uidmap
 
 instance (IsUid uid, IsIpld b) => IsIpld (Tm 'VALUE uid b) where
   toIpld = \case
-    Command uid row             -> CommandIpld uid row
     DataConstructor uid row tms -> DataConstructorIpld uid row tms
     ForeignValue uid1 tys uid2  -> ForeignValueIpld uid1 tys uid2
     Lambda _names body          -> LambdaIpld body
 
   fromIpld = \case
-    CommandIpld uid row             -> Just $ Command uid row
     DataConstructorIpld uid row tms -> Just $ DataConstructor uid row tms
     ForeignValueIpld uid1 tys uid2  -> Just $ ForeignValue uid1 tys uid2
     LambdaIpld body                 -> Just $ Lambda [] body
@@ -546,6 +540,7 @@ instance (IsUid uid, IsIpld b) => IsIpld (Tm 'TM uid b) where
   toIpld = \case
     Variable b                -> VariableIpld b
     InstantiatePolyVar b args -> InstantiatePolyVarIpld b args
+    Command uid row           -> CommandIpld uid row
     Annotation tm ty          -> AnnotationIpld tm ty
     Value tm                  -> ValueIpld tm
     Cut cont scrutinee        -> CutIpld cont scrutinee
@@ -554,6 +549,7 @@ instance (IsUid uid, IsIpld b) => IsIpld (Tm 'TM uid b) where
   fromIpld = \case
     VariableIpld b                -> Just $ Variable b
     InstantiatePolyVarIpld b args -> Just $ InstantiatePolyVar b args
+    CommandIpld uid row           -> Just $ Command uid row
     AnnotationIpld tm ty          -> Just $ Annotation tm ty
     ValueIpld tm                  -> Just $ Value tm
     CutIpld cont scrutinee        -> Just $ Cut cont scrutinee
