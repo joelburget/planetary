@@ -123,8 +123,8 @@ newtype TcM uid b = TcM
 deriving instance MonadReader (TypingEnv uid) (TcM uid)
 
 instance BindingMonad (Ty Cid) IntVar (TcM Cid) where
-  lookupVar = TcM . lift . lift . lookupVar
-  freeVar = TcM $ lift $ lift freeVar
+  lookupVar    = TcM . lift . lift . lookupVar
+  freeVar      = TcM $ lift $ lift freeVar
   bindVar v tm = TcM $ lift $ lift $ bindVar v tm
 
 instance Fallible (Ty Cid) IntVar TcErr where
@@ -133,6 +133,8 @@ instance Fallible (Ty Cid) IntVar TcErr where
 
 unify' :: UTy IntVar -> UTy IntVar -> TcM Cid ()
 unify' tl tr = TcM . lift $ tl =:= tr >> return ()
+
+-- $ Evaluation
 
 runTcM
   :: TypingEnvI

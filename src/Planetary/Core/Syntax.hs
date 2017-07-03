@@ -260,7 +260,7 @@ data Tm (tag :: TmTag) uid b where
   -- Continuation:
   --
   -- We pair each of these with 'Cut' to produce a computation. We also push
-  -- these on a stack for a call-by-push-value-esque evaluation.
+  -- these on a stack for a (call-by-push-value-esque) evaluation.
   Application :: !(Spine uid b) -> Tm 'CONTINUATION uid b
   Case
     :: !uid
@@ -415,6 +415,40 @@ type Spine'              = Spine Text Text
 type Construction        = Tm'
 type Use                 = Tm'
 type Cont'               = Continuation'
+
+-- $ Judgements
+
+-- TODO: this is odd -- why are the first four not value constructors?
+isValue :: Tm 'TM b c -> Bool
+isValue Variable{}           = True
+isValue InstantiatePolyVar{} = True
+isValue Command{}            = True
+isValue Annotation{}         = True
+isValue Value{}              = True
+isValue _                    = False
+
+isComputation :: Tm a b c -> Bool
+isComputation Command{}            = True
+isComputation Cut{}                = True
+isComputation Letrec{}             = True
+isComputation _                    = False
+
+isUse :: Tm a b c -> Bool
+isUse Variable{}              = True
+isUse InstantiatePolyVar{}    = True
+isUse Command{}               = True
+isUse (Cut (Application{}) _) = True
+isUse Annotation{}            = True
+isUse _                       = False
+
+isConstruction :: Tm a b c -> Bool
+isConstruction Value{}           = True
+isConstruction DataConstructor{} = True
+isConstruction ForeignValue{}    = True
+isConstruction Lambda{}          = True
+isConstruction Cut{}             = True
+isConstruction Letrec{}          = True
+isConstruction _                 = False
 
 -- utils:
 
