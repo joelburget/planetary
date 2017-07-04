@@ -2,8 +2,9 @@
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
-module Planetary.Core.Eval.Test (unitTests, runEvalTests, stepTest) where
+module Planetary.Core.Eval.Test (unitTests, stepTest) where
 
+import Control.Lens
 import Prelude hiding (not)
 import NeatInterpolation
 import Network.IPLD as IPLD
@@ -14,7 +15,8 @@ import Planetary.Core
 import Planetary.Support.Ids
 import Planetary.Support.NameResolution (resolveTm)
 import Planetary.Support.Parser (forceTm)
-import Planetary.Library.HaskellForeign (mkForeignTm, mkForeign)
+import Planetary.Library.FrankExamples as Frank
+import Planetary.Library.HaskellForeign (mkForeignTm)
 
 stepTest
   :: String
@@ -43,7 +45,7 @@ runTest name env tm expected = testCase name $ do
   fst result @?= expected
 
 bool :: Int -> Tm Cid
-bool i = DataTm boolId i []
+bool i = DataConstructor boolId i []
 
 unitTests :: TestTree
 unitTests  =
@@ -65,10 +67,10 @@ unitTests  =
 
   in testGroup "evaluation"
        [ testGroup "functions"
-         [ let x = BV 0
+         [ let x = BV 0 0
                -- tm = forceTm "(\y -> y) x"
                lam = Lam ["X"] x
-               tm = Cut (Application [x]) (Value lam)
+               tm = Cut (Application [x]) lam
            in stepTest "application 1" emptyEnv 1 tm (Right x)
          ]
        , testGroup "case"
@@ -97,13 +99,13 @@ unitTests  =
            (Right true)
            ]
        , let ty :: Polytype Cid
-             ty = Polytype [] (DataTy boolId [])
+             ty = Polytype [] (DataTy (UidTy boolId) [])
              -- TODO: remove shadowing
-             Just tm = closeVar ("x", 0) $ let_ "x" ty false (FV"x")
+             tm = close1 "x" $ let_ "x" ty false (FV"x")
          in stepTest "let x = false in x" emptyEnv 1 tm (Right false)
 
        , let handler = forceTm [text|
-               handle x : [e , <Abort>]HaskellInt with
+               handle x : [e , <Abort>]Int with
                  Abort:
                    | <aborting -> k> -> one
                  | v -> two
@@ -113,7 +115,12 @@ unitTests  =
              one  = mkForeignTm @Int intId [] 1
              two  = mkForeignTm @Int intId [] 2
 
-             Right handler' = resolveTm mempty handler
+             resolutionState = uIdMapFromList $
+               -- Provides Abort
+               (Frank.resolvedDecls ^. globalCids) ++
+               [("Int", intId)]
+
+             Right handler' = resolveTm resolutionState handler
              handler'' = substitute "one" one $
                substitute "two" two
                  handler'
@@ -124,13 +131,13 @@ unitTests  =
               ]
 
        , let
-             ty = Polytype [] (DataTy boolId [])
+             ty = Polytype [] (DataTy (UidTy boolId) [])
              -- Just tm = cast [tmExp|
              --   let x: forall. bool = false in
              --     let y: forall. bool = not x in
              --       not y
              -- |]
-             Just tm = closeVar ("x", 0) $
+             tm = close1 "x" $
                   let_ "x" ty false $
                     let_ "y" ty (Cut not (FV"x")) $
                       Cut not (FV"y")
@@ -140,6 +147,3 @@ unitTests  =
        -- , let
        --   in stepTest ""
        ]
-
-runEvalTests :: IO ()
-runEvalTests = defaultMain unitTests

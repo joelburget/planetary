@@ -9,7 +9,7 @@ import Planetary.Core
 import Planetary.Support.Ids
 
 unitTy :: ValTy Cid
-unitTy = DataTy unitId []
+unitTy = DataTy (UidTy unitId) []
 
 unitTests :: TestTree
 unitTests = testGroup "syntax"

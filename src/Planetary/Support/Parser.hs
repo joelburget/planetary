@@ -120,7 +120,7 @@ parseConstructor tyArgs = angles (ConstructorDecl
 
 parseDataTy :: MonadicParsing m => m ValTy'
 parseDataTy = angles $ DataTy
-  <$> parseUid
+  <$> (FreeVariableTy <$> parseUid)
   <*> many parseTyArg
   -- <*> localIndentation Gt (many parseTyArg)
   <?> "Data Ty"
@@ -370,7 +370,7 @@ parseTmOrAnnot =
           _ <- colon
           parseValTy
         pure $ case maybeTy of
-          Nothing -> Value val
+          Nothing -> val
           Just ty -> Annotation val ty
       p2 = parseTm
   in p1 <|> p2 <?> "term or annot"
@@ -378,7 +378,7 @@ parseTmOrAnnot =
 parseTmNoApp :: MonadicParsing m => m Tm'
 parseTmNoApp = choice
   [ parens parseTmOrAnnot
-  , Value <$> parseValue
+  , parseValue
   , parseCase
   , parseHandle
   , parseLet

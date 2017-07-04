@@ -2,9 +2,7 @@
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
-module Planetary.Library.FrankExamples
-  (
-  ) where
+module Planetary.Library.FrankExamples (resolvedDecls) where
 
 import Control.Monad.Except
 import Control.Monad.IO.Class (liftIO)
@@ -30,22 +28,22 @@ eraseCharLit = mkForeignTm @Text textId [] "\b \b"
 
 -- TODO: we actually map with a data constructor
 textMap :: SpineI -> ForeignM TmI
-textMap [LambdaV _binderNames body, ForeignTm _ _ uid] = do
+textMap [Lambda _binderNames body, ForeignValue _ _ uid] = do
   fText <- lookupForeign uid
   let str = T.unpack fText
   let fun :: Char -> ForeignM Char
       fun char = do
-        charPtr <- ForeignTm charId [] <$> writeForeign char
+        charPtr <- ForeignValue charId [] <$> writeForeign char
         -- HACK XXX
         ouch [charPtr]
         pure char
   result <- T.pack <$> traverse fun str
-  ForeignTm textId [] <$> writeForeign result
+  ForeignValue textId [] <$> writeForeign result
 textMap _ = throwError FailedForeignFun
 
 -- charHandler1 :: TmI -> ContinuationI -> Char -> TmI
 charHandler1 :: SpineI -> ForeignM TmI
-charHandler1 [b1, b2, ForeignTm _ _ uid] = do
+charHandler1 [b1, b2, ForeignValue _ _ uid] = do
   char <- lookupForeign uid
   pure $ case char of
     '\b' -> b1
@@ -54,7 +52,7 @@ charHandler1 _ = throwError FailedForeignFun
 
 -- charHandler2 :: TmI -> TmI -> TmI -> Char -> TmI
 charHandler2 :: SpineI -> ForeignM TmI
-charHandler2 [b1, b2, b3, ForeignTm _ _ uid] =
+charHandler2 [b1, b2, b3, ForeignValue _ _ uid] =
   flip fmap (lookupForeign uid) $ \case
     '0' -> b1
     ' ' -> b2
@@ -66,14 +64,14 @@ inch [] = do
   c <- liftIO getChar
   -- Taken from Shonky/Semantics
   let c' = if c == '\DEL' then '\b' else c
-  ForeignTm charId [] <$> writeForeign c'
+  ForeignValue charId [] <$> writeForeign c'
 inch _ = throwError FailedForeignFun
 
 ouch :: SpineI -> ForeignM TmI
-ouch [ForeignTm _ _ uid] = do
+ouch [ForeignValue _ _ uid] = do
   c <- lookupForeign uid
   liftIO $ putChar c >> hFlush stdout
-  pure (DataTm unitId 0 [])
+  pure (DataConstructor unitId 0 [])
 ouch _ = throwError FailedForeignFun
 
 externals :: CurrentHandlers
@@ -244,10 +242,10 @@ in pipe
 
 -- TODO
 charId, eraseCharLitId, addId, zeroId :: Cid
-charId = undefined
-eraseCharLitId = undefined
-addId = undefined
-zeroId = undefined
+charId = mkCid "TODO charId"
+eraseCharLitId = mkCid "TODO eraseCharLitId"
+addId = mkCid "TODO addId"
+zeroId = mkCid "TODO zeroId"
 
 predefined :: UIdMap Text Cid
 predefined = uIdMapFromList

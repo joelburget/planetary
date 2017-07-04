@@ -2,7 +2,7 @@
 {-# language OverloadedStrings #-}
 {-# language PackageImports #-}
 {-# language PatternSynonyms #-}
-module Planetary.Support.Parser.Test (runParserTests, unitTests) where
+module Planetary.Support.Parser.Test (unitTests) where
 
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -70,7 +70,7 @@ unitTests = testGroup "parsing"
   , parserTest "123" parseUid "123"
 
   , parserTest "<1 X>" parseDataTy $
-    DataTy "1" [TyArgVal (VTy"X")]
+    DataTy (FreeVariableTy "1") [TyArgVal (VTy"X")]
 
   -- also test with args
   -- Bool
@@ -119,7 +119,7 @@ unitTests = testGroup "parsing"
   , parserTest "[] X" parsePeg $ Peg emptyAbility (VTy"X")
   , parserTest "[]X" parsePeg $ Peg emptyAbility (VTy"X")
   , parserTest "[] <1 X>" parsePeg $
-    Peg emptyAbility (DataTy "1" [TyArgVal (VTy"X")])
+    Peg emptyAbility (DataTy (FreeVariableTy "1") [TyArgVal (VTy"X")])
 
   , parserTest "X" parseCompTy $ CompTy [] (Peg emptyAbility (VTy"X"))
   , parserTest "X -> X" parseCompTy $
@@ -167,18 +167,18 @@ unitTests = testGroup "parsing"
         polyBinders = [("X", ValTyK), ("Y", ValTyK)]
         pty = Polytype polyBinders polyVal
         expected = let_ "on" pty
-          (Value $ Lam ["x", "f"] (Cut (Application [FV"x"]) (FV"f")))
-          (Cut (Application [FV"n", Value $ Lam ["x"] (FV"body")]) (FV"on"))
+          (Lam ["x", "f"] (Cut (Application [FV"x"]) (FV"f")))
+          (Cut (Application [FV"n", Lam ["x"] (FV"body")]) (FV"on"))
     in parserTest defn parseLet expected
 
   , let defn = "on n (\\x -> body)"
         expected = Cut
-          (Application [FV"n", Value (Lam ["x"] (FV"body"))])
+          (Application [FV"n", Lam ["x"] (FV"body")])
           (FV"on")
     in parserTest defn parseTm expected
 
   , let defn = "\\x f -> f x"
-        expected = Value (Lam ["x", "f"] (Cut (Application [FV"x"]) (FV"f")))
+        expected = Lam ["x", "f"] (Cut (Application [FV"x"]) (FV"f"))
     in parserTest defn parseTm expected
 
   , let defn = T.unlines
@@ -254,6 +254,3 @@ unitTests = testGroup "parsing"
   --         ]
   --   in parserTest defn
   ]
-
-runParserTests :: IO ()
-runParserTests = defaultMain unitTests

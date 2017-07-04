@@ -117,15 +117,15 @@ syntaxInterfaceTable =
       uid = 0
       a = 1
 
-      fixTy = DataTy lfixId
+      fixTy = DataTy (UidTy lfixId)
         [ TyArgVal
-           (DataTy tyId
+           (DataTy (UidTy tyId)
              [ VarTyVal uid
              , VarTyVal a
              ]
            )
         ]
-      tyTy = DataTy tyId
+      tyTy = DataTy (UidTy tyId)
         [ VarTyVal uid
         , VarTyVal a
         , TyArgVal fixTy

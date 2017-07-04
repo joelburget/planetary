@@ -96,13 +96,13 @@ unitTests =
 
              Just (listfId, _) = namedData "ListF" resolved
 
-             lfixTm x   = DataTm lfixId 0 [x]
-             lcons x xs = lfixTm (DataTm listfId 1 [x, xs])
-             lnil       = lfixTm (DataTm listfId 0 [])
+             lfixTm x   = DataConstructor lfixId 0 [x]
+             lcons x xs = lfixTm (DataConstructor listfId 1 [x, xs])
+             lnil       = lfixTm (DataConstructor listfId 0 [])
 
-             lfixTy f     = DataTy lfixId [TyArgVal f]
-             listfTy1 a   = DataTy listfId [TyArgVal a]
-             listfTy2 a f = DataTy listfId [TyArgVal a, TyArgVal f]
+             lfixTy f     = DataTy (UidTy lfixId) [TyArgVal f]
+             listfTy1 a   = DataTy (UidTy listfId) [TyArgVal a]
+             listfTy2 a f = DataTy (UidTy listfId) [TyArgVal a, TyArgVal f]
 
              -- [1]
              oneList :: TmI

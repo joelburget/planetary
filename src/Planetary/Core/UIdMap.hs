@@ -25,6 +25,7 @@ import Control.Lens.At -- (At, Ixed, IxValue, Index)
 import Control.Newtype
 import Data.Data
 import Data.Foldable (toList)
+import Data.Function (on)
 import Data.Hashable (Hashable)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
@@ -51,16 +52,6 @@ instance IsUid uid => At (UIdMap uid a) where
 instance IsUid uid => Ixed (UIdMap uid a) where
   ix k f (UIdMap m) = UIdMap <$> ix k f m
 
--- instance IsUid uid => Unifiable (UIdMap uid) where
---   zipMatch (UIdMap a) (UIdMap b) =
---     let aOnly = Left <$> HashMap.difference a b
---         bOnly = Left <$> HashMap.difference b a
---         both = HashMap.intersectionWith (Right <$$> (,)) a b
-
---         result = HashMap.unions [aOnly, bOnly, both]
-
---     in Just (UIdMap result)
-
 uIdMapFromList :: IsUid uid => [(uid, a)] -> UIdMap uid a
 uIdMapFromList = UIdMap . HashMap.fromList
 
@@ -71,7 +62,7 @@ uidMapUnion :: IsUid uid => UIdMap uid a -> UIdMap uid a -> UIdMap uid a
 uidMapUnion = over2 UIdMap HashMap.union
 
 instance (IsUid uid, Ord a) => Ord (UIdMap uid a) where
-  compare m1 m2 = compare (toList m1) (toList m2)
+  compare = compare `on` toList
 
 instance FunctorWithIndex uid (UIdMap uid)
 instance FoldableWithIndex uid (UIdMap uid)

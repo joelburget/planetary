@@ -14,13 +14,8 @@ module Planetary.Core.Syntax.Patterns
   , let_
   , letrec
 
-  , pattern ForeignTm
-  , pattern DataTm
   , pattern FV
   , pattern BV
-  , pattern ConstructV
-  , pattern LambdaV
-  , pattern DataConstructorV
   , pattern VTy
   ) where
 
@@ -31,27 +26,11 @@ import Planetary.Core.Syntax
 import Planetary.Core.UIdMap
 import Planetary.Util
 
-pattern ForeignTm :: uid -> Vector (ValTy uid) -> uid -> Tm uid
-pattern ForeignTm tyUid tySat valueUid
-  = Value (ForeignValue tyUid tySat valueUid)
-
-pattern DataTm :: uid -> Row -> Vector (Tm uid) -> Tm uid
-pattern DataTm uid row vals = Value (DataConstructor uid row vals)
-
 pattern FV :: Text -> Tm uid
 pattern FV name = FreeVariable name
 
-pattern BV :: Int -> Tm uid
-pattern BV ix = BoundVariable ix
-
-pattern ConstructV :: uid -> Row -> Vector (Tm uid) -> Tm uid
-pattern ConstructV uId row args = Value (DataConstructor uId row args)
-
-pattern LambdaV :: Vector Text -> Tm uid -> Tm uid
-pattern LambdaV binderNames scope = Value (Lambda binderNames scope)
-
-pattern DataConstructorV :: uid -> Row -> Vector (Tm uid) -> Tm uid
-pattern DataConstructorV cid row tms = Value (DataConstructor cid row tms)
+pattern BV :: Int -> Int -> Tm uid
+pattern BV depth ix = BoundVariable depth ix
 
 pattern VTy :: Text -> ValTy uid
 pattern VTy name = FreeVariableTy name
@@ -65,7 +44,7 @@ lam vars body = Lambda vars (abstract (`elemIndex` vars) body)
 unlam :: Tm uid -> Maybe (Vector Text, Tm uid)
 unlam (Lambda binderNames scope) =
   let variables = FV <$> binderNames
-  in Just (binderNames, instantiate (variables !!) scope)
+  in Just (binderNames, open (variables !!) scope)
 unlam _ = Nothing
 
 pattern Lam :: Vector Text -> Tm uid -> Tm uid
@@ -85,8 +64,7 @@ uncase
   :: Tm uid
   -> Maybe (uid, Vector (Vector Text, Tm uid))
 uncase (Case uid tms) =
-  -- let tms' = (\(vars, tm) -> (vars, let vars' = V <$> vars in instantiate (vars' !!) tm)) <$> tms
-  let f (vars, tm) = (vars, let vars' = FV <$> vars in instantiate (vars' !!) tm)
+  let f (vars, tm) = (vars, let vars' = FV <$> vars in open (vars' !!) tm)
   in Just (uid, f <$> tms)
 uncase _ = Nothing
 
@@ -105,15 +83,15 @@ handle
   -> UIdMap uid (Vector (Vector Text, Text, Tm uid))
   -> (Text, Tm uid)
   -> Tm uid
-handle adj peg handlers (bodyVar, body) = todo "handle"
-  -- let abstractor vars kVar var
-  --       | var == kVar = Just Nothing
-  --       | otherwise   = Just <$> elemIndex var vars
-  --     handlers' = AdjustmentHandlers $
-  --       (\(vars, kVar, rhs) -> abstract (abstractor vars kVar) rhs) <$$>
-  --       handlers
-  --     body' = abstract1 bodyVar body
-  -- in Handle adj peg handlers' body'
+handle adj peg handlers (bodyVar, body) =
+  let abstractor vars kVar var
+        | var == kVar = Just 0
+        | otherwise   = succ <$> elemIndex var vars
+      handlers' = (fmap . fmap)
+        (\(vars, kVar, rhs) -> (vars, abstract (abstractor vars kVar) rhs))
+        handlers
+      body' = abstract1 bodyVar body
+  in Handle adj peg handlers' body'
 
 let_
   :: Text

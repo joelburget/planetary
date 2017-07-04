@@ -108,24 +108,25 @@ step (Cut cont scrutinee) = stepCut cont scrutinee
 step Letrec{} = todo "step letrec"
 
 stepCut :: ContinuationI -> TmI -> EvalM TmI
-stepCut (Application spine) (LambdaV _names scope)
+stepCut (Application spine) (Lambda _names scope)
   -- TODO: safe
   = pure $ instantiate (spine !!) scope
 stepCut (Application spine) (Command uid row) =
   -- handler <- findHandler
   runHandler uid row spine
   -- handleCommand cid row spine handlers
-stepCut (Case _uid1 rows) (DataConstructorV _uid2 rowNum args) = do
+stepCut (Case _uid1 rows) (DataConstructor _uid2 rowNum args) = do
   (_, row) <- rows ^? ix rowNum ?? IndexErr
   -- TODO: maybe we need to evaluate the args to a value first
   pure (instantiate (args !!) row)
 -- stepCut (Handle _adj _peg handlers _handleValue) (Command uid row) = do
 --   let AdjustmentHandlers uidmap = handlers
 --   handler <- (uidmap ^? ix uid . ix row) >>= (??
-stepCut (Handle _adj _peg _handlers handleValue) v@Value{} =
-  pure $ instantiate1 v handleValue
+stepCut (Handle _adj _peg _handlers handleValue) v
+  | isValue v = pure $ instantiate1 v handleValue
 
-stepCut (Let _polyty _name body) rhs@Value{} = pure $ instantiate1 rhs body
+stepCut (Let _polyty _name body) rhs
+  | isValue rhs = pure $ instantiate1 rhs body
 stepCut cont cut@Cut {} = stepCut cont =<< step cut
 stepCut cont scrutinee = throwError (CantCut cont scrutinee)
 

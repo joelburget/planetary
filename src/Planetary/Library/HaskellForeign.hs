@@ -9,6 +9,7 @@ module Planetary.Library.HaskellForeign
   , haskellOracles
   , interfaceTable
   , intTy
+  , boolTy
   , textTy
   , uidTy
   , haskellDataTypes
@@ -37,22 +38,22 @@ haskellOracles = uIdMapFromList
   ]
 
 intTy :: ValTyI
-intTy = DataTy intId []
+intTy = DataTy (UidTy intId) []
 
 boolTy :: ValTyI
-boolTy = DataTy boolId []
+boolTy = DataTy (UidTy boolId) []
 
 textTy :: ValTyI
-textTy = DataTy textId []
+textTy = DataTy (UidTy textId) []
 
 uidTy :: ValTyI
-uidTy = DataTy uidId []
+uidTy = DataTy (UidTy uidId) []
 
 vector, uidMap, lfix :: Vector TyArgI -> ValTyI
 
-vector = DataTy vectorId
-uidMap = DataTy uidMapId
-lfix   = DataTy lfixId
+vector = DataTy (UidTy vectorId)
+uidMap = DataTy (UidTy uidMapId)
+lfix   = DataTy (UidTy lfixId)
 
 -- For now these are all opaque: they don't expose any constructors we can see
 -- XXX how do we check the types are saturated correctly?
@@ -101,25 +102,25 @@ writeForeign a = do
 liftBinaryOp
   :: IsIpld s
   => (s -> s -> s) -> (Spine Cid -> ForeignM (Tm Cid))
-liftBinaryOp op [ForeignTm tyUid tySat uid1, ForeignTm _ _ uid2] = do
+liftBinaryOp op [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2] = do
   i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
-  ForeignTm tyUid tySat <$> writeForeign i
+  ForeignValue tyUid tySat <$> writeForeign i
 liftBinaryOp _ _ = throwError FailedForeignFun
 
 -- XXX
 liftUnaryOp
   :: IsIpld s
   => (s -> s) -> (Spine Cid -> ForeignM (Tm Cid))
-liftUnaryOp op [ForeignTm tyUid tySat uid] = do
+liftUnaryOp op [ForeignValue tyUid tySat uid] = do
   i <- op <$> lookupForeign uid
-  ForeignTm tyUid tySat <$> writeForeign i
+  ForeignValue tyUid tySat <$> writeForeign i
 liftUnaryOp _ _ = throwError FailedForeignFun
 
 mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
 mkForeign val = let val' = toIpld val in (valueCid val', val')
 
 mkForeignTm :: IsIpld a => Cid -> Vector ValTyI -> a -> TmI
-mkForeignTm tyId tySat = ForeignTm tyId tySat . fst . mkForeign
+mkForeignTm tyId tySat = ForeignValue tyId tySat . fst . mkForeign
 
 -- exampleDataTypes :: DataTypeTable Cid String
 -- exampleDataTypes = uIdMapFromList

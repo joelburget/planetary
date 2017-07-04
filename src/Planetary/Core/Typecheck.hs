@@ -33,7 +33,6 @@ import Control.Unification
 import Control.Unification.IntVar
 import Data.Functor.Fixedpoint
 import Data.HashMap.Strict (intersectionWith)
-import Data.Monoid ((<>))
 import Data.Text (Text)
 import Network.IPLD hiding (Row)
 
@@ -56,10 +55,10 @@ data TcErr
   | CaseMismatch [Vector (UTy IntVar)] [(Vector Text, Tm Cid)]
   | FailedDataTypeLookup
   | FailedConstructorLookup Cid Row
-  | LookupCommands
+  | LookupCommands Cid
   | LookupCommandTy
-  | LookupVarTy Int
-  | LookupPolyVarTy Int
+  | LookupVarTy Int Int
+  | LookupPolyVarTy Int Int
   | CantInfer TmI
   | NotClosed
   | OccursFailure IntVar (UTerm (Ty Cid) IntVar)
@@ -74,10 +73,10 @@ instance Eq TcErr where
   FailedDataTypeLookup == FailedDataTypeLookup = True
   FailedConstructorLookup c1 r1 == FailedConstructorLookup c2 r2
     = c1 == c2 && r1 == r2
-  LookupCommands == LookupCommands = True
+  LookupCommands c1 == LookupCommands c2 = c1 == c2
   LookupCommandTy == LookupCommandTy = True
-  LookupVarTy a == LookupVarTy b = a == b
-  LookupPolyVarTy a == LookupPolyVarTy b = a == b
+  LookupVarTy a1 b1 == LookupVarTy a2 b2 = a1 == a2 && b1 == b2
+  LookupPolyVarTy a1 b1 == LookupPolyVarTy a2 b2 = a1 == a2 && b1 == b2
   NotClosed == NotClosed = True
   CheckFailure a == CheckFailure b = a == b
   CantInfer a == CantInfer b = a == b
@@ -102,7 +101,7 @@ data TypingEnv uid = TypingEnv
   { _typingData       :: DataTypeTable  uid
   , _typingInterfaces :: InterfaceTable uid
   , _typingAbilities  :: UTy IntVar -- :: Ability
-  , _varTypes         :: [Either (UTy IntVar) PolytypeI]
+  , _varTypes         :: [Vector (Either (UTy IntVar) PolytypeI)]
   } deriving Show
 
 makeLenses ''TypingEnv
@@ -150,11 +149,11 @@ lfixId = mkCid "lfix"
 infer :: TmI -> TcM' (UTy IntVar)
 infer = \case
   -- VAR
-  BoundVariable v -> lookupVarTy v
-  FreeVariable v -> todo "lookup free var ty" -- lookupVarTy v
+  BoundVariable depth pos -> lookupVarTy depth pos
+  FreeVariable v -> todo ("lookup free var ty: " ++ show v)
   -- POLYVAR
-  InstantiatePolyVar (BoundVariable v) tys -> do
-    Polytype binders ty' <- lookupPolyVarTy v
+  InstantiatePolyVar (BoundVariable depth pos) tys -> do
+    Polytype binders ty' <- lookupPolyVarTy depth pos
     boundVars <- replicateM (length binders) freeVar
     pure (modTm boundVars ty')
   -- COMMAND
@@ -166,7 +165,9 @@ infer = \case
     pure $ SuspendedTyU (CompTyU from' (PegU ambient to'))
   -- APP
   Cut (Application spine) f -> do
-    SuspendedTyU (CompTyU dom (PegU ability retTy)) <- infer f
+    -- SuspendedTyU (CompTyU dom (PegU ability retTy)) <- infer f
+    f' <- infer f
+    let SuspendedTyU (CompTyU dom (PegU ability retTy)) = f'
     ambient <- getAmbient
     _ <- unify' ability ambient
     _ <- mapM_ (uncurry check) =<< strictZip ApplicationSpineMismatch spine dom
@@ -174,21 +175,21 @@ infer = \case
   -- COERCE
   Annotation n a -> do
     let a' = unfreeze a
-    check (Value n) a'
+    check n a'
     pure a'
 
-  ForeignTm uid sat _ -> pure (DataTyU uid (TyArgValU <$> (unfreeze <$> sat)))
+  ForeignValue uid sat _ -> pure (DataTyU (UidTyU uid) (TyArgValU <$> (unfreeze <$> sat)))
   x -> throwError (CantInfer x)
 
 check :: TmI -> UTy IntVar -> TcM' ()
 -- FUN
-check (Value (Lambda _binders body))
+check (Lambda _binders body)
       (SuspendedTyU (CompTyU dom (PegU ability codom))) =
   withValTypes' dom body $ \body' ->
     withAbility ability $
       check body' codom
 -- DATA
-check (DataTm uid1 row tms) (DataTyU uid2 valTysExp)
+check (DataConstructor uid1 row tms) (DataTyU uid2 valTysExp)
   -- Lfix extension to vanilla core frank
   --
   -- maybe this can be of help:
@@ -200,7 +201,7 @@ check (DataTm uid1 row tms) (DataTyU uid2 valTysExp)
   --     ----------------------------
   --     lfix nilf : Lfix (Listf Int)
   | uid1 == lfixId = do
-  assert (DataUIdMismatch uid1 uid2) (uid1 == uid2)
+  _ <- unify' (UidTyU uid1) uid2
   assert LfixShape (row == 0 && length tms == 1 && length valTysExp == 1)
   let [tm] = tms
       [TyArgValU (DataTyU uid args)] = valTysExp
@@ -209,19 +210,19 @@ check (DataTm uid1 row tms) (DataTyU uid2 valTysExp)
 
   -- Back to vanilla core frank
   | otherwise = do
-  assert (DataUIdMismatch uid1 uid2) (uid1 == uid2)
+  _ <- unify' (UidTyU uid1) uid2
   (argTys, valTysAct) <- lookupConstructorTy uid1 row
 
   mapM_ (uncurry unify') =<< strictZip DataSaturationMismatch valTysAct valTysExp
   mapM_ (uncurry check) =<< strictZip ConstructorArgMismatch tms argTys
 
-check (DataTm uid row tms) (UVar i) = do
+check (DataConstructor uid row tms) (UVar i) = do
   -- Make a variable for each subterm and solve for all of them.
   vars <- UVar <$$> replicateM (length tms) freeVar
   mapM_ (uncurry check) (zip tms vars)
-  bindVar i (DataTyU uid vars)
+  bindVar i (DataTyU (UidTyU uid) vars)
 
--- check (Value (DataConstructor uid row tms)) (VariableTy n) = do
+-- check (DataConstructor uid row tms) (VariableTy n) = do
 --   ConstructorDecl _name argTys valTysAct <- lookupConstructorTy uid row
 --   let ty = DataTy uid valTysAct
 --   n =:= ty -- TODO doesn't seem like this should escape from unification
@@ -229,7 +230,7 @@ check (DataTm uid row tms) (UVar i) = do
 check (Cut (Case uid1 rows) m) ty = do
   -- args :: (Vector (TyArg a))
   DataTyU uid2 _args <- infer m
-  assert (DataUIdMismatch uid1 uid2) (uid1 == uid2)
+  _ <- unify' (UidTyU uid1) uid2
 
   dataIface <- dataInterface <$> lookupDataType uid1
   let dataRows = fst <$> dataIface -- :: Vector (Vector ValTyI)
@@ -247,27 +248,22 @@ check (Cut (Handle adj peg handlers fallthrough) val) ty = do
   cmds <- instantiateAbility adjustedEmpty
   pairs <- uidZip handlers cmds
   forMOf_ (traverse . traverse) pairs $
-    \(handler, CommandDeclaration _name as b) ->
+    \((_, handler), CommandDeclaration _name as b) ->
     let cTy = CompTyU [unfreeze b] (PegU ambient valTy)
         as' = unfreeze <$> as
     in openAdjustmentHandler handler as' cTy $ \tm ->
          check tm ty
-  withValTypes [valTy] $
-    let fallthrough' = succOpen fallthrough
-    in check fallthrough' ty
+  withValTypes [valTy] $ check fallthrough ty
 -- LET
 check (Cut (Let pty _name body) val) ty = do
   valTy <- instantiateWithEnv pty
   check val valTy
-  withPolyty pty $ check (succOpen body) ty
+  withPolyty pty $ check body ty
 -- SWITCH
 check m b = do
   a <- infer m
   _ <- unify' a b
   pure ()
-
-succOpen :: Tm Cid -> Tm Cid
-succOpen = todo "succOpen"
 
 extendAbility'
   :: UTy IntVar -> UIdMap Cid (Vector (UTy IntVar)) -> Maybe (UTy IntVar)
@@ -298,10 +294,8 @@ uidZip
 uidZip (UIdMap as) (UIdMap bs) = UIdMap <$>
   sequence (intersectionWith (strictZip (\_ _ -> UIdMismatch)) as bs)
 
--- TODO: should we push these in this order?
--- * we should reverse and push at the head
 withValTypes :: [UTy IntVar] -> TcM' a -> TcM' a
-withValTypes tys = local (& varTypes %~ (<> (Left <$> tys)))
+withValTypes tys = local (& varTypes %~ ((Left <$> tys):))
 
 withValTypes'
   :: [UTy IntVar]
@@ -309,7 +303,7 @@ withValTypes'
   -> (TmI -> TcM' a)
   -> TcM' a
 withValTypes' tys scope cb =
-  let body = instantiate BV scope
+  let body = instantiate (BV 0) scope
   in withValTypes tys (cb body)
 
 openAdjustmentHandler
@@ -319,21 +313,20 @@ openAdjustmentHandler
   -> (TmI -> TcM' a)
   -> TcM' a
 openAdjustmentHandler handler argTys handlerTy cb = do
-  TypingEnv _ _ _ envTys <- ask
-  let envTys' = (Left <$> argTys) <> ((Left $ SuspendedTyU handlerTy):envTys)
+  let bindingTys = Left <$> (SuspendedTyU handlerTy:argTys)
 
       instantiator = todo "openAdjustmentHandler instantiator"
       -- instantiator Nothing  = BV 0
       -- instantiator (Just i) = BV (length argTys + 1)
 
-  local (& varTypes .~ envTys') (cb (instantiate instantiator handler))
+  local (& varTypes %~ (bindingTys:)) (cb (instantiate instantiator handler))
   -- withState' envAdj (cb (instantiate instantiator handler))
 
 instantiateWithEnv :: PolytypeI -> TcM' (UTy IntVar)
 instantiateWithEnv = todo "instantiateWithEnv"
 
 withPolyty :: PolytypeI -> TcM' a -> TcM' a
-withPolyty pty = local (& varTypes %~ (<> [Right pty]))
+withPolyty pty = local (& varTypes %~ ([Right pty]:))
 
 -- | Get the types each data constructor holds for this data type.
 --
@@ -362,7 +355,7 @@ modTm vars = cata $ \case
 lookupCommands :: Cid -> TcM' [CommandDeclarationI]
 lookupCommands uid
   = asks (^? typingInterfaces . ix uid . commands)
-    >>= (?? LookupCommands)
+    >>= (?? LookupCommands uid)
 
 lookupCommandTy :: Cid -> Row -> TcM' CommandDeclarationI
 lookupCommandTy uid row
@@ -375,10 +368,12 @@ withAbility ability = local (& typingAbilities .~ ability)
 getAmbient :: TcM' (UTy IntVar) -- AbilityI
 getAmbient = asks (^?! typingAbilities)
 
-lookupPolyVarTy :: Int -> TcM' PolytypeI
-lookupPolyVarTy v =
-  asks (^? varTypes . ix v . _Right) >>= (?? LookupPolyVarTy v)
+lookupPolyVarTy :: Int -> Int -> TcM' PolytypeI
+lookupPolyVarTy depth pos =
+  asks (^? varTypes . ix depth . ix pos . _Right)
+    >>= (?? LookupPolyVarTy depth pos)
 
-lookupVarTy :: Int -> TcM' (UTy IntVar)
-lookupVarTy v =
-  asks (^? varTypes . ix v . _Left) >>= (?? LookupVarTy v)
+lookupVarTy :: Int -> Int -> TcM' (UTy IntVar)
+lookupVarTy depth pos =
+  asks (^? varTypes . ix depth . ix pos . _Left)
+    >>= (?? LookupVarTy depth pos)

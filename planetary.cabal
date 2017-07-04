@@ -67,7 +67,6 @@ library
     base16-bytestring == 0.1.*,
     ipld,
     binary-serialise-cbor,
-    monad-gen == 0.3.*,
     mmorph >= 1.0 && < 1.2,
     neat-interpolation == 0.3.*,
     unification-fd == 0.10.*,

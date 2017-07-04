@@ -1,5 +1,11 @@
 {-# language OverloadedLists #-}
-module Tests (runTests) where
+module Tests
+  ( runTests
+  , runEvalTests
+  , runTypecheckingTests
+  , runParserTests
+  , runHaskellForeignTests
+  ) where
 
 import Test.Tasty
 
@@ -20,6 +26,18 @@ tests = testGroup "planetary"
   , Parser.unitTests
   , HaskellForeign.unitTests
   ]
+
+runEvalTests :: IO ()
+runEvalTests = defaultMain Eval.unitTests
+
+runTypecheckingTests :: IO ()
+runTypecheckingTests = defaultMain Typecheck.unitTests
+
+runParserTests :: IO ()
+runParserTests = defaultMain Parser.unitTests
+
+runHaskellForeignTests :: IO ()
+runHaskellForeignTests = defaultMain HaskellForeign.unitTests
 
 -- unitTests :: TestTree
 -- unitTests = testGroup "ipc unit tests"
