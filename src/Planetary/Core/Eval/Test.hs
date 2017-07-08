@@ -1,4 +1,5 @@
 {-# language DataKinds #-}
+{-# language LambdaCase #-}
 {-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
@@ -21,6 +22,7 @@ import Planetary.Support.NameResolution (resolveTm)
 import Planetary.Support.Parser (forceTm)
 import Planetary.Library.FrankExamples as Frank
 import Planetary.Library.HaskellForeign (mkForeignTm)
+import Planetary.Util (todo)
 
 stepTest
   :: String
@@ -131,17 +133,23 @@ unitTests  =
 
        , let
              ty = Polytype [] (DataTy (UidTy boolId) [])
-             -- Just tm = cast [tmExp|
-             --   let x: forall. bool = false in
-             --     let y: forall. bool = not x in
-             --       not y
-             -- |]
              tm = close1 "x" $
                   let_ "x" ty false $
                     let_ "y" ty (Cut not (FV"x")) $
                       Cut not (FV"y")
-         in stepTest "let x = false in let y = not x in not y"
-              emptyEnv 3 tm (Right false)
+
+             -- both versions of tm should be equivalent
+             resolutionState = todo "resolutionState"
+             Right tm2 = resolveTm resolutionState $ forceTm [text|
+               let x: forall. Bool = false in
+                 let y: forall. Bool = not x in
+                   not y
+             |]
+
+         in testGroup "let x = false in let y = not x in not y"
+              [ stepTest "tm"  emptyEnv 3 tm  (Right false)
+              , stepTest "tm2" emptyEnv 3 tm2 (Right false)
+              ]
 
        , let evenodd = forceTm [text|
                letrec
@@ -160,12 +168,21 @@ unitTests  =
              evenodd' = resolveTm
                -- Provides NatF, Bool
                ((fromList $ Frank.resolvedDecls ^. globalCids) <>
-                [("Fix", undefined)])
+                [("Fix", lfixId)])
                evenodd
+
+             natId = undefined
+             mkFix = undefined
 
              -- mkTm n = [| evenOdd n |]
              mkTm :: Int -> Tm Cid
-             mkTm n = undefined
+             mkTm n =
+               let mkNat 0 = mkFix $ DataConstructor natId 0 []
+                   mkNat k = mkFix $ DataConstructor natId 1 [mkNat (k - 1)]
+
+                   closer = \case
+                     unfix ->
+               in close
 
              natBoolEnv = emptyEnv
          in testGroup "letrec"
