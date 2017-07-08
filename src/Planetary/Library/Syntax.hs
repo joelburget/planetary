@@ -1,8 +1,9 @@
-{-# language GADTs #-}
+{-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language PatternSynonyms #-}
 {-# language QuasiQuotes #-}
 {-# language ScopedTypeVariables #-}
+{-# language TypeFamilies #-}
 module Planetary.Library.Syntax () where
 
 import Data.Text (Text)
@@ -96,7 +97,7 @@ data Tm uid tyvar tmvar tm =
 |]
 
 resolvedDecls :: ResolvedDecls
-Right resolvedDecls = resolveDecls decls $ uIdMapFromList
+Right resolvedDecls = resolveDecls decls
   [ ("vector", vectorId)
   , ("uidMap", uidMapId)
   , ("lfix", lfixId)
@@ -131,7 +132,7 @@ syntaxInterfaceTable =
         , TyArgVal fixTy
         ]
 
-  in uIdMapFromList
+  in
     [ (syntaxOpsId, EffectInterface [("uid", ValTyK), ("a", ValTyK)]
       -- Fix :: f (Fix f) -> Fix f
       -- FixTy :: Ty uid a (Fix (Ty uid a)) -> Fix (Ty uid a)

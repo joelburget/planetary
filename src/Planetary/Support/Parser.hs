@@ -7,6 +7,7 @@
 {-# language OverloadedStrings #-}
 {-# language PackageImports #-}
 {-# language StandaloneDeriving #-}
+{-# language TypeFamilies #-}
 {-# language TupleSections #-}
 -- A simple Core Frank parser
 module Planetary.Support.Parser where
@@ -138,12 +139,12 @@ parseAbilityBody =
         _ <- textSymbol "0"
         skipOptional comma
         instances <- option [] parseInterfaceInstances
-        return $ Ability ClosedAbility (uIdMapFromList instances)
+        return $ Ability ClosedAbility (fromList instances)
       varAb = do
         var <- option ("e" :: Text) (try identifier)
         skipOptional comma
         instances <- parseInterfaceInstances
-        return $ Ability OpenAbility (uIdMapFromList instances)
+        return $ Ability OpenAbility (fromList instances)
   in closedAb <|> varAb <?> "Ability Body"
 
 parseAbility :: MonadicParsing m => m Ability'
@@ -337,9 +338,9 @@ parseHandle = (do
       rhs <- parseTm
       pure (var, rhs)
 
-    let handlers = uIdMapFromList $
+    let handlers = fromList $
           (\(uid, _, rows) -> (uid, rows)) <$> effectHandlers
-        adjustment = Adjustment $ uIdMapFromList $
+        adjustment = Adjustment $ fromList $
           (\(uid, tyArgs, _) -> (uid, tyArgs)) <$> effectHandlers
 
     pure (handlers, adjustment, valueHandler)

@@ -1,6 +1,8 @@
 {-# language DataKinds #-}
+{-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language TypeApplications #-}
+{-# language TypeFamilies #-}
 module Planetary.Library.HaskellForeign
   ( mkForeign
   , mkForeignTm
@@ -30,7 +32,7 @@ import Planetary.Support.Ids
 import Planetary.Util
 
 haskellOracles :: CurrentHandlers
-haskellOracles = uIdMapFromList
+haskellOracles =
   [ (intOpsId, [ liftBinaryOp @Int (+) , liftBinaryOp @Int (-) ])
   , (boolOpsId, [ liftBinaryOp (&&) , liftBinaryOp (||), liftUnaryOp not ])
   , (textOpsId, [ liftBinaryOp @Text (<>) ])
@@ -58,7 +60,7 @@ lfix   = DataTy (UidTy lfixId)
 -- For now these are all opaque: they don't expose any constructors we can see
 -- XXX how do we check the types are saturated correctly?
 haskellDataTypes :: DataTypeTableI
-haskellDataTypes = uIdMapFromList
+haskellDataTypes =
   [ (vectorId, emptyDataTypeInterface)
   , (uidMapId, emptyDataTypeInterface)
   -- , (lfixId, DataTypeInterface ["Fix"] [])
@@ -66,7 +68,7 @@ haskellDataTypes = uIdMapFromList
 
 -- TODO: some way to declare both implementation and type at the same time
 interfaceTable :: InterfaceTableI
-interfaceTable = uIdMapFromList
+interfaceTable =
   [ (intOpsId, EffectInterface []
     [ CommandDeclaration "+" [intTy, intTy] intTy -- +
     , CommandDeclaration "-" [intTy, intTy] intTy -- -
@@ -123,7 +125,7 @@ mkForeignTm :: IsIpld a => Cid -> Vector ValTyI -> a -> TmI
 mkForeignTm tyId tySat = ForeignValue tyId tySat . fst . mkForeign
 
 -- exampleDataTypes :: DataTypeTable Cid String
--- exampleDataTypes = uIdMapFromList
+-- exampleDataTypes =
 --   -- void has no constructor
 --   [ (voidUid, [])
 --   -- unit has a single nullary constructor

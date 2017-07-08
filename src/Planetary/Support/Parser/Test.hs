@@ -1,7 +1,9 @@
 {-# language NamedFieldPuns #-}
+{-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language PackageImports #-}
 {-# language PatternSynonyms #-}
+{-# language TypeFamilies #-}
 module Planetary.Support.Parser.Test (unitTests) where
 
 import Data.Text (Text)
@@ -104,14 +106,14 @@ unitTests = testGroup "parsing"
 
   , parserTest "0" parseAbilityBody closedAbility
   , parserTest "0,<1>" parseAbilityBody $
-    Ability ClosedAbility (uIdMapFromList [("1", [])])
+    Ability ClosedAbility [("1", [])]
   , parserTest "e" parseAbilityBody emptyAbility
   , parserTest "e,<1>" parseAbilityBody $
-    Ability OpenAbility (uIdMapFromList [("1", [])])
+    Ability OpenAbility [("1", [])]
 
   -- TODO: parseAbility
   , parserTest "[0,<1>]" parseAbility $
-    Ability ClosedAbility (uIdMapFromList [("1", [])])
+    Ability ClosedAbility [("1", [])]
 
   , parserTest "[]" parseAbility emptyAbility
   , parserTest "[0]" parseAbility closedAbility
@@ -222,16 +224,16 @@ unitTests = testGroup "parsing"
           , "  | y -> y"
           ]
         scrutinee = Cut (Application []) (FV"y")
-        adj = Adjustment (uIdMapFromList
+        adj = Adjustment
           [ ("Receive", [TyArgVal (FreeVariableTy"X")])
-          ])
-        peg = Peg (Ability OpenAbility (uIdMapFromList [("Abort", [])]))
+          ]
+        peg = Peg (Ability OpenAbility [("Abort", [])])
                   (FreeVariableTy "Y")
         handlers =
           [ ("Receive", [([], "r", Cut (Application []) (FV"abort"))])
           ]
         fallthrough = ("y", FV"y")
-        cont = handle adj peg (uIdMapFromList handlers) fallthrough
+        cont = handle adj peg (fromList handlers) fallthrough
         expected = Cut cont scrutinee
     in parserTest defn parseHandle expected
 

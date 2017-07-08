@@ -1,6 +1,5 @@
 {-# language DataKinds #-}
 {-# language FlexibleContexts #-}
-{-# language GADTs #-}
 {-# language LambdaCase #-}
 {-# language NamedFieldPuns #-}
 {-# language TemplateHaskell #-}

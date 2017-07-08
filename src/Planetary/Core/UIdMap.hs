@@ -11,9 +11,8 @@
 module Planetary.Core.UIdMap
   ( UIdMap(..)
   , IsUid
-  , uIdMapFromList
-  , uIdMapToList
-  , uidMapUnion
+  , fromList
+  , toList
   ) where
 
 import Control.Lens (
@@ -24,7 +23,6 @@ import Control.Lens (
 import Control.Lens.At (At(..), Ixed(..), IxValue, Index)
 import Control.Newtype
 import Data.Data
--- import Data.Foldable (toList)
 import Data.Function (on)
 import Data.Hashable (Hashable)
 import Data.HashMap.Strict (HashMap)
@@ -53,15 +51,6 @@ instance IsUid uid => At (UIdMap uid a) where
 instance IsUid uid => Ixed (UIdMap uid a) where
   ix k f (UIdMap m) = UIdMap <$> ix k f m
 
-uIdMapFromList :: IsUid uid => [(uid, a)] -> UIdMap uid a
-uIdMapFromList = UIdMap . HashMap.fromList
-
-uIdMapToList :: UIdMap uid a -> [(uid, a)]
-uIdMapToList (UIdMap hmap) = HashMap.toList hmap
-
-uidMapUnion :: IsUid uid => UIdMap uid a -> UIdMap uid a -> UIdMap uid a
-uidMapUnion = over2 UIdMap HashMap.union
-
 instance (IsUid uid, Ord a) => Ord (UIdMap uid a) where
   compare = compare `on` toList
 
@@ -73,10 +62,10 @@ instance TraversableWithIndex uid (UIdMap uid) where
 
 -- TODO: use HashMap instance when it exists
 instance (IsUid uid, IsIpld a) => IsIpld (UIdMap uid a) where
-  toIpld = toIpld . uIdMapToList
-  fromIpld = uIdMapFromList <$$> fromIpld
+  toIpld = toIpld . toList
+  fromIpld = fromList <$$> fromIpld
 
 instance IsUid uid => IsList (UIdMap uid a) where
   type Item (UIdMap uid a) = (uid, a)
-  toList = uIdMapToList
-  fromList = uIdMapFromList
+  toList (UIdMap hmap) = HashMap.toList hmap
+  fromList = UIdMap . HashMap.fromList

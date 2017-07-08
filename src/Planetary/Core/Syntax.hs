@@ -5,7 +5,6 @@
 {-# language DeriveGeneric #-}
 {-# language DeriveTraversable #-}
 {-# language FlexibleInstances #-}
-{-# language GADTs #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language KindSignatures #-}
 {-# language LambdaCase #-}
@@ -347,7 +346,7 @@ extendAbility
   -> Adjustment uid
   -> Ability uid
 extendAbility (Ability initAb uidMap) (Adjustment adj)
-  = Ability initAb (uidMap `uidMapUnion` adj)
+  = Ability initAb (uidMap <> adj)
 extendAbility _ _ = error "extendAbility called with non-ability"
 
 -- executable

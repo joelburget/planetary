@@ -1,10 +1,13 @@
+{-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
+{-# language TypeFamilies #-}
 module Planetary.Library.HaskellForeign.Test (unitTests) where
 
 import Control.Lens
 import Control.Unification (unfreeze)
+import Data.Monoid ((<>))
 import Data.Text (Text)
 import NeatInterpolation
 import Prelude hiding (not)
@@ -25,15 +28,13 @@ import Planetary.Support.Parser
 simpleEnv :: EvalEnv
 simpleEnv = EvalEnv
   haskellOracles
-  (uIdMapFromList
-    [ mkForeign @Int 1
-    , mkForeign @Int 2
-    , mkForeign @Int 4
-    , mkForeign @Text "hello "
-    , mkForeign @Text "world"
-    , mkForeign @Text "hello world"
-    ]
-  )
+  [ mkForeign @Int 1
+  , mkForeign @Int 2
+  , mkForeign @Int 4
+  , mkForeign @Text "hello "
+  , mkForeign @Text "world"
+  , mkForeign @Text "hello world"
+  ]
 
 unitTests :: TestTree
 unitTests =
@@ -120,10 +121,9 @@ unitTests =
                    [listfTy2 intTy intListTy]
                    [TyArgVal (listfTy1 intTy)]
                ]
-             specialDecl' = uIdMapFromList [(lfixId, specialDecl)]
+             specialDecl' = [(lfixId, specialDecl)]
 
-             dtypes =
-               haskellDataTypes `uidMapUnion` listFDecl `uidMapUnion` specialDecl'
+             dtypes = haskellDataTypes <> listFDecl <> specialDecl'
 
              env' = emptyTypingEnv & typingData .~ dtypes
 

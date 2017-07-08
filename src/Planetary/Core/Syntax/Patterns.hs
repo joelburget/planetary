@@ -1,5 +1,4 @@
 {-# language DataKinds #-}
-{-# language GADTs #-}
 {-# language PatternSynonyms #-}
 {-# language Rank2Types #-}
 {-# language ViewPatterns #-}

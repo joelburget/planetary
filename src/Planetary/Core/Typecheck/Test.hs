@@ -1,8 +1,9 @@
 {-# language FlexibleContexts #-}
-{-# language GADTs #-}
 {-# language LambdaCase #-}
+{-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
+{-# language TypeFamilies #-}
 module Planetary.Core.Typecheck.Test
   ( unitTests
   , checkTest
@@ -78,13 +79,13 @@ unitTests = testGroup "typechecking"
           cmdUid = mockCid "fire missiles"
 
           -- TODO: this duplication between ambient and interfaces is so bad
-          cmdIfaces = uIdMapFromList
+          cmdIfaces =
             [ (cmdUid, EffectInterface []
                 [CommandDeclaration "fire missiles" [domTy] codomTy]
               )
             ]
 
-          ambient = extendAbility emptyAbility $ Adjustment $ uIdMapFromList
+          ambient = extendAbility emptyAbility $ Adjustment
             [ (cmdUid, [TyArgVal domTy])
             -- TODO: what does it mean to have an ability here?
             -- [ (cmdUid, [TyArgVal domTy, TyArgAbility _])
@@ -124,7 +125,7 @@ unitTests = testGroup "typechecking"
           CompTy [ty1, ty1] (Peg emptyAbility resultTy)
         expectedBad = Left (MismatchFailure undefined undefined)
 
-        tables = emptyTypingEnv & typingData .~ uIdMapFromList
+        tables = emptyTypingEnv & typingData .~
           [ (dataUid, DataTypeInterface [] [constr1 ty1ty2vals])
           , (v1Id, DataTypeInterface [] [constr2 []])
           , (v2Id, DataTypeInterface [] [constr2 []])
@@ -136,7 +137,7 @@ unitTests = testGroup "typechecking"
            , inferTest "APP (2)" tables (Cut app baddAnnF) expectedBad
            ]
          , testGroup "check data"
-           [ let tables' = emptyTypingEnv & typingData .~ uIdMapFromList
+           [ let tables' = emptyTypingEnv & typingData .~
                    [ (v1Id, DataTypeInterface [] [ConstructorDecl "constr" [] []]) ]
              in checkTest "DATA (simple)" tables' tm1 (unfreeze ty1)
            , let tm = DataConstructor dataUid 0 [tm1, tm2]
@@ -149,7 +150,7 @@ unitTests = testGroup "typechecking"
     [ let cid = mockCid "ty"
           ty = DataTy (UidTy cid) []
           tm = Annotation (DataConstructor cid 0 []) ty
-          env = emptyTypingEnv & typingData .~ uIdMapFromList
+          env = emptyTypingEnv & typingData .~
             [ (cid, DataTypeInterface []
               [ ConstructorDecl "constr" [] []
               ])
@@ -165,7 +166,7 @@ unitTests = testGroup "typechecking"
             abcdTy = DataTy (UidTy abcdUid) []
             abcdVal = DataConstructor abcdUid 0 []
             val = DataConstructor defgUid 1 [abcdVal, abcdVal]
-            resolutionState = uIdMapFromList
+            resolutionState =
               [ ("abcd", abcdUid)
               , ("defg", defgUid)
               ]
@@ -183,7 +184,7 @@ unitTests = testGroup "typechecking"
             --       | <defg1 abcd abcd abcd>
             --       | <defg2 abcd abcd>
             --   |]
-            env = emptyTypingEnv & typingData .~ uIdMapFromList
+            env = emptyTypingEnv & typingData .~
               [ (abcdUid, DataTypeInterface []
                 [ ConstructorDecl "abcd" [] []
                 ])
@@ -205,7 +206,7 @@ unitTests = testGroup "typechecking"
         in checkTest "SWITCH" env tm expectedTy
       ]
 
-    , let resolutionState = uIdMapFromList $
+    , let resolutionState = fromList $
             -- provides Abort, Send, Receive
             (Frank.resolvedDecls ^. globalCids) ++
             [ ("Int", intId)
@@ -231,7 +232,7 @@ unitTests = testGroup "typechecking"
                 ^? globalCids
                  . to HashMap.fromList
                  . ix "Abort"
-              abortAbility = Ability OpenAbility (uIdMapFromList [(abortId, [])])
+              abortAbility = Ability OpenAbility [(abortId, [])]
               abortTy = SuspendedTy
                 (CompTy []
                   (Peg abortAbility intTy)) -- XXX generalize

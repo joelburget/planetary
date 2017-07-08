@@ -1,4 +1,5 @@
 {-# language LambdaCase #-}
+{-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
@@ -75,7 +76,7 @@ ouch [ForeignValue _ _ uid] = do
 ouch _ = throwError FailedForeignFun
 
 externals :: CurrentHandlers
-externals = uIdMapFromList
+externals =
   [ (consoleId, [ inch, ouch ])
   , (textId, [ textMap ])
   , (charHandlerId, [ charHandler1, charHandler2 ])
@@ -84,10 +85,8 @@ externals = uIdMapFromList
 env :: EvalEnv
 env = EvalEnv
   externals
-  (uIdMapFromList
-    [ mkForeign @Text "\b \b"
-    ]
-  )
+  [ mkForeign @Text "\b \b"
+  ]
 
 -- runIt :: IO ()
 -- runIt = print . fst =<< run env [] main
@@ -250,7 +249,7 @@ addId = mkCid "TODO addId"
 zeroId = mkCid "TODO zeroId"
 
 predefined :: UIdMap Text Cid
-predefined = uIdMapFromList
+predefined =
   [ ("char", charId)
   , ("eraseCharLit", eraseCharLitId)
   , ("Int", intId)

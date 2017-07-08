@@ -1,4 +1,5 @@
-{-# language Rank2Types #-}
+{-# language OverloadedLists #-}
+{-# language TypeFamilies #-}
 module Planetary.Core.Syntax.Test (unitTests) where
 
 import Network.IPLD
@@ -14,13 +15,13 @@ unitTy = DataTy (UidTy unitId) []
 unitTests :: TestTree
 unitTests = testGroup "syntax"
   [ testCase "extendAbility 1" $
-    let uidMap = uIdMapFromList [(unitId, [TyArgVal unitTy])]
+    let uidMap = [(unitId, [TyArgVal unitTy])]
         actual :: Ability Cid
         actual = extendAbility emptyAbility (Adjustment uidMap)
         expected = Ability OpenAbility uidMap
     in expected @?= actual
   , testCase "extendAbility 2" $
-    let uidMap = uIdMapFromList [(unitId, [TyArgVal unitTy])]
+    let uidMap = [(unitId, [TyArgVal unitTy])]
         actual :: Ability Cid
         actual = extendAbility closedAbility (Adjustment uidMap)
         expected = Ability ClosedAbility uidMap

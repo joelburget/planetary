@@ -1,6 +1,5 @@
 {-# language DataKinds #-}
 {-# language FlexibleInstances #-}
-{-# language GADTs #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language LambdaCase #-}
 {-# language MultiParamTypeClasses #-}
@@ -157,8 +156,8 @@ convertUidMap umap = do
     (\(key, tyArg) -> (,)
       <$> lookupUid key
       <*> pure tyArg)
-    (uIdMapToList umap)
-  pure (uIdMapFromList umap')
+    (toList umap)
+  pure (fromList umap')
 
 convertDti
   :: DataTypeInterface Text

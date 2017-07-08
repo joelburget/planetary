@@ -1,7 +1,9 @@
 {-# language DataKinds #-}
+{-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
+{-# language TypeFamilies #-}
 module Planetary.Core.Eval.Test (unitTests, stepTest) where
 
 import Control.Lens
@@ -106,7 +108,7 @@ unitTests  =
              one  = mkForeignTm @Int intId [] 1
              two  = mkForeignTm @Int intId [] 2
 
-             resolutionState = uIdMapFromList $
+             resolutionState = fromList $
                -- Provides Abort
                (Frank.resolvedDecls ^. globalCids) ++
                [("Int", intId)]
@@ -157,8 +159,8 @@ unitTests  =
 
              evenodd' = resolveTm
                -- Provides NatF, Bool
-               ((uIdMapFromList $ Frank.resolvedDecls ^. globalCids) <>
-                (uIdMapFromList [("Fix", undefined)]))
+               ((fromList $ Frank.resolvedDecls ^. globalCids) <>
+                [("Fix", undefined)])
                evenodd
 
              -- mkTm n = [| evenOdd n |]

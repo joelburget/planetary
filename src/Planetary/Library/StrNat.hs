@@ -1,4 +1,6 @@
+{-# language OverloadedLists #-}
 {-# language QuasiQuotes #-}
+{-# language TypeFamilies #-}
 module Planetary.Library.StrNat () where
 
 decls = forceDeclarations [text|
@@ -23,7 +25,7 @@ semantics = letrec
 -- * sub in add, cat
 
 predefined :: UIdMap Text Cid
-predefined = uIdMapFromList
+predefined =
   [ ("add", _)
   , ("cat", _)
   ]
