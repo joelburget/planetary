@@ -5,9 +5,11 @@
 module Planetary.Core.Eval.Test (unitTests, stepTest) where
 
 import Control.Lens
-import Prelude hiding (not)
+import qualified Data.HashMap.Strict as HashMap
+import Data.Monoid ((<>))
 import NeatInterpolation
 import Network.IPLD as IPLD
+import Prelude hiding (not)
 import Test.Tasty
 import Test.Tasty.HUnit
 
@@ -76,23 +78,12 @@ unitTests  =
        , testGroup "case"
            [ stepTest "case False of { False -> True; True -> False }"
                emptyEnv 1
-             -- [tmExp|
-             --   case false of
-             --     boolId:
-             --       | -> one
-             --       | -> zero
-             -- |]
-             -- [ ("false", false)
-             -- , ("bool", bool)
-             -- , ("one", one)
-             -- , ("zero", zero)
-             -- ]
-             (Cut not false)
-             (Right true)
+               (Cut not false)
+               (Right true)
            , stepTest "case True of { False -> True; True -> False }"
                emptyEnv 1
-             (Cut not true)
-             (Right false)
+               (Cut not true)
+               (Right false)
 
          , stepTest "not false" emptyEnv 1
            (Cut not false)
@@ -126,8 +117,14 @@ unitTests  =
                  handler'
 
              handleVal = substitute "x" zero handler''
+
+             abortCid = Frank.resolvedDecls ^?!
+               globalCids . to HashMap.fromList . ix "Abort"
+             abort = Command abortCid 0
+             handleAbort = substitute "x" abort handler''
          in testGroup "handle"
               [ runTest "handle val" emptyEnv handleVal (Right two)
+              , runTest "handle abort" emptyEnv handleAbort (Right one)
               ]
 
        , let
@@ -144,6 +141,37 @@ unitTests  =
          in stepTest "let x = false in let y = not x in not y"
               emptyEnv 3 tm (Right false)
 
-       -- , let
-       --   in stepTest ""
+       , let evenodd = forceTm [text|
+               letrec
+                 even : forall. Fix NatF -> Bool
+                      = \n -> case unfix n of
+                        NatF:
+                          | <z>       -> <Bool.1> -- true
+                          | <succ n'> -> odd n'
+                 odd : forall. Fix NatF -> Bool
+                     = \n -> case unfix n of
+                       NatF:
+                         | <z>       -> <Bool.0> -- false
+                         | <succ n'> -> even n'
+             |]
+
+             evenodd' = resolveTm
+               -- Provides NatF, Bool
+               ((uIdMapFromList $ Frank.resolvedDecls ^. globalCids) <>
+                (uIdMapFromList [("Fix", undefined)]))
+               evenodd
+
+             -- mkTm n = [| evenOdd n |]
+             mkTm :: Int -> Tm Cid
+             mkTm n = undefined
+
+             natBoolEnv = emptyEnv
+         in testGroup "letrec"
+              [ stepTest "even 0"  natBoolEnv 1  (mkTm 0)  (Right true)
+              , stepTest "even 7"  natBoolEnv 8  (mkTm 7)  (Right false)
+              , stepTest "even 10" natBoolEnv 11 (mkTm 10) (Right true)
+              , stepTest "odd 0"   natBoolEnv 1  (mkTm 0)  (Right false)
+              , stepTest "odd 7"   natBoolEnv 8  (mkTm 7)  (Right true)
+              , stepTest "odd 10"  natBoolEnv 11 (mkTm 10) (Right false)
+              ]
        ]

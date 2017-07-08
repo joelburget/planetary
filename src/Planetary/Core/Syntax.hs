@@ -321,6 +321,7 @@ data ResolvedDecls = ResolvedDecls
 
 -- TODO: make traversals
 -- namedData :: Text -> Traversal' ResolvedDecls DataTypeInterfaceI
+-- namedInterface :: Text -> Traversal' ResolvedDecls EffectInterfaceI
 
 namedData :: Text -> ResolvedDecls -> Maybe (Cid, DataTypeInterfaceI)
 namedData name decls = do

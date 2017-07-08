@@ -1,10 +1,7 @@
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
-module Planetary.Library.HaskellForeign.Test
-  ( unitTests
-  , runHaskellForeignTests
-  ) where
+module Planetary.Library.HaskellForeign.Test (unitTests) where
 
 import Control.Lens
 import Control.Unification (unfreeze)
@@ -126,7 +123,7 @@ unitTests =
              specialDecl' = uIdMapFromList [(lfixId, specialDecl)]
 
              dtypes =
-               (haskellDataTypes `uidMapUnion` listFDecl `uidMapUnion` specialDecl')
+               haskellDataTypes `uidMapUnion` listFDecl `uidMapUnion` specialDecl'
 
              env' = emptyTypingEnv & typingData .~ dtypes
 
@@ -134,7 +131,3 @@ unitTests =
             , checkTest "ListF [1]" env' oneList (unfreeze intListTy)
             ]
       ]
-
-
-runHaskellForeignTests :: IO ()
-runHaskellForeignTests = defaultMain unitTests

@@ -104,16 +104,18 @@ data Unit =
   | <unit>
 
 data Bool =
-  | <tt>
   | <ff>
+  | <tt>
 
 data Pair X Y =
   | <pair X Y>
 
+-- TODO NatF is duplicated in Eval.Test
 data NatF Nat =
   | <zero>
   | <suc Nat>
 
+-- TODO ListF is duplicated in HaskellForeign.Test
 data ListF X list =
   | <nil>
   | <cons X <list X>>
@@ -140,7 +142,7 @@ interface Console =
   | ouch : char -> <Unit>
 
 -- XXX inductive
-data Log [e] X =
+data LogF [e] X Log =
   | <start {[e]X}>
   | <inched <Log [e] X> {char -> [e]X}>
   | <ouched <Log [e] X>>

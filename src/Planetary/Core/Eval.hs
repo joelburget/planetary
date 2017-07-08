@@ -25,6 +25,8 @@ import Planetary.Core.Syntax.Patterns
 import Planetary.Core.UIdMap
 import Planetary.Util
 
+import Debug.Trace
+
 data Err
   = RowBound
   | IndexErr
@@ -111,8 +113,9 @@ stepCut :: ContinuationI -> TmI -> EvalM TmI
 stepCut (Application spine) (Lambda _names scope)
   -- TODO: safe
   = pure $ instantiate (spine !!) scope
-stepCut (Application spine) (Command uid row) =
+stepCut (Application spine) (Command uid row) = do
   -- handler <- findHandler
+  traceM "running handler"
   runHandler uid row spine
   -- handleCommand cid row spine handlers
 stepCut (Case _uid1 rows) (DataConstructor _uid2 rowNum args) = do

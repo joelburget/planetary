@@ -21,14 +21,15 @@ import Control.Lens (
   FoldableWithIndex(..),
   TraversableWithIndex(..)
   )
-import Control.Lens.At -- (At, Ixed, IxValue, Index)
+import Control.Lens.At (At(..), Ixed(..), IxValue, Index)
 import Control.Newtype
 import Data.Data
-import Data.Foldable (toList)
+-- import Data.Foldable (toList)
 import Data.Function (on)
 import Data.Hashable (Hashable)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
+import GHC.Exts (IsList(..))
 import GHC.Generics
 import Network.IPLD
 
@@ -74,3 +75,8 @@ instance TraversableWithIndex uid (UIdMap uid) where
 instance (IsUid uid, IsIpld a) => IsIpld (UIdMap uid a) where
   toIpld = toIpld . uIdMapToList
   fromIpld = uIdMapFromList <$$> fromIpld
+
+instance IsUid uid => IsList (UIdMap uid a) where
+  type Item (UIdMap uid a) = (uid, a)
+  toList = uIdMapToList
+  fromList = uIdMapFromList
