@@ -444,9 +444,6 @@ shiftTraverse f = go 0 where
   go ix (Let pty name body) = Let pty name (go (succ ix) body)
   go _ _ = error "impossible: shiftTraverse"
 
-abstract :: (Text -> Maybe Int) -> Tm uid -> Tm uid
-abstract = close
-
 close :: (Text -> Maybe Int) -> Tm uid -> Tm uid
 close f =
   let binder depth var = case var of
@@ -456,15 +453,9 @@ close f =
         _bv -> var
   in shiftTraverse binder
 
-abstract1 :: Text -> Tm uid -> Tm uid
-abstract1 = close1
-
 close1 :: Text -> Tm uid -> Tm uid
 close1 name = close
   (\free -> if name == free then Just 0 else Nothing)
-
-instantiate :: (Int -> Tm uid) -> Tm uid -> Tm uid
-instantiate = open
 
 -- | Enter a scope, instantiating all bound variables
 open :: (Int -> Tm uid) -> Tm uid -> Tm uid
@@ -473,9 +464,6 @@ open f =
         BoundVariable level ix -> if depth == level then f ix else var
         _fv -> var
   in shiftTraverse unbinder
-
-instantiate1 :: Tm uid -> Tm uid -> Tm uid
-instantiate1 = open1
 
 -- | Enter a 'Scope' that binds one variable, instantiating it
 open1 :: Tm uid -> Tm uid -> Tm uid

@@ -111,7 +111,7 @@ step Letrec{} = todo "step letrec"
 stepCut :: ContinuationI -> TmI -> EvalM TmI
 stepCut (Application spine) (Lambda _names scope)
   -- TODO: safe
-  = pure $ instantiate (spine !!) scope
+  = pure $ open (spine !!) scope
 stepCut (Application spine) (Command uid row) = do
   -- handler <- findHandler
   traceM "running handler"
@@ -120,15 +120,15 @@ stepCut (Application spine) (Command uid row) = do
 stepCut (Case _uid1 rows) (DataConstructor _uid2 rowNum args) = do
   (_, row) <- rows ^? ix rowNum ?? IndexErr
   -- TODO: maybe we need to evaluate the args to a value first
-  pure (instantiate (args !!) row)
+  pure (open (args !!) row)
 -- stepCut (Handle _adj _peg handlers _handleValue) (Command uid row) = do
 --   let AdjustmentHandlers uidmap = handlers
 --   handler <- (uidmap ^? ix uid . ix row) >>= (??
 stepCut (Handle _adj _peg _handlers handleValue) v
-  | isValue v = pure $ instantiate1 v handleValue
+  | isValue v = pure $ open1 v handleValue
 
 stepCut (Let _polyty _name body) rhs
-  | isValue rhs = pure $ instantiate1 rhs body
+  | isValue rhs = pure $ open1 rhs body
 stepCut cont cut@Cut {} = stepCut cont =<< step cut
 stepCut cont scrutinee = throwError (CantCut cont scrutinee)
 
@@ -154,7 +154,7 @@ handleCommand uid row spine (UIdMap handlers) = do
     --     Just i -> spine !! i
   -- \case
   --       -- XXX really not sure this is right
-  --       Nothing -> Value (Lambda (abstract Just val))
+  --       Nothing -> Value (Lambda (close Just val))
   --       Just i -> spine !! i
 
-  pure (instantiate instantiator handler)
+  pure (open instantiator handler)

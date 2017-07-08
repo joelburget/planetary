@@ -303,7 +303,7 @@ withValTypes'
   -> (TmI -> TcM' a)
   -> TcM' a
 withValTypes' tys scope cb =
-  let body = instantiate (BV 0) scope
+  let body = open (BV 0) scope
   in withValTypes tys (cb body)
 
 openAdjustmentHandler
@@ -319,8 +319,8 @@ openAdjustmentHandler handler argTys handlerTy cb = do
       -- instantiator Nothing  = BV 0
       -- instantiator (Just i) = BV (length argTys + 1)
 
-  local (& varTypes %~ (bindingTys:)) (cb (instantiate instantiator handler))
-  -- withState' envAdj (cb (instantiate instantiator handler))
+  local (& varTypes %~ (bindingTys:)) (cb (open instantiator handler))
+  -- withState' envAdj (cb (open instantiator handler))
 
 instantiateWithEnv :: PolytypeI -> TcM' (UTy IntVar)
 instantiateWithEnv = todo "instantiateWithEnv"

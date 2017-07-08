@@ -38,7 +38,7 @@ pattern VTy name = FreeVariableTy name
 -- TODO: make these bidirectional
 
 lam :: Vector Text -> Tm uid -> Tm uid
-lam vars body = Lambda vars (abstract (`elemIndex` vars) body)
+lam vars body = Lambda vars (close (`elemIndex` vars) body)
 
 unlam :: Tm uid -> Maybe (Vector Text, Tm uid)
 unlam (Lambda binderNames scope) =
@@ -56,7 +56,7 @@ case_
   -> Vector (Vector Text, Tm uid)
   -> Tm uid
 case_ uid tms =
-  let f (vars, tm) = (vars, abstract (`elemIndex` vars) tm)
+  let f (vars, tm) = (vars, close (`elemIndex` vars) tm)
   in Case uid (f <$> tms)
 
 uncase
@@ -87,9 +87,9 @@ handle adj peg handlers (bodyVar, body) =
         | var == kVar = Just 0
         | otherwise   = succ <$> elemIndex var vars
       handlers' = (fmap . fmap)
-        (\(vars, kVar, rhs) -> (vars, abstract (abstractor vars kVar) rhs))
+        (\(vars, kVar, rhs) -> (vars, close (abstractor vars kVar) rhs))
         handlers
-      body' = abstract1 bodyVar body
+      body' = close1 bodyVar body
   in Handle adj peg handlers' body'
 
 let_
@@ -104,7 +104,7 @@ let_ name pty rhs body = Cut
   -- cutting against. `let_` matches the order they appear in the typical
   -- syntax.
 
-  (Let pty name (abstract1 name body)) -- continuation
+  (Let pty name (close1 name body)) -- continuation
   rhs -- term
 
 letrec
@@ -113,4 +113,4 @@ letrec
   -> Tm uid
   -> Tm uid
 letrec names binderVals body =
-  Letrec binderVals (abstract (`elemIndex` names) body)
+  Letrec binderVals (close (`elemIndex` names) body)
