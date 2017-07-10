@@ -10,6 +10,7 @@ module Planetary.Core.Eval.Test (unitTests, stepTest) where
 import Control.Lens
 import qualified Data.HashMap.Strict as HashMap
 import Data.Monoid ((<>))
+import Data.Text (Text)
 import NeatInterpolation
 import Network.IPLD as IPLD
 import Prelude hiding (not)
@@ -20,9 +21,12 @@ import Planetary.Core
 import Planetary.Support.Ids
 import Planetary.Support.NameResolution (resolveTm)
 import Planetary.Support.Parser (forceTm)
-import Planetary.Library.FrankExamples as Frank
-import Planetary.Library.HaskellForeign (mkForeignTm)
+import qualified Planetary.Library.FrankExamples as Frank
+import Planetary.Library.HaskellForeign (mkForeignTm, boolTy)
+import qualified Planetary.Library.HaskellForeign as HaskellForeign
 import Planetary.Util (todo)
+
+import Debug.Trace
 
 stepTest
   :: String
@@ -153,44 +157,53 @@ unitTests  =
 
        , let evenodd = forceTm [text|
                letrec
-                 even : forall. Fix NatF -> Bool
-                      = \n -> case unfix n of
+                 even : forall. {<Fix NatF> -> <Bool>}
+                      = \n -> case unFix n of
                         NatF:
                           | <z>       -> <Bool.1> -- true
                           | <succ n'> -> odd n'
-                 odd : forall. Fix NatF -> Bool
-                     = \n -> case unfix n of
+                 odd : forall. {<Fix NatF> -> <Bool>}
+                     = \n -> case unFix n of
                        NatF:
                          | <z>       -> <Bool.0> -- false
                          | <succ n'> -> even n'
+               in body
              |]
 
-             evenodd' = resolveTm
+             Right evenodd' = resolveTm
                -- Provides NatF, Bool
                ((fromList $ Frank.resolvedDecls ^. globalCids) <>
                 [("Fix", lfixId)])
                evenodd
 
-             natId = undefined
-             mkFix = undefined
+             mkFix = Command fixOpsId 0
+             unFix = Command fixOpsId 1
+             Just (natfId, _) = namedData "NatF" Frank.resolvedDecls
+             Just (_, fixDecl) = namedInterface "FixOps" HaskellForeign.resolvedDecls
+             EffectInterface fixBinders fixCtrs = fixDecl
+
+             [_, CommandDeclaration _ _ unfixResult] = fixCtrs
+             unfixTy = Polytype fixBinders unfixResult
 
              -- mkTm n = [| evenOdd n |]
-             mkTm :: Int -> Tm Cid
-             mkTm n =
-               let mkNat 0 = mkFix $ DataConstructor natId 0 []
-                   mkNat k = mkFix $ DataConstructor natId 1 [mkNat (k - 1)]
+             mkTm :: Text -> Int -> Tm Cid
+             mkTm fnName n =
+               let mkNat 0 = Cut mkFix (Application [DataConstructor natfId 0 []])
+                   mkNat k = Cut mkFix (Application [DataConstructor natfId 1 [mkNat (k - 1)]])
 
-                   closer = \case
-                     unfix ->
-               in close
+               in let_ "unFix" unfixTy unFix $
+                    -- closeXXX fnName $
+                      let_ "body" (Polytype [] boolTy)
+                        (Cut (FV fnName) (Application [mkNat n]))
+                        evenodd'
 
              natBoolEnv = emptyEnv
          in testGroup "letrec"
-              [ stepTest "even 0"  natBoolEnv 1  (mkTm 0)  (Right true)
-              , stepTest "even 7"  natBoolEnv 8  (mkTm 7)  (Right false)
-              , stepTest "even 10" natBoolEnv 11 (mkTm 10) (Right true)
-              , stepTest "odd 0"   natBoolEnv 1  (mkTm 0)  (Right false)
-              , stepTest "odd 7"   natBoolEnv 8  (mkTm 7)  (Right true)
-              , stepTest "odd 10"  natBoolEnv 11 (mkTm 10) (Right false)
+              [ stepTest "even 0"  natBoolEnv 2  (mkTm "even" 0)  (Right true)
+              -- , stepTest "even 7"  natBoolEnv 8  (mkTm "even" 7)  (Right false)
+              -- , stepTest "even 10" natBoolEnv 11 (mkTm "even" 10) (Right true)
+              -- , stepTest "odd 0"   natBoolEnv 1  (mkTm "odd"  0)  (Right false)
+              -- , stepTest "odd 7"   natBoolEnv 8  (mkTm "odd"  7)  (Right true)
+              -- , stepTest "odd 10"  natBoolEnv 11 (mkTm "odd"  10) (Right false)
               ]
        ]

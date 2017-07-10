@@ -14,7 +14,7 @@ import NeatInterpolation
 import Network.IPLD
 
 import Planetary.Core
-import Planetary.Library.HaskellForeign
+import Planetary.Library.HaskellForeign hiding (resolvedDecls)
 import Planetary.Support.Ids
 import Planetary.Support.NameResolution
 import Planetary.Support.Parser
@@ -151,7 +151,7 @@ data Buffer =
   | <hold char>
 
 main = letrec
-  input : forall X. {<Log [<LookAhead>, <Abort>, <Console>] X>
+  input : forall X. {<LogF [<LookAhead>, <Abort>, <Console>] X>
         -> Buffer
         -> X
         -> [Console]X}
@@ -162,25 +162,25 @@ main = letrec
                 | <hold c> -> input <Buffer.0 c> (k c)
                 | <empty> -> on Console.0! (charHandler1
                   (rollback l)                                  -- '\b'
-                  (\c -> input <Log.1 l k> <Buffer.0 c> (k c)) -- other char
+                  (\c -> input <LogF.1 l k> <Buffer.0 c> (k c)) -- other char
                   )
             | <accept -> k> -> case buffer of
               Buffer:
-                | <hold c> -> snd (Console.1 c) (input <Log.2 l> empty (k unit))
+                | <hold c> -> snd (Console.1 c) (input <LogF.2 l> empty (k unit))
                 | <empty>  -> input l empty (k unit)
           Abort:
             | <aborting -> k> -> rollback log
           | x -> x
 
-  rollback : forall X. {<Log [<LookAhead>, <Abort>, <Console>] X> -> [<Console>]X}
+  rollback : forall X. {<LogF [<LookAhead>, <Abort>, <Console>] X> -> [<Console>]X}
            = \x -> case x of
-    Log:
+    LogF:
       | <start p> -> parse p
       | <ouched l> -> snd (textMap Console.1 eraseCharLit) (rollback l)
       | <inched l k> -> input l empty (k LookAhead.0!)
 
   parse : forall X. {{[<LookAhead>, <Abort>, <Console>]X} -> [<Console>]X}
-        = \p -> input <Log.0 p> empty p!
+        = \p -> input <LogF.0 p> empty p!
 
   on : forall X Y. {X -> {X -> Y} -> Y}
      = \x f -> f x
@@ -258,4 +258,4 @@ predefined =
   ]
 
 resolvedDecls :: ResolvedDecls
-Right resolvedDecls = resolveDecls decls predefined
+Right resolvedDecls = resolveDecls predefined decls

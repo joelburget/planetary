@@ -38,6 +38,7 @@ module Planetary.Support.Ids
   , syntaxOpsId
   , rowId
   , tupleId
+  , fixOpsId
   ) where
 
 import Data.Byteable (toBytes)
@@ -90,4 +91,5 @@ intId
   : syntaxOpsId
   : rowId
   : tupleId
+  : fixOpsId
   :_ = generateCids

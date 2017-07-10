@@ -97,7 +97,7 @@ data Tm uid tyvar tmvar tm =
 |]
 
 resolvedDecls :: ResolvedDecls
-Right resolvedDecls = resolveDecls decls
+Right resolvedDecls = resolveDecls
   [ ("vector", vectorId)
   , ("uidMap", uidMapId)
   , ("lfix", lfixId)
@@ -105,6 +105,7 @@ Right resolvedDecls = resolveDecls decls
   , ("text", textId)
   , ("tuple", tupleId)
   ]
+  decls
 tyId :: Cid
 Just (tyId, _) = namedData "Ty" resolvedDecls
 

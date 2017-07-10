@@ -57,7 +57,7 @@ resolveTm initState tm =
 
 -- For each declaration, in order:
 -- * Close the term and type levels (convert Text free vars to Int)
---   (there should be no free variables!)
+--   (remaining free variables are okay)
 -- * Replace any names (in the uid position) to a previously defined name with
 --   the full uid
 -- * Generate uid, save it for future use
@@ -65,10 +65,10 @@ resolveTm initState tm =
 -- Term conversions can spawn child type conversions (at the places where terms
 -- hold types).
 resolveDecls
-  :: [DeclS]
-  -> ResolutionState
+  :: ResolutionState
+  -> [DeclS]
   -> Either ResolutionErr ResolvedDecls
-resolveDecls xs initState =
+resolveDecls initState xs =
   let ResolutionM action = nameResolutionM xs
   in (evalState (runReaderT (runExceptT action) []) initState)
 

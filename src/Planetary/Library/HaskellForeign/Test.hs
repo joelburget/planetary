@@ -89,7 +89,7 @@ unitTests =
                | <consf a f>
              |]
 
-             Right resolved = resolveDecls decls mempty
+             Right resolved = resolveDecls mempty decls
              listFDecl = resolved ^. datatypes
 
              Just (listfId, _) = namedData "ListF" resolved
@@ -123,7 +123,7 @@ unitTests =
                ]
              specialDecl' = [(lfixId, specialDecl)]
 
-             dtypes = haskellDataTypes <> listFDecl <> specialDecl'
+             dtypes = {-haskellDataTypes <>-} listFDecl <> specialDecl'
 
              env' = emptyTypingEnv & typingData .~ dtypes
 
