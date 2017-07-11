@@ -124,7 +124,7 @@ stepCut (Case _uid1 rows) (DataConstructor _uid2 rowNum args) = do
 -- stepCut (Handle _adj _peg handlers _handleValue) (Command uid row) = do
 --   let AdjustmentHandlers uidmap = handlers
 --   handler <- (uidmap ^? ix uid . ix row) >>= (??
-stepCut (Handle _adj _peg _handlers handleValue) v
+stepCut (Handle _adj _peg _handlers (_, handleValue)) v
   | isValue v = pure $ open1 v handleValue
 
 stepCut (Let _polyty _name body) rhs

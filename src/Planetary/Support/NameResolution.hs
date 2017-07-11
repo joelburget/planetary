@@ -14,11 +14,13 @@ module Planetary.Support.NameResolution
   , ResolutionErr(..)
   ) where
 
-import Control.Lens ((&), ix, at, (?~), (^?), (%~))
+import Control.Lens ((&), ix, at, (?~), (^?), (%~), _1, imap)
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
 import Data.Functor.Fixedpoint
+import Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
 import Data.List (elemIndex)
 import Data.Text (Text)
 import Network.IPLD
@@ -28,7 +30,7 @@ import Planetary.Util
 
 data ResolutionErr
   = UnresolvedUid Text
-  | VarLookup Text
+  | TyVarLookup Text
   | NotClosed
   deriving Show
 
@@ -46,6 +48,14 @@ newtype ResolutionM a = ResolutionM
            , MonadReader [Text]
            , MonadState ResolutionState
            )
+
+data ClosureErr
+  = TmVarLookup Text
+  deriving Show
+
+type CloseInfo = HashMap Text (Int, Int)
+newtype CloseM a = CloseM (ExceptT ClosureErr (Reader CloseInfo) a)
+  deriving (Functor, Applicative, Monad, MonadError ClosureErr, MonadReader CloseInfo)
 
 resolveTm
   :: ResolutionState
@@ -91,46 +101,79 @@ nameResolutionM (TermDecl_ (TermDecl name recTm):xs) = do
   pure (xs' & terms %~ (TermDecl name recTm':))
 nameResolutionM [] = pure (ResolvedDecls mempty mempty [] [])
 
-lookupVar :: Text -> ResolutionM Int
-lookupVar var = asks (elemIndex var) >>= (?? VarLookup var)
+lookupTyVar :: Text -> ResolutionM Int
+lookupTyVar var = asks (elemIndex var) >>= (?? TyVarLookup var)
 
 lookupUid :: Text -> ResolutionM Cid
 lookupUid name = gets (^? ix name) >>= (?? UnresolvedUid name)
 
-withPushedVars :: [Text] -> ResolutionM a -> ResolutionM a
-withPushedVars names = local (names ++)
+todowithPushedVars :: [Text] -> ResolutionM a -> ResolutionM a
+todowithPushedVars names = local (names ++)
+
+withTmVars :: Vector Text -> CloseM a -> CloseM a
+withTmVars names = local $ \hmap ->
+      -- increment the depth
+  let hmap' = hmap & (traverse . _1) %~ (+1)
+      newHmap = HashMap.fromList $ flip imap names $ \i name -> (name, (0, i))
+      hmap'' = HashMap.union hmap' newHmap
+  in hmap''
+
+lookupTmVar :: Text -> CloseM (Int, Int)
+lookupTmVar name = asks (^? ix name) >>= (?? TmVarLookup name)
 
 --
+
+closeTm :: Tm a -> CloseM (Tm a)
+closeTm = anaM $ \case
+  FreeVariable name ->
+    ((\(depth, col) -> BoundVariable_ depth col) <$> lookupTmVar name) `catchError`
+    (\_ -> pure $ FreeVariable_ name)
+  BoundVariable depth column -> pure $ BoundVariable_ depth column
+  DataConstructor uid row tms -> DataConstructor_ uid row <$> (traverse closeTm tms)
+  ForeignValue uid1 tys uid2 -> pure $ ForeignValue_ uid1 tys uid2
+  Lambda names tm -> withTmVars names $ Lambda_ names <$> closeTm tm
+  -- InstantiatePolyVar_ tm tyArgs -> pure $ InstantiatePolyVar tm tyArgs
+  -- Command_ uid row -> pure $ Command uid row
+  -- Annotation_ tm ty -> pure $ Annotation tm ty
+  -- Cut_ l r -> pure $ Cut l r
+  -- Letrec_ names defns body -> withPushedVars names $
+  --   pure $ Letrec names defns body
+  -- Application_ spine -> Application <$> mapM closeTm spine
+  -- Case_ uid branches -> pure $ Case uid branches
+  -- Handle_ adj (Peg ab codom) handlers (vName, vHandler) -> Handle
+  --   adj (Peg ab codom) handlers
+  --   <$> ((vName,) <$> withPushedVars [vName] (pure vHandler))
+  -- Handle_ _ _ _ _ -> error "impossible: convertTm Handle_"
+  -- Let_ pty name body -> pure $ Let pty name body
 
 convertTm :: Tm Text -> ResolutionM (Tm Cid)
 convertTm = cataM $ \case
   FreeVariable_ name -> pure $ FreeVariable name
-  -- XXX bind tm variables
   BoundVariable_ depth column -> pure $ BoundVariable depth column
   DataConstructor_ uid row tms -> DataConstructor
     <$> lookupUid uid <*> pure row <*> pure tms
   ForeignValue_ uid1 tys uid2 -> ForeignValue
     <$> lookupUid uid1 <*> (mapM convertTy tys) <*> lookupUid uid2
-  Lambda_ names tm -> pure $ Lambda names tm
+  Lambda_ names tm -> todowithPushedVars names $ pure $ Lambda names tm
   InstantiatePolyVar_ tm tyArgs
     -> InstantiatePolyVar tm <$> (mapM convertTy tyArgs)
   Command_ uid row -> Command <$> lookupUid uid <*> pure row
   Annotation_ tm ty -> Annotation tm <$> convertTy ty
   Cut_ l r -> pure $ Cut l r
-  Letrec_ defns body -> do
+  Letrec_ names defns body -> todowithPushedVars names $ do
     defns' <- forM defns $ \(pty, tm) -> (,)
       <$> convertPolytype pty
       <*> pure tm
-    pure $ Letrec defns' body
+    pure $ Letrec names defns' body
   Application_ spine -> Application <$> mapM convertTm spine
   Case_ uid branches -> Case
     <$> lookupUid uid
     <*> pure branches
-  Handle_ adj (Peg ab codom) handlers valHandler -> Handle
+  Handle_ adj (Peg ab codom) handlers (vName, vHandler) -> Handle
     <$> convertAdjustment adj
     <*> (Peg <$> convertTy ab <*> convertTy codom)
     <*> convertUidMap handlers
-    <*> pure valHandler
+    <*> ((vName,) <$> todowithPushedVars [vName] (pure vHandler))
   Handle_ _ _ _ _ -> error "impossible: convertTm Handle_"
   Let_ pty name body -> Let <$> convertPolytype pty <*> pure name <*> pure body
 
@@ -141,7 +184,7 @@ convertTy = cataM $ \case
   BoundVariableTy_ i     -> pure $ BoundVariableTy i
   FreeVariableTy_ name   ->
     (UidTy <$> lookupUid name) `catchError`
-    (\_ -> BoundVariableTy <$> lookupVar name) `catchError`
+    (\_ -> BoundVariableTy <$> lookupTyVar name) `catchError`
     (\_ -> pure $ FreeVariableTy name)
   UidTy_ uid             -> UidTy <$> lookupUid uid
   CompTy_ dom codom      -> pure $ CompTy dom codom

@@ -90,7 +90,7 @@ handle adj peg handlers (bodyVar, body) =
         (\(vars, kVar, rhs) -> (vars, close (abstractor vars kVar) rhs))
         handlers
       body' = close1 bodyVar body
-  in Handle adj peg handlers' body'
+  in Handle adj peg handlers' (bodyVar, body')
 
 let_
   :: Text
@@ -113,4 +113,4 @@ letrec
   -> Tm uid
   -> Tm uid
 letrec names binderVals body =
-  Letrec binderVals (close (`elemIndex` names) body)
+  Letrec names binderVals (close (`elemIndex` names) body)

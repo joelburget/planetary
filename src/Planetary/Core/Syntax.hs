@@ -253,7 +253,10 @@ data TmF uid tm
   -- TODO: remove this
   | Cut_                !tm            !tm
     -- invariant: each value in a letrec is a lambda
-  | Letrec_             !(Vector (Polytype uid, tm)) !tm
+  | Letrec_
+    !(Vector Text)               -- ^ the name of each fn
+    !(Vector (Polytype uid, tm)) -- ^ a typed lambda
+    !tm                          -- ^ the body
 
   -- Continuation:
   --
@@ -265,7 +268,7 @@ data TmF uid tm
     !(Adjustment uid)
     !(Peg uid)
     !(UIdMap uid (Vector (Vector Text, tm)))
-    !tm
+    !(Text, tm)
   | Let_ !(Polytype uid) !Text !tm
   deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
 
@@ -282,7 +285,7 @@ pattern InstantiatePolyVar tm tyargs       = Fix (InstantiatePolyVar_ tm tyargs)
 pattern Command uid row                    = Fix (Command_ uid row)
 pattern Annotation tm ty                   = Fix (Annotation_ tm ty)
 pattern Cut l r                            = Fix (Cut_ l r)
-pattern Letrec lambdas body                = Fix (Letrec_ lambdas body)
+pattern Letrec names lambdas body          = Fix (Letrec_ names lambdas body)
 
 -- type? newtype?
 type Spine uid = Vector (Tm uid)
@@ -432,15 +435,15 @@ shiftTraverse f = go 0 where
   go _ix cmd@Command{} = cmd
   go ix (Annotation tm ty) = Annotation (go ix tm) ty
   go ix (Cut tm1 tm2) = Cut (go ix tm1) (go ix tm2)
-  go ix (Letrec defns body) =
+  go ix (Letrec names defns body) =
     let ix' = ix + length defns
-    in Letrec ((fmap . second) (go ix') defns) (go ix' body)
+    in Letrec names ((fmap . second) (go ix') defns) (go ix' body)
   go ix (Application spine) = Application (go ix <$> spine)
   go ix (Case uid rows) = Case uid ((fmap . second) (go ix) rows)
-  go ix (Handle adj peg handlers valHandler) =
+  go ix (Handle adj peg handlers (vName, vHandler)) =
     let handlers' = (<$$> handlers) $ \(binders, handler) ->
           (binders, go (ix + length binders + 1) handler)
-    in Handle adj peg handlers' (go (succ ix) valHandler)
+    in Handle adj peg handlers' (vName, go (succ ix) vHandler)
   go ix (Let pty name body) = Let pty name (go (succ ix) body)
   go _ _ = error "impossible: shiftTraverse"
 
@@ -554,7 +557,7 @@ pattern InstantiatePolyVarIpld b args   = T2 "InstantiatePolyVar" b args
 pattern AnnotationIpld tm ty            = T2 "Annotation" tm ty
 pattern ValueIpld tm                    = T1 "Value" tm
 pattern CutIpld cont scrutinee          = T2 "Cut" cont scrutinee
-pattern LetrecIpld defns body           = T2 "Letrec" defns body
+pattern LetrecIpld names defns body     = T3 "Letrec" names defns body
 
 instance IsUid uid => IsIpld (Tm uid) where
   toIpld = \case
@@ -571,7 +574,8 @@ instance IsUid uid => IsIpld (Tm uid) where
     Command uid row                    -> CommandIpld uid row
     Annotation tm ty                   -> AnnotationIpld tm ty
     Cut cont scrutinee                 -> CutIpld cont scrutinee
-    Letrec defns body                  -> LetrecIpld defns body
+    Letrec names defns body            -> LetrecIpld names defns body
+    _                                  -> error "impossible: toIpld Tm"
 
   fromIpld = \case
     DataConstructorIpld uid row tms        -> Just $ DataConstructor uid row tms
@@ -588,7 +592,7 @@ instance IsUid uid => IsIpld (Tm uid) where
     CommandIpld uid row                    -> Just $ Command uid row
     AnnotationIpld tm ty                   -> Just $ Annotation tm ty
     CutIpld cont scrutinee                 -> Just $ Cut cont scrutinee
-    LetrecIpld defns body                  -> Just $ Letrec defns body
+    LetrecIpld names defns body            -> Just $ Letrec names defns body
     _                                      -> Nothing
 
 instance IsUid uid => IsIpld (Polytype uid)

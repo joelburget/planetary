@@ -239,7 +239,7 @@ check (Cut (Case uid1 rows) m) ty = do
   forM_ zipped $ \(dataConTys, (_, rhs)) ->
     withValTypes' dataConTys rhs (`check` ty)
 -- HANDLE
-check (Cut (Handle adj peg handlers fallthrough) val) ty = do
+check (Cut (Handle adj peg handlers (_, vHandler)) val) ty = do
   ambient <- getAmbient
   let adj' = unfreeze <$$> unAdjustment adj
   Just adjustedAmbient <- pure $ extendAbility' ambient adj'
@@ -253,7 +253,7 @@ check (Cut (Handle adj peg handlers fallthrough) val) ty = do
         as' = unfreeze <$> as
     in openAdjustmentHandler handler as' cTy $ \tm ->
          check tm ty
-  withValTypes [valTy] $ check fallthrough ty
+  withValTypes [valTy] $ check vHandler ty
 -- LET
 check (Cut (Let pty _name body) val) ty = do
   valTy <- instantiateWithEnv pty
