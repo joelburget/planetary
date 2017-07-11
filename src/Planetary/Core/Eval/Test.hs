@@ -19,7 +19,7 @@ import Test.Tasty.HUnit
 
 import Planetary.Core
 import Planetary.Support.Ids
-import Planetary.Support.NameResolution (resolveTm)
+import Planetary.Support.NameResolution (resolveTm, closeTm)
 import Planetary.Support.Parser (forceTm)
 import qualified Planetary.Library.FrankExamples as Frank
 import Planetary.Library.HaskellForeign (mkForeignTm, boolTy)
@@ -188,14 +188,16 @@ unitTests  =
              -- mkTm n = [| evenOdd n |]
              mkTm :: Text -> Int -> Tm Cid
              mkTm fnName n =
-               let mkNat 0 = Cut mkFix (Application [DataConstructor natfId 0 []])
-                   mkNat k = Cut mkFix (Application [DataConstructor natfId 1 [mkNat (k - 1)]])
+               let mkNat 0 = Cut (Application [DataConstructor natfId 0 []])              mkFix
+                   mkNat k = Cut (Application [DataConstructor natfId 1 [mkNat (k - 1)]]) mkFix
 
-               in let_ "unFix" unfixTy unFix $
-                    -- closeXXX fnName $
-                      let_ "body" (Polytype [] boolTy)
-                        (Cut (FV fnName) (Application [mkNat n]))
-                        evenodd'
+                   Right tm = closeTm $
+                     let_ "unFix" unfixTy unFix $
+                       -- substitute the application for "body" in the letrec
+                       substitute "body"
+                         (Cut (Application [mkNat n]) (FV fnName))
+                         evenodd'
+               in tm
 
              natBoolEnv = emptyEnv
          in testGroup "letrec"

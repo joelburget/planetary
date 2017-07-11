@@ -252,11 +252,6 @@ data TmF uid tm
   | Annotation_         !tm            !(ValTy uid)
   -- TODO: remove this
   | Cut_                !tm            !tm
-    -- invariant: each value in a letrec is a lambda
-  | Letrec_
-    !(Vector Text)               -- ^ the name of each fn
-    !(Vector (Polytype uid, tm)) -- ^ a typed lambda
-    !tm                          -- ^ the body
 
   -- Continuation:
   --
@@ -270,6 +265,11 @@ data TmF uid tm
     !(UIdMap uid (Vector (Vector Text, tm)))
     !(Text, tm)
   | Let_ !(Polytype uid) !Text !tm
+  -- invariant: each value in a letrec is a lambda
+  | Letrec_
+    !(Vector Text)               -- ^ the name of each fn
+    !(Vector (Polytype uid, tm)) -- ^ a typed lambda
+    -- !tm                          -- ^ the body
   deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
 
 pattern DataConstructor uid row tms        = Fix (DataConstructor_ uid row tms)

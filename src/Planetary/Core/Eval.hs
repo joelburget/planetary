@@ -106,7 +106,10 @@ step (Cut cont scrutinee) = stepCut cont scrutinee
   --   _other -> do
   --     modify (cont:)
   --     pure scrutinee
-step Letrec{} = todo "step letrec"
+step (Letrec _names lambdas body) = do
+  let lambdaBodies = snd <$> lambdas
+  evalStack %= (lambdaBodies ++)
+  pure (open (lambdaBodies !!) body)
 
 stepCut :: ContinuationI -> TmI -> EvalM TmI
 stepCut (Application spine) (Lambda _names scope)

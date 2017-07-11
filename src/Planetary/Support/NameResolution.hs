@@ -9,12 +9,13 @@
 {-# language TypeSynonymInstances #-}
 {-# language TupleSections #-}
 module Planetary.Support.NameResolution
-  ( resolveDecls
+  ( closeTm
+  , resolveDecls
   , resolveTm
   , ResolutionErr(..)
   ) where
 
-import Control.Lens ((&), ix, at, (?~), (^?), (%~), _1, imap)
+import Control.Lens ((&), ix, at, (?~), (^?), (%~), _1, _2, imap)
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
@@ -56,6 +57,9 @@ data ClosureErr
 type CloseInfo = HashMap Text (Int, Int)
 newtype CloseM a = CloseM (ExceptT ClosureErr (Reader CloseInfo) a)
   deriving (Functor, Applicative, Monad, MonadError ClosureErr, MonadReader CloseInfo)
+
+runCloseM :: CloseM a -> Either ClosureErr a
+runCloseM (CloseM action) = runReader (runExceptT action) HashMap.empty
 
 resolveTm
   :: ResolutionState
@@ -107,8 +111,8 @@ lookupTyVar var = asks (elemIndex var) >>= (?? TyVarLookup var)
 lookupUid :: Text -> ResolutionM Cid
 lookupUid name = gets (^? ix name) >>= (?? UnresolvedUid name)
 
-todowithPushedVars :: [Text] -> ResolutionM a -> ResolutionM a
-todowithPushedVars names = local (names ++)
+withPushedTyVars :: [Text] -> ResolutionM a -> ResolutionM a
+withPushedTyVars names = local (names ++)
 
 withTmVars :: Vector Text -> CloseM a -> CloseM a
 withTmVars names = local $ \hmap ->
@@ -123,28 +127,35 @@ lookupTmVar name = asks (^? ix name) >>= (?? TmVarLookup name)
 
 --
 
-closeTm :: Tm a -> CloseM (Tm a)
-closeTm = anaM $ \case
+closeTm :: Show a => Tm a -> Either ClosureErr (Tm a)
+closeTm = runCloseM . closeTm'
+
+closeTm' :: Show a => Tm a -> CloseM (Tm a)
+closeTm' = anaM $ \case
+  -- bind free variables
   FreeVariable name ->
     ((\(depth, col) -> BoundVariable_ depth col) <$> lookupTmVar name) `catchError`
     (\_ -> pure $ FreeVariable_ name)
-  BoundVariable depth column -> pure $ BoundVariable_ depth column
-  DataConstructor uid row tms -> DataConstructor_ uid row <$> (traverse closeTm tms)
-  ForeignValue uid1 tys uid2 -> pure $ ForeignValue_ uid1 tys uid2
-  Lambda names tm -> withTmVars names $ Lambda_ names <$> closeTm tm
-  -- InstantiatePolyVar_ tm tyArgs -> pure $ InstantiatePolyVar tm tyArgs
-  -- Command_ uid row -> pure $ Command uid row
-  -- Annotation_ tm ty -> pure $ Annotation tm ty
-  -- Cut_ l r -> pure $ Cut l r
-  -- Letrec_ names defns body -> withPushedVars names $
-  --   pure $ Letrec names defns body
-  -- Application_ spine -> Application <$> mapM closeTm spine
-  -- Case_ uid branches -> pure $ Case uid branches
-  -- Handle_ adj (Peg ab codom) handlers (vName, vHandler) -> Handle
-  --   adj (Peg ab codom) handlers
-  --   <$> ((vName,) <$> withPushedVars [vName] (pure vHandler))
-  -- Handle_ _ _ _ _ -> error "impossible: convertTm Handle_"
-  -- Let_ pty name body -> pure $ Let pty name body
+
+  -- binding terms
+  Lambda names tm -> withTmVars names $ Lambda_ names <$> closeTm' tm
+  Letrec names defns body -> withTmVars names $
+    Letrec_ names <$> (traverse . _2) closeTm' defns <*> closeTm' body
+  Handle adj (Peg ab codom) handlers (vName, vHandler) -> Handle_
+    adj (Peg ab codom) handlers
+    <$> ((vName,) <$> withTmVars [vName] (closeTm' vHandler))
+  Case uid branches -> Case_ uid <$>
+    traverse (\(names, branch) -> (names,) <$> (withTmVars names $ closeTm' branch)) branches
+  Let pty name body -> Let_ pty name <$> withTmVars [name] (closeTm' body)
+
+  -- non-binding terms. just handle the recursive ones
+  Annotation tm ty -> Annotation_ <$> closeTm' tm <*> pure ty
+  Cut l r -> Cut_ <$> closeTm' l <*> closeTm' r
+  Application spine -> Application_ <$> mapM closeTm' spine
+  DataConstructor uid row tms -> DataConstructor_ uid row <$> (traverse closeTm' tms)
+  InstantiatePolyVar tm tyArgs -> InstantiatePolyVar_ <$> closeTm' tm <*> pure tyArgs
+
+  other -> pure (unFix other)
 
 convertTm :: Tm Text -> ResolutionM (Tm Cid)
 convertTm = cataM $ \case
@@ -154,13 +165,13 @@ convertTm = cataM $ \case
     <$> lookupUid uid <*> pure row <*> pure tms
   ForeignValue_ uid1 tys uid2 -> ForeignValue
     <$> lookupUid uid1 <*> (mapM convertTy tys) <*> lookupUid uid2
-  Lambda_ names tm -> todowithPushedVars names $ pure $ Lambda names tm
+  Lambda_ names tm -> pure $ Lambda names tm
   InstantiatePolyVar_ tm tyArgs
     -> InstantiatePolyVar tm <$> (mapM convertTy tyArgs)
   Command_ uid row -> Command <$> lookupUid uid <*> pure row
   Annotation_ tm ty -> Annotation tm <$> convertTy ty
   Cut_ l r -> pure $ Cut l r
-  Letrec_ names defns body -> todowithPushedVars names $ do
+  Letrec_ names defns body -> do
     defns' <- forM defns $ \(pty, tm) -> (,)
       <$> convertPolytype pty
       <*> pure tm
@@ -173,7 +184,7 @@ convertTm = cataM $ \case
     <$> convertAdjustment adj
     <*> (Peg <$> convertTy ab <*> convertTy codom)
     <*> convertUidMap handlers
-    <*> ((vName,) <$> todowithPushedVars [vName] (pure vHandler))
+    <*> ((vName,) <$> pure vHandler)
   Handle_ _ _ _ _ -> error "impossible: convertTm Handle_"
   Let_ pty name body -> Let <$> convertPolytype pty <*> pure name <*> pure body
 
@@ -207,8 +218,7 @@ convertDti
   -> ResolutionM (Cid, DataTypeInterface Cid)
 convertDti (DataTypeInterface binders ctrs) = do
   let varNames = map fst binders
-
-  ctrs' <- withPushedVars varNames $ traverse convertCtr ctrs
+  ctrs' <- withPushedTyVars varNames $ traverse convertCtr ctrs
   let dti = DataTypeInterface binders ctrs'
   pure (cidOf dti, dti)
 
@@ -217,7 +227,7 @@ convertEi
   -> ResolutionM (Cid, Resolved EffectInterface)
 convertEi (EffectInterface binders cmds) = do
   let varNames = map fst binders
-  cmds' <- withPushedVars varNames $ traverse convertCmd cmds
+  cmds' <- withPushedTyVars varNames $ traverse convertCmd cmds
   let ei = EffectInterface binders cmds'
   pure (cidOf ei, ei)
 
