@@ -35,6 +35,8 @@ import Planetary.Support.NameResolution
 import Planetary.Support.Parser
 import Planetary.Util
 
+import Debug.Trace
+
 haskellOracles :: CurrentHandlers
 haskellOracles =
   [ (intOpsId, [ liftBinaryOp @Int (+) , liftBinaryOp @Int (-) ])
@@ -184,7 +186,7 @@ mkFix [a] = ForeignValue lfixId [{- XXX -}] <$> writeForeign a
 unFix :: Spine Cid -> ForeignM (Tm Cid)
 unFix [ForeignValue uid [val] tyUid]
   | tyUid == lfixId = lookupForeign uid
-unFix _ = throwError FailedForeignFun
+unFix x = traceShow x $ throwError FailedForeignFun
 
 mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
 mkForeign val = let val' = toIpld val in (valueCid val', val')

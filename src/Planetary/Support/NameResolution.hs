@@ -139,18 +139,23 @@ closeTm' = anaM $ \case
 
   -- binding terms
   Lambda names tm -> withTmVars names $ Lambda_ names <$> closeTm' tm
-  Letrec names defns body -> withTmVars names $
-    Letrec_ names <$> (traverse . _2) closeTm' defns <*> closeTm' body
   Handle adj (Peg ab codom) handlers (vName, vHandler) -> Handle_
     adj (Peg ab codom) handlers
     <$> ((vName,) <$> withTmVars [vName] (closeTm' vHandler))
   Case uid branches -> Case_ uid <$>
     traverse (\(names, branch) -> (names,) <$> (withTmVars names $ closeTm' branch)) branches
-  Let pty name body -> Let_ pty name <$> withTmVars [name] (closeTm' body)
+
+  -- these binding terms are particularly tricky because the scoping extends
+  -- over a cut
+  Cut (Let pty name body) rhs ->
+    Cut_ (Let pty name body) <$> withTmVars [name] (closeTm' rhs)
+  Cut (Letrec names defns) rhs -> withTmVars names $ Cut_
+    <$> (Letrec names <$> (traverse . _2) closeTm' defns)
+    <*> closeTm' rhs
 
   -- non-binding terms. just handle the recursive ones
-  Annotation tm ty -> Annotation_ <$> closeTm' tm <*> pure ty
   Cut l r -> Cut_ <$> closeTm' l <*> closeTm' r
+  Annotation tm ty -> Annotation_ <$> closeTm' tm <*> pure ty
   Application spine -> Application_ <$> mapM closeTm' spine
   DataConstructor uid row tms -> DataConstructor_ uid row <$> (traverse closeTm' tms)
   InstantiatePolyVar tm tyArgs -> InstantiatePolyVar_ <$> closeTm' tm <*> pure tyArgs
@@ -171,11 +176,11 @@ convertTm = cataM $ \case
   Command_ uid row -> Command <$> lookupUid uid <*> pure row
   Annotation_ tm ty -> Annotation tm <$> convertTy ty
   Cut_ l r -> pure $ Cut l r
-  Letrec_ names defns body -> do
+  Letrec_ names defns -> do
     defns' <- forM defns $ \(pty, tm) -> (,)
       <$> convertPolytype pty
       <*> pure tm
-    pure $ Letrec names defns' body
+    pure $ Letrec names defns'
   Application_ spine -> Application <$> mapM convertTm spine
   Case_ uid branches -> Case
     <$> lookupUid uid

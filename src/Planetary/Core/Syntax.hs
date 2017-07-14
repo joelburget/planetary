@@ -257,7 +257,7 @@ data TmF uid tm
   --
   -- We pair each of these with 'Cut' to produce a computation. We also push
   -- these on a stack for a (call-by-push-value-esque) evaluation.
-  | Application_ !(Spine uid)
+  | Application_ !(Spine tm)
   | Case_ !uid !(Vector (Vector Text, tm))
   | Handle_
     !(Adjustment uid)
@@ -266,6 +266,7 @@ data TmF uid tm
     !(Text, tm)
   | Let_ !(Polytype uid) !Text !tm
   -- invariant: each value in a letrec is a lambda
+  -- TODO: we probably want to just bind directly instead of using a lambda
   | Letrec_
     !(Vector Text)               -- ^ the name of each fn
     !(Vector (Polytype uid, tm)) -- ^ a typed lambda
@@ -285,10 +286,20 @@ pattern InstantiatePolyVar tm tyargs       = Fix (InstantiatePolyVar_ tm tyargs)
 pattern Command uid row                    = Fix (Command_ uid row)
 pattern Annotation tm ty                   = Fix (Annotation_ tm ty)
 pattern Cut l r                            = Fix (Cut_ l r)
-pattern Letrec names lambdas body          = Fix (Letrec_ names lambdas body)
+pattern Letrec names lambdas               = Fix (Letrec_ names lambdas)
 
--- type? newtype?
-type Spine uid = Vector (Tm uid)
+data Spine tm = MixedSpine
+  ![tm] -- ^ non-normalized terms
+  ![tm] -- ^ normalized values
+  deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
+
+instance IsIpld tm => IsIpld (Spine tm)
+
+pattern TermSpine :: [Tm uid] -> Spine (Tm uid)
+pattern TermSpine tms = MixedSpine tms []
+
+pattern NormalSpine :: [Tm uid] -> Spine (Tm uid)
+pattern NormalSpine vals = MixedSpine [] vals
 
 type Tm uid = Fix (TmF uid)
 
@@ -435,9 +446,9 @@ shiftTraverse f = go 0 where
   go _ix cmd@Command{} = cmd
   go ix (Annotation tm ty) = Annotation (go ix tm) ty
   go ix (Cut tm1 tm2) = Cut (go ix tm1) (go ix tm2)
-  go ix (Letrec names defns body) =
+  go ix (Letrec names defns) =
     let ix' = ix + length defns
-    in Letrec names ((fmap . second) (go ix') defns) (go ix' body)
+    in Letrec names ((fmap . second) (go ix') defns)
   go ix (Application spine) = Application (go ix <$> spine)
   go ix (Case uid rows) = Case uid ((fmap . second) (go ix) rows)
   go ix (Handle adj peg handlers (vName, vHandler)) =
@@ -557,7 +568,7 @@ pattern InstantiatePolyVarIpld b args   = T2 "InstantiatePolyVar" b args
 pattern AnnotationIpld tm ty            = T2 "Annotation" tm ty
 pattern ValueIpld tm                    = T1 "Value" tm
 pattern CutIpld cont scrutinee          = T2 "Cut" cont scrutinee
-pattern LetrecIpld names defns body     = T3 "Letrec" names defns body
+pattern LetrecIpld names defns          = T2 "Letrec" names defns
 
 instance IsUid uid => IsIpld (Tm uid) where
   toIpld = \case
@@ -574,7 +585,7 @@ instance IsUid uid => IsIpld (Tm uid) where
     Command uid row                    -> CommandIpld uid row
     Annotation tm ty                   -> AnnotationIpld tm ty
     Cut cont scrutinee                 -> CutIpld cont scrutinee
-    Letrec names defns body            -> LetrecIpld names defns body
+    Letrec names defns                 -> LetrecIpld names defns
     _                                  -> error "impossible: toIpld Tm"
 
   fromIpld = \case
@@ -592,7 +603,7 @@ instance IsUid uid => IsIpld (Tm uid) where
     CommandIpld uid row                    -> Just $ Command uid row
     AnnotationIpld tm ty                   -> Just $ Annotation tm ty
     CutIpld cont scrutinee                 -> Just $ Cut cont scrutinee
-    LetrecIpld names defns body            -> Just $ Letrec names defns body
+    LetrecIpld names defns                 -> Just $ Letrec names defns
     _                                      -> Nothing
 
 instance IsUid uid => IsIpld (Polytype uid)

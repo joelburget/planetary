@@ -22,11 +22,9 @@ import Planetary.Support.Ids
 import Planetary.Support.NameResolution (resolveTm, closeTm)
 import Planetary.Support.Parser (forceTm)
 import qualified Planetary.Library.FrankExamples as Frank
-import Planetary.Library.HaskellForeign (mkForeignTm, boolTy)
+import Planetary.Library.HaskellForeign (mkForeignTm, haskellOracles)
 import qualified Planetary.Library.HaskellForeign as HaskellForeign
 import Planetary.Util (todo)
-
-import Debug.Trace
 
 stepTest
   :: String
@@ -199,9 +197,9 @@ unitTests  =
                          evenodd'
                in tm
 
-             natBoolEnv = emptyEnv
+             natBoolEnv = EvalEnv haskellOracles []
          in testGroup "letrec"
-              [ stepTest "even 0"  natBoolEnv 2  (mkTm "even" 0)  (Right true)
+              [ stepTest "even 0"  natBoolEnv 3  (mkTm "even" 0)  (Right true)
               -- , stepTest "even 7"  natBoolEnv 8  (mkTm "even" 7)  (Right false)
               -- , stepTest "even 10" natBoolEnv 11 (mkTm "even" 10) (Right true)
               -- , stepTest "odd 0"   natBoolEnv 1  (mkTm "odd"  0)  (Right false)

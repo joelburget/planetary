@@ -20,7 +20,6 @@ import Network.IPLD hiding (Row, Value)
 import qualified Network.IPLD as IPLD
 
 import Planetary.Core.Syntax
-import Planetary.Core.Syntax.Patterns
 import Planetary.Core.UIdMap
 import Planetary.Util
 
@@ -106,20 +105,19 @@ step (Cut cont scrutinee) = stepCut cont scrutinee
   --   _other -> do
   --     modify (cont:)
   --     pure scrutinee
-step (Letrec _names lambdas body) = do
-  let lambdaBodies = snd <$> lambdas
-  evalStack %= (lambdaBodies ++)
-  pure (open (lambdaBodies !!) body)
 
 stepCut :: ContinuationI -> TmI -> EvalM TmI
-stepCut (Application spine) (Lambda _names scope)
+stepCut (Application (NormalSpine spine)) (Lambda _names scope)
   -- TODO: safe
   = pure $ open (spine !!) scope
-stepCut (Application spine) (Command uid row) = do
-  -- handler <- findHandler
-  traceM "running handler"
-  runHandler uid row spine
-  -- handleCommand cid row spine handlers
+stepCut (Application (NormalSpine spine)) (Command uid row)
+  | all isValue spine = do
+    -- handler <- findHandler
+    traceM "running handler"
+    runHandler uid row spine
+    -- handleCommand cid row spine handlers
+  | otherwise = error "non-value spine"
+stepCut (Application (MixedSpine tms vals))
 stepCut (Case _uid1 rows) (DataConstructor _uid2 rowNum args) = do
   (_, row) <- rows ^? ix rowNum ?? IndexErr
   -- TODO: maybe we need to evaluate the args to a value first
@@ -132,6 +130,12 @@ stepCut (Handle _adj _peg _handlers (_, handleValue)) v
 
 stepCut (Let _polyty _name body) rhs
   | isValue rhs = pure $ open1 rhs body
+
+stepCut (Letrec _names lambdas) rhs = do
+  let lambdaBodies = snd <$> lambdas
+  evalStack %= (lambdaBodies ++)
+  pure (open (lambdaBodies !!) rhs)
+
 stepCut cont cut@Cut {} = stepCut cont =<< step cut
 stepCut cont scrutinee = throwError (CantCut cont scrutinee)
 

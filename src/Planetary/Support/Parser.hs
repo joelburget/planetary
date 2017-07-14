@@ -245,7 +245,7 @@ parseLetrec =
         reserved "in"
         body <- indentedBlock parseTm
         let (names, binderVals) = unzip definitions
-        return $ letrec names binderVals body
+        return $ Cut (letrec names binderVals) body
   in parser <?> "Letrec"
 
 parsePolyty :: MonadicParsing m => m Polytype'

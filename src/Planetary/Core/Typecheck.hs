@@ -170,7 +170,7 @@ infer = \case
     let SuspendedTyU (CompTyU dom (PegU ability retTy)) = f'
     ambient <- getAmbient
     _ <- unify' ability ambient
-    _ <- mapM_ (uncurry check) =<< strictZip ApplicationSpineMismatch spine dom
+    _ <- mapM_ (uncurry check) =<< strictZip ApplicationSpineMismatch (toList spine) dom
     pure retTy
   -- COERCE
   Annotation n a -> do

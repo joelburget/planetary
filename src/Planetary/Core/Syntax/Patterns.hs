@@ -18,6 +18,7 @@ module Planetary.Core.Syntax.Patterns
   , pattern VTy
   ) where
 
+import Control.Arrow (second)
 import Data.List (elemIndex)
 import Data.Text (Text)
 
@@ -111,6 +112,5 @@ letrec
   :: Vector Text
   -> Vector (Polytype uid, Tm uid)
   -> Tm uid
-  -> Tm uid
-letrec names binderVals body =
-  Letrec names binderVals (close (`elemIndex` names) body)
+letrec names binderVals = Letrec names $
+  (fmap . second) (close (`elemIndex` names)) binderVals
