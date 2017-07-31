@@ -1,4 +1,5 @@
 {-# language DataKinds #-}
+{-# language FlexibleContexts #-}
 {-# language FlexibleInstances #-}
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language LambdaCase #-}
@@ -117,7 +118,7 @@ withPushedTyVars names = local (names ++)
 withTmVars :: Vector Text -> CloseM a -> CloseM a
 withTmVars names = local $ \hmap ->
       -- increment the depth
-  let hmap' = hmap & (traverse . _1) %~ (+1)
+  let hmap' = hmap & (traverse . _1) %~ succ
       newHmap = HashMap.fromList $ flip imap names $ \i name -> (name, (0, i))
       hmap'' = HashMap.union hmap' newHmap
   in hmap''
@@ -139,24 +140,29 @@ closeTm' = anaM $ \case
 
   -- binding terms
   Lambda names tm -> withTmVars names $ Lambda_ names <$> closeTm' tm
-  Handle adj (Peg ab codom) handlers (vName, vHandler) -> Handle_
-    adj (Peg ab codom) handlers
-    <$> ((vName,) <$> withTmVars [vName] (closeTm' vHandler))
-  Case uid branches -> Case_ uid <$>
-    traverse (\(names, branch) -> (names,) <$> (withTmVars names $ closeTm' branch)) branches
+  Handle tm adj (Peg ab codom) handlers (vName, vHandler) -> Handle_
+    <$> closeTm' tm
+    <*> pure adj
+    <*> pure (Peg ab codom)
+    <*> pure handlers
+    <*> ((vName,) <$> withTmVars [vName] (closeTm' vHandler))
+  Case uid tm branches -> Case_ uid
+    <$> closeTm' tm
+    <*> traverse (\(names, branch) -> (names,) <$> (withTmVars names $ closeTm' branch)) branches
 
-  -- these binding terms are particularly tricky because the scoping extends
-  -- over a cut
-  Cut (Let pty name body) rhs ->
-    Cut_ (Let pty name body) <$> withTmVars [name] (closeTm' rhs)
-  Cut (Letrec names defns) rhs -> withTmVars names $ Cut_
-    <$> (Letrec names <$> (traverse . _2) closeTm' defns)
+  Let body pty name rhs -> Let_
+    <$> closeTm' body
+    <*> pure pty
+    <*> pure name
+    <*> withTmVars [name] (closeTm' rhs)
+
+  Letrec names defns rhs -> withTmVars names $ Letrec_ names
+    <$> (traverse . _2) closeTm' defns
     <*> closeTm' rhs
 
   -- non-binding terms. just handle the recursive ones
-  Cut l r -> Cut_ <$> closeTm' l <*> closeTm' r
   Annotation tm ty -> Annotation_ <$> closeTm' tm <*> pure ty
-  Application spine -> Application_ <$> mapM closeTm' spine
+  Application f spine -> Application_ <$> closeTm' f <*> mapM closeTm' spine
   DataConstructor uid row tms -> DataConstructor_ uid row <$> (traverse closeTm' tms)
   InstantiatePolyVar tm tyArgs -> InstantiatePolyVar_ <$> closeTm' tm <*> pure tyArgs
 
@@ -175,23 +181,25 @@ convertTm = cataM $ \case
     -> InstantiatePolyVar tm <$> (mapM convertTy tyArgs)
   Command_ uid row -> Command <$> lookupUid uid <*> pure row
   Annotation_ tm ty -> Annotation tm <$> convertTy ty
-  Cut_ l r -> pure $ Cut l r
-  Letrec_ names defns -> do
+  Letrec_ names defns body -> do
     defns' <- forM defns $ \(pty, tm) -> (,)
       <$> convertPolytype pty
       <*> pure tm
-    pure $ Letrec names defns'
-  Application_ spine -> Application <$> mapM convertTm spine
-  Case_ uid branches -> Case
+    pure $ Letrec names defns' body
+  Application_ f (MixedSpine tms vals) ->
+    pure $ Application f (MixedSpine tms vals)
+  Case_ uid tm branches -> Case
     <$> lookupUid uid
+    <*> pure tm
     <*> pure branches
-  Handle_ adj (Peg ab codom) handlers (vName, vHandler) -> Handle
+  Handle_ tm adj (Peg ab codom) handlers (vName, vHandler) -> Handle tm
     <$> convertAdjustment adj
     <*> (Peg <$> convertTy ab <*> convertTy codom)
     <*> convertUidMap handlers
     <*> ((vName,) <$> pure vHandler)
-  Handle_ _ _ _ _ -> error "impossible: convertTm Handle_"
-  Let_ pty name body -> Let <$> convertPolytype pty <*> pure name <*> pure body
+  Handle_ _ _ _ _ _ -> error "impossible: convertTm Handle_"
+  Let_ body pty name rhs
+    -> Let body <$> convertPolytype pty <*> pure name <*> pure body
 
 convertTy :: TyFix Text -> ResolutionM (TyFix Cid)
 convertTy = cataM $ \case

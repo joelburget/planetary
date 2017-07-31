@@ -28,62 +28,64 @@ eraseCharLit :: TmI
 eraseCharLit = mkForeignTm @Text textId [] "\b \b"
 
 -- TODO: we actually map with a data constructor
-textMap :: SpineI -> ForeignM TmI
-textMap [Lambda _binderNames body, ForeignValue _ _ uid] = do
+textMap :: Handler
+textMap [Lambda _binderNames body, ForeignValue _ _ uid] stk= do
   fText <- lookupForeign uid
   let str = T.unpack fText
-  let fun :: Char -> ForeignM Char
+      fun :: Char -> ForeignM Char
       fun char = do
         charPtr <- ForeignValue charId [] <$> writeForeign char
         -- HACK XXX
-        ouch [charPtr]
+        ouch [charPtr] stk
         pure char
   result <- T.pack <$> traverse fun str
-  ForeignValue textId [] <$> writeForeign result
-textMap _ = throwError FailedForeignFun
+  result' <- writeForeign result
+  pure (ForeignValue textId [] result', stk)
+textMap _ _ = throwError FailedForeignFun
 
--- charHandler1 :: TmI -> ContinuationI -> Char -> TmI
-charHandler1 :: SpineI -> ForeignM TmI
-charHandler1 [b1, b2, ForeignValue _ _ uid] = do
+-- charHandler1 :: TmI -> TmI -> Char -> TmI
+charHandler1 :: Handler
+charHandler1 [b1, b2, ForeignValue _ _ uid] stk = do
   char <- lookupForeign uid
   pure $ case char of
-    '\b' -> b1
-    c -> Cut (Application [b2]) (mkForeignTm @Char charId [] c)
-charHandler1 _ = throwError FailedForeignFun
+    '\b' -> (b1, stk)
+    c    -> (AppN (mkForeignTm @Char charId [] c) [b2], stk)
+charHandler1 _ _ = throwError FailedForeignFun
 
 -- charHandler2 :: TmI -> TmI -> TmI -> Char -> TmI
-charHandler2 :: SpineI -> ForeignM TmI
-charHandler2 [b1, b2, b3, ForeignValue _ _ uid] =
+charHandler2 :: Handler
+charHandler2 [b1, b2, b3, ForeignValue _ _ uid] stk=
   flip fmap (lookupForeign uid) $ \case
-    '0' -> b1
-    ' ' -> b2
-    _   -> b3
-charHandler2 _ = throwError FailedForeignFun
+    '0' -> (b1, stk)
+    ' ' -> (b2, stk)
+    _   -> (b3, stk)
+charHandler2 _ _ = throwError FailedForeignFun
 
-inch :: SpineI -> ForeignM TmI
-inch [] = do
+inch :: Handler
+inch [] stk = do
   c <- liftIO getChar
   -- Taken from Shonky/Semantics
   let c' = if c == '\DEL' then '\b' else c
-  ForeignValue charId [] <$> writeForeign c'
-inch _ = throwError FailedForeignFun
+  c'' <- writeForeign c'
+  pure (ForeignValue charId [] c'', stk)
+inch _ _ = throwError FailedForeignFun
 
-ouch :: SpineI -> ForeignM TmI
-ouch [ForeignValue _ _ uid] = do
+ouch :: Handler
+ouch [ForeignValue _ _ uid] stk = do
   c <- lookupForeign uid
   liftIO $ putChar c >> hFlush stdout
-  pure (DataConstructor unitId 0 [])
-ouch _ = throwError FailedForeignFun
+  pure (DataConstructor unitId 0 [], stk)
+ouch _ _ = throwError FailedForeignFun
 
-externals :: CurrentHandlers
+externals :: Handlers
 externals =
   [ (consoleId, [ inch, ouch ])
   , (textId, [ textMap ])
   , (charHandlerId, [ charHandler1, charHandler2 ])
   ]
 
-env :: EvalEnv
-env = EvalEnv
+env :: AmbientEnv
+env = AmbientEnv
   externals
   [ mkForeign @Text "\b \b"
   ]
@@ -125,9 +127,9 @@ interface Send X =
 interface Receive X =
   | receive : X
 
--- interface State X =
---   | get : S
---   | put : S -> Unit
+interface State S =
+  | get : S
+  | put : S -> Unit
 
 interface Abort =
   | aborting : <Zero>

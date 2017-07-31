@@ -25,8 +25,8 @@ import Planetary.Support.Parser
 -- * ids are duplicated here and in Interplanetary.Ids
 -- * we shouldn't need to supply the Uid separately -- it can be derived from
 -- the data
-simpleEnv :: EvalEnv
-simpleEnv = EvalEnv
+simpleEnv :: AmbientEnv
+simpleEnv = AmbientEnv
   haskellOracles
   [ mkForeign @Int 1
   , mkForeign @Int 2
@@ -47,9 +47,9 @@ unitTests =
       world = mkForeignTm @Text textId [] "world"
       helloWorld = mkForeignTm @Text textId [] "hello world"
 
-      add spine = Cut (Application spine) (Command intOpsId 0)
-      sub spine = Cut (Application spine) (Command intOpsId 1)
-      cat spine = Cut (Application spine) (Command textOpsId 0)
+      add spine = AppN (Command intOpsId 0)  spine
+      sub spine = AppN (Command intOpsId 1)  spine
+      cat spine = AppN (Command textOpsId 0) spine
 
       env = emptyTypingEnv & typingInterfaces .~ interfaceTable
 
@@ -58,16 +58,16 @@ unitTests =
          [ stepTest "1 + 1" simpleEnv 1
            -- [tmExp| add one one |]
            (add [one, one])
-           (Right two)
+           (Right [two])
          , stepTest "2 + 2" simpleEnv 1
            (add [two, two])
-           (Right four)
+           (Right [four])
          , stepTest "2 - 1" simpleEnv 1
            (sub [two, one])
-           (Right one)
+           (Right [one])
          , stepTest "\"hello \" <> \"world\"" simpleEnv 1
            (cat [hello, world])
-           (Right helloWorld)
+           (Right [helloWorld])
          ]
 
        , testGroup "typechecking"

@@ -3,27 +3,43 @@
 {-# language LambdaCase #-}
 {-# language NamedFieldPuns #-}
 {-# language TemplateHaskell #-}
+{-# language TypeFamilies #-}
+{-# language TupleSections #-}
 module Planetary.Core.Eval
   ( Err(..)
-  , EvalEnv(..)
+  , EvalM
+  , AmbientEnv(..)
+  , LocalEnv(..)
   , ForeignM
-  , CurrentHandlers
+  , Handler
+  , Handlers
   , step
   , run
   , runEvalM
+
+  -- debugging
+  , showStack
+  , showEnv
+  , traceStack
+  , traceStackM
+  , traceEnvM
   ) where
+
+-- We use an abstract machine similar to the CEK-style machine of "Liberating
+-- Effects with Rows and Handlers" - Hillerström, Lindley.
 
 import Control.Lens hiding ((??))
 import Control.Monad.Except
 import Control.Monad.State
-import Network.IPLD hiding (Row, Value)
+import Network.IPLD hiding (Row, Value, (.=))
 import qualified Network.IPLD as IPLD
 
 import Planetary.Core.Syntax
+import Planetary.Core.Syntax.Patterns
 import Planetary.Core.UIdMap
 import Planetary.Util
 
-import Debug.Trace
+import Debug.Trace hiding (traceStack)
 
 data Err
   = RowBound
@@ -31,19 +47,20 @@ data Err
   | FailedHandlerLookup
   | FailedIpldConversion
   | FailedForeignFun
-  | CantCut ContinuationI TmI
+  | VariableLookup
   deriving (Eq, Show)
 
-type CurrentHandlers = UIdMap Cid [SpineI -> ForeignM TmI]
-type ValueStore      = UIdMap Cid IPLD.Value
-data EvalEnv         = EvalEnv
-  { _currentHandlers :: CurrentHandlers
+type Handler    = [TmI] -> LocalEnv -> ForeignM (TmI, LocalEnv)
+type Handlers   = UIdMap Cid [Handler]
+type ValueStore = UIdMap Cid IPLD.Value
+data AmbientEnv = AmbientEnv
+  { _ambientHandlers :: Handlers
   , _valueStore      :: ValueStore
   }
 
-data EvalState = EvalState
-  { _evalStack :: Stack ContinuationI
-  , _evalEnv   :: EvalEnv
+data LocalEnv = LocalEnv
+  { _boundVars :: Stack [TmI]
+  , _handlers :: Handlers
   }
 
 -- This is the monad you write FFI operations in.
@@ -57,111 +74,165 @@ type ForeignM =
 -- target to a value
 type EvalM =
   ExceptT Err
-  (StateT EvalState
+  (StateT AmbientEnv
   IO)
 
-makeLenses ''EvalEnv
-makeLenses ''EvalState
+makeLenses ''AmbientEnv
+makeLenses ''LocalEnv
 
-runHandler :: Cid -> Row -> Spine Cid -> EvalM TmI
-runHandler cid row spine = do
-  cont <- gets (^? evalEnv . currentHandlers . ix cid . ix row)
-    >>= (?? FailedHandlerLookup)
-  let action = cont spine
-  runForeignM action
+showStack :: Stack TmI -> String
+showStack stk =
+  let lines = show <$> stk
+      indented = ("  " <>) <$> lines
+      headed = "stack:" : indented <> ["end stack"]
+  in unlines headed
+
+showEnv :: Stack [TmI] -> String
+showEnv env =
+  let env' = ("  " <>) . show <$$> env
+      env'' = flip imap env' $ \i stk ->
+        show i ++ ":\n" ++ unlines stk
+      headed = "env:" : env'' <> ["end env"]
+  in unlines headed
+
+traceStack :: Stack TmI -> Stack TmI
+traceStack stk = trace (showStack stk) stk
+
+traceStackM :: Stack TmI -> EvalM ()
+traceStackM = traceM . showStack
+
+traceEnvM :: Stack [TmI] -> EvalM ()
+traceEnvM = traceM . showEnv
 
 -- TODO: do this without casing? mmorph
 runForeignM :: ForeignM a -> EvalM a
 runForeignM action = do
-  store <- gets (^. evalEnv . valueStore)
-  val <- liftIO $ runExceptT action `evalStateT` store
+  store <- gets (^. valueStore)
+  (val, store') <- liftIO $ runExceptT action `runStateT` store
+  valueStore .= store'
   case val of
     Left err -> throwError err
     Right a -> pure a
 
 runEvalM
-  :: EvalEnv -> Stack ContinuationI -> EvalM TmI
-  -> IO (Either Err TmI, EvalState)
-runEvalM env stack action = runStateT
-  (runExceptT action)
-  (EvalState stack env)
+  :: AmbientEnv
+  -> EvalM (Stack (TmI, LocalEnv))
+  -> IO (Either Err (Stack (TmI, LocalEnv)), AmbientEnv)
+runEvalM ambient state = runStateT (runExceptT state) ambient
 
-run
-  :: EvalEnv -> Stack ContinuationI -> TmI
-  -> IO (Either Err TmI, EvalState)
-run env stack tm
-  | isValue tm = pure (Right tm, EvalState stack env)
+run :: AmbientEnv -> Stack (TmI, LocalEnv) -> IO (Either Err TmI, AmbientEnv)
+run ambient stack
+  | [(tm, _env)] <- stack
+  , isValue tm = pure (Right tm, ambient)
   | otherwise = do
-    (eitherTm, evst@(EvalState stack' env')) <- runEvalM env stack (step tm)
-    case eitherTm of
-      Left err -> pure (Left err, evst)
-      Right tm' -> run env' stack' tm'
+    (eitherStack, env') <- runEvalM ambient (step stack)
+    case eitherStack of
+      Left err -> pure (Left err, env')
+      Right stack' -> run env' stack'
 
-step :: TmI -> EvalM TmI
-step x | isValue x = pure x
-step (Cut cont scrutinee) = stepCut cont scrutinee
-  -- case scrutinee of
-  --   Value v -> stepCut cont v
-  --   _other -> do
-  --     modify (cont:)
-  --     pure scrutinee
-
-stepCut :: ContinuationI -> TmI -> EvalM TmI
-stepCut (Application (NormalSpine spine)) (Lambda _names scope)
-  -- TODO: safe
-  = pure $ open (spine !!) scope
-stepCut (Application (NormalSpine spine)) (Command uid row)
-  | all isValue spine = do
-    -- handler <- findHandler
-    traceM "running handler"
-    runHandler uid row spine
-    -- handleCommand cid row spine handlers
-  | otherwise = error "non-value spine"
-stepCut (Application (MixedSpine tms vals))
-stepCut (Case _uid1 rows) (DataConstructor _uid2 rowNum args) = do
-  (_, row) <- rows ^? ix rowNum ?? IndexErr
-  -- TODO: maybe we need to evaluate the args to a value first
-  pure (open (args !!) row)
--- stepCut (Handle _adj _peg handlers _handleValue) (Command uid row) = do
---   let AdjustmentHandlers uidmap = handlers
---   handler <- (uidmap ^? ix uid . ix row) >>= (??
-stepCut (Handle _adj _peg _handlers (_, handleValue)) v
-  | isValue v = pure $ open1 v handleValue
-
-stepCut (Let _polyty _name body) rhs
-  | isValue rhs = pure $ open1 rhs body
-
-stepCut (Letrec _names lambdas) rhs = do
-  let lambdaBodies = snd <$> lambdas
-  evalStack %= (lambdaBodies ++)
-  pure (open (lambdaBodies !!) rhs)
-
-stepCut cont cut@Cut {} = stepCut cont =<< step cut
-stepCut cont scrutinee = throwError (CantCut cont scrutinee)
-
--- withHandlers :: AdjustmentHandlersI -> Scope () (Tm Cid Int) Int -> EvalM a -> EvalM a
--- withHandlers (AdjustmentHandlers handlers) handleValue action $ do
-
-handleCommand
+-- Walk up the stack until we locate a handler for this Cid. Return the current
+-- continuation and rest of the stack.
+findHandler
   :: Cid
   -> Row
-  -> SpineI
-  -- -> TmI
-  -> UIdMap Cid (Vector TmI)
-  -> EvalM TmI
-handleCommand uid row spine (UIdMap handlers) = do
-  -- look up n_c (handler)
-  -- TODO this should actually just fall through not error
-  handlers' <- handlers  ^? ix uid ?? IndexErr
-  handler   <- handlers' ^? ix row ?? IndexErr
+  -> LocalEnv
 
-  let instantiator = todo "handleCommand instantiator"
-    -- \case
-    --     Nothing -> LambdaV (todo "XXX") (todo "command instantiator")
-    --     Just i -> spine !! i
-  -- \case
-  --       -- XXX really not sure this is right
-  --       Nothing -> Value (Lambda (close Just val))
-  --       Just i -> spine !! i
+  -- args, environment they live in
+  -> EvalM Handler
 
-  pure (open instantiator handler)
+findHandler cid row env = case env ^? handlers . ix cid . ix row of
+  Just handler -> pure handler
+  Nothing -> gets (^? ambientHandlers . ix cid . ix row)
+    >>= (?? FailedHandlerLookup)
+
+pushBoundVars :: LocalEnv -> [TmI] -> LocalEnv
+pushBoundVars env defns = env & boundVars %~ (defns:)
+
+step :: Stack (TmI, LocalEnv) -> EvalM (Stack (TmI, LocalEnv))
+-- step [x] | isValue x = pure [x] -- XXX should this even be a rule? Halt?
+step ((BoundVariable level col, env) : stk) = do
+  -- traceM $ "looking up variable " ++ show (level, col)
+  -- traceM "variable env"
+  -- traceEnvM $ env ^. boundVars
+  -- traceM "variable stk"
+  -- traceStackM $ fst <$> stk
+  val <- env ^? boundVars . ix level . ix col ?? VariableLookup
+  -- traceM $ "variable lookup returned: " ++ show val
+  pure $ (val, env) : stk
+step ((Application f (MixedSpine (tm:tms) vals), env) : stk) =
+  pure $ (tm, env) : (Application f (MixedSpine tms vals), env) : stk
+step ((val, _env) : (AppN Hole vals, env) : stk)
+  | isValue val
+  = pure $ (AppN val vals, env) : stk
+step ((val, _env) : (Application f (MixedSpine tms vals), env) : stk)
+  | isValue val
+  = pure $ (Application f (MixedSpine tms (val:vals)), env) : stk
+step ((AppN (Lambda _names scope) spine, env) : stk) = do
+  traceM $ "lambda pushing spine: " ++ show spine
+  pure $ (scope, pushBoundVars env spine) : stk
+
+step ((Case _uid1 (DataConstructor _uid2 rowNum args) rows, env) : stk) = do
+  row <- rows ^? ix rowNum . _2 ?? IndexErr
+  pure $ (row, pushBoundVars env args) : stk
+
+step ((Case uid tm rows, env) : stk)
+  = pure $ (tm, env) : (Case uid Hole rows, env) : stk
+
+step ((val, _env) : (Case uid Hole rows, env) : stk)
+  | isValue val
+  = pure $ (Case uid val rows, env) : stk
+
+-- step (Handle (Command uid row) _adj _peg handlers _handleValue) = do
+--   let AdjustmentHandlers uidmap = handlers
+--   handler <- (uidmap ^? ix uid . ix row) -- >>= (??
+
+step ((Handle tm adj peg lambdas valHandler, env) : stk) = do
+  let mkHandler :: TmI -> Handler
+      mkHandler tm args env = pure (tm, pushBoundVars env args)
+      env' = env & handlers %~ ((mkHandler . snd <$$> lambdas) <>)
+      stk' = (tm, env') : stk
+  pure stk'
+
+step ((AppN (Command uid row) spine, env) : stk) = do
+  handler <- findHandler uid row env
+  traceM "found handler"
+  val <- runForeignM (handler spine env)
+  traceM $ "handler result: " ++ show (fst val)
+  traceStackM (fst <$> stk)
+  pure $ val : stk
+
+step ((Command uid row, env) : stk) = do
+  handler <- findHandler uid row env
+  traceM "found handler"
+  val <- runForeignM (handler [] env)
+  traceM $ "handler result: " ++ show (fst val)
+  traceStackM (fst <$> stk)
+  pure $ val : stk
+
+-- TODO: just `f, spine : env`?
+step ((AppN f spine, env) : stk)
+  = pure $ (f, env) : (AppN Hole spine, env) : stk
+
+-- step ((val, _env) : (Handle Hole _ _ _ (_, handleValue), env) : stk)
+--   | isValue val = do
+--     pure $ (handleValue, pushBoundVars env [val]) : stk
+--   | otherwise = error "impossible"
+
+step ((Let rhs polyty name body, env) : stk)
+  = pure $ (rhs, env) : (Let Hole polyty name body, env) : stk
+step ((v, _env) : (Let Hole polyty name body, env) : stk)
+  | isValue v
+  = pure $ (body, pushBoundVars env [v]) : stk
+
+step ((Letrec names lambdas rhs, env) : stk) =
+  let lambdaVars = snd <$> lambdas
+      env' = pushBoundVars env lambdaVars
+
+  -- both the focus and lambdas close over the lambdas (use env')
+  in pure $ (rhs, env') : (Letrec names lambdas Hole, env') : stk
+
+step ((v, env) : (Letrec _names _lambdas Hole, _env) : stk)
+  | isValue v
+  = pure $ (v, env) : stk
+
+step other = traceStackM (fst <$> other) >> error "incomplete"

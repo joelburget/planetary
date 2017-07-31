@@ -29,6 +29,7 @@ import Control.Lens.TH (makeLenses)
 import Control.Unification
 import Data.Data
 import Data.Functor.Fixedpoint
+import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.List (find)
 import Data.Monoid ((<>))
@@ -245,48 +246,52 @@ data TmF uid tm
   = FreeVariable_       !Text
   | BoundVariable_      !Int           !Int
   | DataConstructor_    !uid           !Row                  !(Vector tm)
-  | ForeignValue_       !uid           !(Vector (ValTy uid)) !uid
+  | ForeignValue_
+    !uid -- ^ type id
+    !(Vector (ValTy uid))
+    !uid -- ^ value locator
   | Lambda_             !(Vector Text) !tm
   | InstantiatePolyVar_ !tm            !(Vector (TyArg uid))
   | Command_            !uid           !Row
   | Annotation_         !tm            !(ValTy uid)
-  -- TODO: remove this
-  | Cut_                !tm            !tm
 
   -- Continuation:
   --
   -- We pair each of these with 'Cut' to produce a computation. We also push
   -- these on a stack for a (call-by-push-value-esque) evaluation.
-  | Application_ !(Spine tm)
-  | Case_ !uid !(Vector (Vector Text, tm))
+  | Application_ !tm !(Spine tm)
+  | Case_ !uid !tm !(Vector (Vector Text, tm))
   | Handle_
+    !tm
     !(Adjustment uid)
     !(Peg uid)
     !(UIdMap uid (Vector (Vector Text, tm)))
     !(Text, tm)
-  | Let_ !(Polytype uid) !Text !tm
+  | Let_ !tm !(Polytype uid) !Text !tm
   -- invariant: each value in a letrec is a lambda
   -- TODO: we probably want to just bind directly instead of using a lambda
   | Letrec_
     !(Vector Text)               -- ^ the name of each fn
     !(Vector (Polytype uid, tm)) -- ^ a typed lambda
-    -- !tm                          -- ^ the body
+    !tm                          -- ^ the body
+
+  | Hole_ -- ^ Used at execution only
   deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
 
-pattern DataConstructor uid row tms        = Fix (DataConstructor_ uid row tms)
-pattern ForeignValue uid1 rows uid2        = Fix (ForeignValue_ uid1 rows uid2)
-pattern Lambda names body                  = Fix (Lambda_ names body)
-pattern Application spine                  = Fix (Application_ spine)
-pattern Case uid rows                      = Fix (Case_ uid rows)
-pattern Handle adj peg handlers valHandler = Fix (Handle_ adj peg handlers valHandler)
-pattern Let pty name body                  = Fix (Let_ pty name body)
-pattern FreeVariable name                  = Fix (FreeVariable_ name)
-pattern BoundVariable lvl ix               = Fix (BoundVariable_ lvl ix)
-pattern InstantiatePolyVar tm tyargs       = Fix (InstantiatePolyVar_ tm tyargs)
-pattern Command uid row                    = Fix (Command_ uid row)
-pattern Annotation tm ty                   = Fix (Annotation_ tm ty)
-pattern Cut l r                            = Fix (Cut_ l r)
-pattern Letrec names lambdas               = Fix (Letrec_ names lambdas)
+pattern DataConstructor uid row tms           = Fix (DataConstructor_ uid row tms)
+pattern ForeignValue uid1 rows uid2           = Fix (ForeignValue_ uid1 rows uid2)
+pattern Lambda names body                     = Fix (Lambda_ names body)
+pattern Application tm spine                  = Fix (Application_ tm spine)
+pattern Case uid tm rows                      = Fix (Case_ uid tm rows)
+pattern Handle tm adj peg handlers valHandler = Fix (Handle_ tm adj peg handlers valHandler)
+pattern Let body pty name rhs                 = Fix (Let_ body pty name rhs)
+pattern FreeVariable name                     = Fix (FreeVariable_ name)
+pattern BoundVariable lvl ix                  = Fix (BoundVariable_ lvl ix)
+pattern InstantiatePolyVar tm tyargs          = Fix (InstantiatePolyVar_ tm tyargs)
+pattern Command uid row                       = Fix (Command_ uid row)
+pattern Annotation tm ty                      = Fix (Annotation_ tm ty)
+pattern Letrec names lambdas body             = Fix (Letrec_ names lambdas body)
+pattern Hole                                  = Fix Hole_
 
 data Spine tm = MixedSpine
   ![tm] -- ^ non-normalized terms
@@ -376,7 +381,6 @@ type EffectInterfaceI    = Resolved EffectInterface
 type ConstructorDeclI    = Resolved ConstructorDecl
 
 type TmI                 = Tm Cid
-type ContinuationI       = Tm Cid
 type SpineI              = Spine Cid
 
 -- raw
@@ -398,10 +402,10 @@ type Value'              = Tm Text
 -- $ Judgements
 
 isValue :: Tm a -> Bool
-isValue BoundVariable{}      = True
+-- isValue BoundVariable{}      = True
 isValue FreeVariable{}       = True
 isValue InstantiatePolyVar{} = True
-isValue Command{}            = True
+-- isValue Command{}            = True
 isValue Annotation{}         = True
 isValue DataConstructor{}    = True
 isValue ForeignValue{}       = True
@@ -410,7 +414,6 @@ isValue _                    = False
 
 isComputation :: Tm a -> Bool
 isComputation Command{}            = True
-isComputation Cut{}                = True
 isComputation Letrec{}             = True
 isComputation _                    = False
 
@@ -419,7 +422,6 @@ isUse BoundVariable{}         = True
 isUse FreeVariable{}          = True
 isUse InstantiatePolyVar{}    = True
 isUse Command{}               = True
-isUse (Cut (Application{}) _) = True
 isUse Annotation{}            = True
 isUse _                       = False
 
@@ -427,7 +429,6 @@ isConstruction :: Tm a -> Bool
 isConstruction DataConstructor{} = True
 isConstruction ForeignValue{}    = True
 isConstruction Lambda{}          = True
-isConstruction Cut{}             = True
 isConstruction Letrec{}          = True
 isConstruction _                 = False
 
@@ -445,17 +446,16 @@ shiftTraverse f = go 0 where
   go ix (InstantiatePolyVar tm tys) = InstantiatePolyVar (go ix tm) tys
   go _ix cmd@Command{} = cmd
   go ix (Annotation tm ty) = Annotation (go ix tm) ty
-  go ix (Cut tm1 tm2) = Cut (go ix tm1) (go ix tm2)
-  go ix (Letrec names defns) =
+  go ix (Letrec names defns body) =
     let ix' = ix + length defns
-    in Letrec names ((fmap . second) (go ix') defns)
-  go ix (Application spine) = Application (go ix <$> spine)
-  go ix (Case uid rows) = Case uid ((fmap . second) (go ix) rows)
-  go ix (Handle adj peg handlers (vName, vHandler)) =
+    in Letrec names ((fmap . second) (go ix') defns) (go ix' body)
+  go ix (Application tm spine) = Application (go ix tm) (go ix <$> spine)
+  go ix (Case uid tm rows) = Case uid (go ix tm) ((fmap . second) (go ix) rows)
+  go ix (Handle tm adj peg handlers (vName, vHandler)) =
     let handlers' = (<$$> handlers) $ \(binders, handler) ->
           (binders, go (ix + length binders + 1) handler)
-    in Handle adj peg handlers' (vName, go (succ ix) vHandler)
-  go ix (Let pty name body) = Let pty name (go (succ ix) body)
+    in Handle (go ix tm) adj peg handlers' (vName, go (succ ix) vHandler)
+  go ix (Let body pty name rhs) = Let (go ix body) pty name (go (succ ix) rhs)
   go _ _ = error "impossible: shiftTraverse"
 
 close :: (Text -> Maybe Int) -> Tm uid -> Tm uid
@@ -490,6 +490,13 @@ substitute freev insert body = flip ycata body $ \case
     | otherwise -> tm
   tm -> tm
 
+substituteAll :: HashMap Text (Tm uid) -> Tm uid -> Tm uid
+substituteAll vals body = flip ycata body $ \case
+  tm@(FreeVariable v)
+    | Just insert <- HashMap.lookup v vals -> insert
+    | otherwise -> tm
+  tm -> tm
+
 -- Instance Hell:
 
 -- IsIpld
@@ -513,6 +520,10 @@ pattern T3 tag a b c <- (DagArray (Vx [fromIpld -> Just tag, fromIpld -> Just a,
 pattern T4 :: (IsIpld a, IsIpld b, IsIpld c, IsIpld d) => Text -> a -> b -> c -> d -> IPLD.Value
 pattern T4 tag a b c d <- (DagArray (Vx [fromIpld -> Just tag, fromIpld -> Just a, fromIpld -> Just b, fromIpld -> Just c, fromIpld -> Just d])) where
   T4 tag a b c d = DagArray (Vx [toIpld tag, toIpld a, toIpld b, toIpld c, toIpld d])
+
+pattern T5 :: (IsIpld a, IsIpld b, IsIpld c, IsIpld d, IsIpld e) => Text -> a -> b -> c -> d -> e -> IPLD.Value
+pattern T5 tag a b c d e <- (DagArray (Vx [fromIpld -> Just tag, fromIpld -> Just a, fromIpld -> Just b, fromIpld -> Just c, fromIpld -> Just d, fromIpld -> Just e])) where
+  T5 tag a b c d e = DagArray (Vx [toIpld tag, toIpld a, toIpld b, toIpld c, toIpld d, toIpld e])
 
 pattern DataTyIpld uid args     = T2 "DataTy" uid args
 pattern SuspendedTyIpld cty     = T1 "SuspendedTy" cty
@@ -557,54 +568,52 @@ pattern CommandIpld uid row             = T2 "Command" uid row
 pattern DataConstructorIpld uid row tms = T3 "DataConstructor" uid row tms
 pattern ForeignValueIpld uid1 tys uid2  = T3 "ForeignValue" uid1 tys uid2
 pattern LambdaIpld body                 = T1 "Lambda" body
-pattern ApplicationIpld spine           = T1 "Application" spine
-pattern CaseIpld uid branches           = T2 "Case" uid branches
-pattern HandleIpld adj peg handlers valHandler
-  = T4 "Handle" adj peg handlers valHandler
-pattern LetIpld pty scope               = T2 "LetIpld" pty scope
+pattern ApplicationIpld tm spine        = T2 "Application" tm spine
+pattern CaseIpld uid tm branches        = T3 "Case" uid tm branches
+pattern HandleIpld tm adj peg handlers valHandler
+                                        = T5 "Handle" tm adj peg handlers valHandler
+pattern LetIpld body pty scope          = T3 "LetIpld" body pty scope
 pattern BoundVariableIpld depth column  = T2 "BoundVariable" depth column
 pattern FreeVariableIpld name           = T1 "FreeVariable" name
 pattern InstantiatePolyVarIpld b args   = T2 "InstantiatePolyVar" b args
 pattern AnnotationIpld tm ty            = T2 "Annotation" tm ty
 pattern ValueIpld tm                    = T1 "Value" tm
 pattern CutIpld cont scrutinee          = T2 "Cut" cont scrutinee
-pattern LetrecIpld names defns          = T2 "Letrec" names defns
+pattern LetrecIpld names defns body     = T3 "Letrec" names defns body
 
 instance IsUid uid => IsIpld (Tm uid) where
   toIpld = \case
-    DataConstructor uid row tms        -> DataConstructorIpld uid row tms
-    ForeignValue uid1 tys uid2         -> ForeignValueIpld uid1 tys uid2
-    Lambda _names body                 -> LambdaIpld body
-    Application spine                  -> ApplicationIpld spine
-    Case uid branches                  -> CaseIpld uid branches
-    Handle adj peg handlers valHandler -> HandleIpld adj peg handlers valHandler
-    Let pty _name scope                -> LetIpld pty scope
-    BoundVariable depth column         -> BoundVariableIpld depth column
-    FreeVariable name                  -> FreeVariableIpld name
-    InstantiatePolyVar b args          -> InstantiatePolyVarIpld b args
-    Command uid row                    -> CommandIpld uid row
-    Annotation tm ty                   -> AnnotationIpld tm ty
-    Cut cont scrutinee                 -> CutIpld cont scrutinee
-    Letrec names defns                 -> LetrecIpld names defns
-    _                                  -> error "impossible: toIpld Tm"
+    DataConstructor uid row tms           -> DataConstructorIpld uid row tms
+    ForeignValue uid1 tys uid2            -> ForeignValueIpld uid1 tys uid2
+    Lambda _names body                    -> LambdaIpld body
+    Application tm spine                  -> ApplicationIpld tm spine
+    Case uid tm branches                  -> CaseIpld uid tm branches
+    Handle tm adj peg handlers valHandler -> HandleIpld tm adj peg handlers valHandler
+    Let body pty _name scope              -> LetIpld body pty scope
+    BoundVariable depth column            -> BoundVariableIpld depth column
+    FreeVariable name                     -> FreeVariableIpld name
+    InstantiatePolyVar b args             -> InstantiatePolyVarIpld b args
+    Command uid row                       -> CommandIpld uid row
+    Annotation tm ty                      -> AnnotationIpld tm ty
+    Letrec names defns body               -> LetrecIpld names defns body
+    _                                     -> error "impossible: toIpld Tm"
 
   fromIpld = \case
-    DataConstructorIpld uid row tms        -> Just $ DataConstructor uid row tms
-    ForeignValueIpld uid1 tys uid2         -> Just $ ForeignValue uid1 tys uid2
-    LambdaIpld body                        -> Just $ Lambda [] body
-    ApplicationIpld spine                  -> Just $ Application spine
-    CaseIpld uid branches                  -> Just $ Case uid branches
-    HandleIpld adj peg handlers valHandler -> Just $
-      Handle adj peg handlers valHandler
-    LetIpld pty scope                      -> Just $ Let pty "" scope
-    BoundVariableIpld depth column         -> Just $ BoundVariable depth column
-    FreeVariableIpld name                  -> Just $ FreeVariable name
-    InstantiatePolyVarIpld b args          -> Just $ InstantiatePolyVar b args
-    CommandIpld uid row                    -> Just $ Command uid row
-    AnnotationIpld tm ty                   -> Just $ Annotation tm ty
-    CutIpld cont scrutinee                 -> Just $ Cut cont scrutinee
-    LetrecIpld names defns                 -> Just $ Letrec names defns
-    _                                      -> Nothing
+    DataConstructorIpld uid row tms           -> Just $ DataConstructor uid row tms
+    ForeignValueIpld uid1 tys uid2            -> Just $ ForeignValue uid1 tys uid2
+    LambdaIpld body                           -> Just $ Lambda [] body
+    ApplicationIpld tm spine                  -> Just $ Application tm spine
+    CaseIpld uid tm branches                  -> Just $ Case uid tm branches
+    HandleIpld tm adj peg handlers valHandler -> Just $
+      Handle tm adj peg handlers valHandler
+    LetIpld body pty scope                    -> Just $ Let body pty "" scope
+    BoundVariableIpld depth column            -> Just $ BoundVariable depth column
+    FreeVariableIpld name                     -> Just $ FreeVariable name
+    InstantiatePolyVarIpld b args             -> Just $ InstantiatePolyVar b args
+    CommandIpld uid row                       -> Just $ Command uid row
+    AnnotationIpld tm ty                      -> Just $ Annotation tm ty
+    LetrecIpld names defns body               -> Just $ Letrec names defns body
+    _                                         -> Nothing
 
 instance IsUid uid => IsIpld (Polytype uid)
 instance (IsUid uid, IsIpld uid) => IsIpld (Adjustment uid)

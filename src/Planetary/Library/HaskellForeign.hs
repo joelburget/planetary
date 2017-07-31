@@ -37,7 +37,7 @@ import Planetary.Util
 
 import Debug.Trace
 
-haskellOracles :: CurrentHandlers
+haskellOracles :: Handlers
 haskellOracles =
   [ (intOpsId, [ liftBinaryOp @Int (+) , liftBinaryOp @Int (-) ])
   , (boolOpsId, [ liftBinaryOp (&&) , liftBinaryOp (||), liftUnaryOp not ])
@@ -113,7 +113,7 @@ interface IntOps =
 
 interface BoolOps =
   | and : <Bool> -> <Bool> -> <Bool>
-  | or : <Bool> -> <Bool> -> <Bool>
+  | or  : <Bool> -> <Bool> -> <Bool>
   | not : <Bool> -> <Bool>
 
 interface TextOps =
@@ -123,8 +123,8 @@ interface UidOps =
   | generateUid : <Uid>
 
 interface FixOps =
-  | mkFix : <F <Fix F>> -> <Fix F>
-  | unFix : <Fix F> -> <F <Fix F>>
+  | mkFix : <F <Fix F>> ->    <Fix F>
+  | unFix :    <Fix F>  -> <F <Fix F>>
 
 -- TODO: these example data types don't really belong here
 
@@ -150,6 +150,7 @@ interfaceTable = _interfaces resolvedDecls
 
 lookupForeign :: IsIpld a => Cid -> ForeignM a
 lookupForeign cid = do
+  db <- get
   val <- gets (^? ix cid) >>= (?? IndexErr)
   case fromIpld val of
     Nothing -> throwError FailedIpldConversion
@@ -159,34 +160,41 @@ writeForeign :: IsIpld a => a -> ForeignM Cid
 writeForeign a = do
   let val = toIpld a
       cid = valueCid val
-  modify (& ix cid .~ val)
+  modify (& at cid ?~ val)
   pure cid
 
 -- XXX
-liftBinaryOp
-  :: IsIpld s
-  => (s -> s -> s) -> (Spine Cid -> ForeignM (Tm Cid))
-liftBinaryOp op [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2] = do
+liftBinaryOp :: IsIpld s => (s -> s -> s) -> Handler
+liftBinaryOp op [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2] env = do
   i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
-  ForeignValue tyUid tySat <$> writeForeign i
-liftBinaryOp _ _ = throwError FailedForeignFun
+  i' <- writeForeign i
+  pure (ForeignValue tyUid tySat i', env)
+liftBinaryOp _ _ _ = throwError FailedForeignFun
 
 -- XXX
-liftUnaryOp
-  :: IsIpld s
-  => (s -> s) -> (Spine Cid -> ForeignM (Tm Cid))
-liftUnaryOp op [ForeignValue tyUid tySat uid] = do
+liftUnaryOp :: IsIpld s => (s -> s) -> Handler
+liftUnaryOp op [ForeignValue tyUid tySat uid] env = do
   i <- op <$> lookupForeign uid
-  ForeignValue tyUid tySat <$> writeForeign i
-liftUnaryOp _ _ = throwError FailedForeignFun
+  i' <- writeForeign i
+  pure (ForeignValue tyUid tySat i', env)
+liftUnaryOp _ _ _ = throwError FailedForeignFun
 
-mkFix :: Spine Cid -> ForeignM (Tm Cid)
-mkFix [a] = ForeignValue lfixId [{- XXX -}] <$> writeForeign a
+mkFix :: Handler
+mkFix [a] env = do
+  traceM $ "running mkfix on: " ++ show a
+  a' <- writeForeign a
+  traceM $ "mkfix returning: " ++ show a'
+  pure (ForeignValue lfixId [{- XXX -}] a', env)
 
-unFix :: Spine Cid -> ForeignM (Tm Cid)
-unFix [ForeignValue uid [val] tyUid]
-  | tyUid == lfixId = lookupForeign uid
-unFix x = traceShow x $ throwError FailedForeignFun
+unFix :: Handler
+-- unFix [ForeignValue uid [val] tyUid]
+unFix [ForeignValue tyUid _vals valUid] env
+  | tyUid == lfixId = do
+    traceM "running unfix"
+    val <- lookupForeign valUid
+    traceM $ "unfix returning: " ++ show val
+    pure (val, env)
+unFix x _stk = traceShowM x >> throwError FailedForeignFun
 
 mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
 mkForeign val = let val' = toIpld val in (valueCid val', val')

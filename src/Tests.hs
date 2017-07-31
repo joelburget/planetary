@@ -5,6 +5,7 @@ module Tests
   , runTypecheckingTests
   , runParserTests
   , runHaskellForeignTests
+  , runFrankExamplesTests
   ) where
 
 import Test.Tasty
@@ -14,6 +15,7 @@ import qualified Planetary.Core.Syntax.Test as Syntax
 import qualified Planetary.Core.Typecheck.Test as Typecheck
 import qualified Planetary.Support.Parser.Test as Parser
 import qualified Planetary.Library.HaskellForeign.Test as HaskellForeign
+import qualified Planetary.Library.FrankExamples.Test as FrankExamples
 
 runTests :: IO ()
 runTests = defaultMain tests
@@ -25,6 +27,7 @@ tests = testGroup "planetary"
   , Typecheck.unitTests
   , Parser.unitTests
   , HaskellForeign.unitTests
+  , FrankExamples.unitTests
   ]
 
 runEvalTests :: IO ()
@@ -38,6 +41,9 @@ runParserTests = defaultMain Parser.unitTests
 
 runHaskellForeignTests :: IO ()
 runHaskellForeignTests = defaultMain HaskellForeign.unitTests
+
+runFrankExamplesTests :: IO ()
+runFrankExamplesTests = defaultMain FrankExamples.unitTests
 
 -- unitTests :: TestTree
 -- unitTests = testGroup "ipc unit tests"

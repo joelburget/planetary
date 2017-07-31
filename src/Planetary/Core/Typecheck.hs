@@ -31,6 +31,7 @@ import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Unification
 import Control.Unification.IntVar
+import qualified Data.Foldable as Foldable
 import Data.Functor.Fixedpoint
 import Data.HashMap.Strict (intersectionWith)
 import Data.Text (Text)
@@ -164,13 +165,13 @@ infer = \case
     ambient <- getAmbient
     pure $ SuspendedTyU (CompTyU from' (PegU ambient to'))
   -- APP
-  Cut (Application spine) f -> do
+  (Application f spine) -> do
     -- SuspendedTyU (CompTyU dom (PegU ability retTy)) <- infer f
     f' <- infer f
     let SuspendedTyU (CompTyU dom (PegU ability retTy)) = f'
     ambient <- getAmbient
     _ <- unify' ability ambient
-    _ <- mapM_ (uncurry check) =<< strictZip ApplicationSpineMismatch (toList spine) dom
+    _ <- mapM_ (uncurry check) =<< strictZip ApplicationSpineMismatch (Foldable.toList spine) dom
     pure retTy
   -- COERCE
   Annotation n a -> do
@@ -227,7 +228,7 @@ check (DataConstructor uid row tms) (UVar i) = do
 --   let ty = DataTy uid valTysAct
 --   n =:= ty -- TODO doesn't seem like this should escape from unification
 -- CASE
-check (Cut (Case uid1 rows) m) ty = do
+check (Case uid1 m rows) ty = do
   -- args :: (Vector (TyArg a))
   DataTyU uid2 _args <- infer m
   _ <- unify' (UidTyU uid1) uid2
@@ -239,7 +240,7 @@ check (Cut (Case uid1 rows) m) ty = do
   forM_ zipped $ \(dataConTys, (_, rhs)) ->
     withValTypes' dataConTys rhs (`check` ty)
 -- HANDLE
-check (Cut (Handle adj peg handlers (_, vHandler)) val) ty = do
+check (Handle val adj peg handlers (_, vHandler)) ty = do
   ambient <- getAmbient
   let adj' = unfreeze <$$> unAdjustment adj
   Just adjustedAmbient <- pure $ extendAbility' ambient adj'
@@ -255,7 +256,7 @@ check (Cut (Handle adj peg handlers (_, vHandler)) val) ty = do
          check tm ty
   withValTypes [valTy] $ check vHandler ty
 -- LET
-check (Cut (Let pty _name body) val) ty = do
+check (Let val pty _name body) ty = do
   valTy <- instantiateWithEnv pty
   check val valTy
   withPolyty pty $ check body ty

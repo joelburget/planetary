@@ -12,7 +12,8 @@ module Planetary.Core.UIdMap
   ( UIdMap(..)
   , IsUid
   , fromList
-  , Foldable.toList
+  , toList
+  , (<>)
   ) where
 
 import Control.Lens (
@@ -23,11 +24,11 @@ import Control.Lens (
 import Control.Lens.At (At(..), Ixed(..), IxValue, Index)
 import Control.Newtype
 import Data.Data
-import qualified Data.Foldable as Foldable
 import Data.Function (on)
 import Data.Hashable (Hashable)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
+import Data.Monoid ((<>))
 import GHC.Exts (IsList(..))
 import GHC.Generics
 import Network.IPLD

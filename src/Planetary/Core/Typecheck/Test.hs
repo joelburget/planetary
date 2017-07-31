@@ -113,7 +113,7 @@ unitTests = testGroup "typechecking"
         constr1 = ConstructorDecl "constr1" [ty1, ty2]
         constr2 = ConstructorDecl "constr2" []
 
-        app = Application [tm1, tm2]
+        app f = AppT f [tm1, tm2]
         f = Lam ["x", "y"] $ DataConstructor dataUid 0 [FV"x", FV"y"]
         resultTy = DataTy (UidTy dataUid) ty1ty2vals
 
@@ -133,8 +133,8 @@ unitTests = testGroup "typechecking"
 
     in testGroup "(sharing data defns)"
          [ testGroup "infer app"
-           [ inferTest "APP (1)" tables (Cut app goodAnnF) expected
-           , inferTest "APP (2)" tables (Cut app baddAnnF) expectedBad
+           [ inferTest "APP (1)" tables (app goodAnnF) expected
+           , inferTest "APP (2)" tables (app baddAnnF) expectedBad
            ]
          , testGroup "check data"
            [ let tables' = emptyTypingEnv & typingData .~

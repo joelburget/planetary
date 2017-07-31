@@ -245,7 +245,7 @@ parseLetrec =
         reserved "in"
         body <- indentedBlock parseTm
         let (names, binderVals) = unzip definitions
-        return $ Cut (letrec names binderVals) body
+        return $ Letrec names binderVals body
   in parser <?> "Letrec"
 
 parsePolyty :: MonadicParsing m => m Polytype'
@@ -267,7 +267,7 @@ parseLet =
         rhs <- parseTm
         reserved "in"
         body <- parseTm
-        pure (let_ name ty rhs body)
+        pure (Let rhs ty name body)
   in parser <?> "Let"
 
 parseValue :: MonadicParsing m => m Value'
@@ -302,7 +302,7 @@ parseCase =
             let _uncheckedName:vars = idents
             pure (vars, rhs)
           pure (uid, branches)
-        pure $ Cut (CaseP uid branches) m
+        pure $ CaseP uid m branches
   in parser <?> "case"
 
 parseHandle :: MonadicParsing m => m Tm'
@@ -345,8 +345,8 @@ parseHandle = (do
 
     pure (handlers, adjustment, valueHandler)
 
-  let cont = handle adjustment peg effectHandlers valueHandler
-  pure $ Cut cont scrutinee
+  -- XXX use Handle
+  pure $ handle scrutinee adjustment peg effectHandlers valueHandler
   ) <?> "handle"
 
 parseTm :: MonadicParsing m => m Tm'
@@ -355,12 +355,12 @@ parseTm = (do
     tm <- parseTmNoApp
 
     -- "We write '!' for the empty spine"
-    (Cut (Application []) tm <$ bang) <|> pure tm
+    (AppT tm [] <$ bang) <|> pure tm
 
   case tms of
     [] -> empty
     [tm] -> pure tm
-    fun:spine -> pure $ Cut (Application spine) fun
+    fun:spine -> pure $ AppT fun spine
   ) <?> "Tm"
 
 parseTmOrAnnot :: MonadicParsing m => m Tm'
@@ -399,7 +399,7 @@ parseCommandOrIdent = do
   pure $ case dotRow of
     Nothing -> FV name
     -- TODO application of terms
-    Just row -> Cut (Application []) (Command name (fromIntegral row))
+    Just row -> AppT (Command name (fromIntegral row)) []
 
 parseLambda :: MonadicParsing m => m Value'
 parseLambda = Lam

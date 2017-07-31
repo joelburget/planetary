@@ -5,7 +5,9 @@
 -- ghc mistakenly thinks we're not using functions used in patterns
 {-# options_ghc -fno-warn-unused-top-binds #-}
 module Planetary.Core.Syntax.Patterns
-  ( pattern Lam
+  ( pattern AppN
+  , pattern AppT
+  , pattern Lam
   , pattern CaseP
 
   -- TODO: convert to patterns?
@@ -38,6 +40,12 @@ pattern VTy name = FreeVariableTy name
 -- patterns
 -- TODO: make these bidirectional
 
+pattern AppN :: Tm uid -> [Tm uid] -> Tm uid
+pattern AppN f lst = Application f (NormalSpine lst)
+
+pattern AppT :: Tm uid -> [Tm uid] -> Tm uid
+pattern AppT f lst = Application f (TermSpine lst)
+
 lam :: Vector Text -> Tm uid -> Tm uid
 lam vars body = Lambda vars (close (`elemIndex` vars) body)
 
@@ -54,36 +62,39 @@ pattern Lam names tm <- (unlam -> Just (names, tm)) where
 case_
   :: IsUid uid
   => uid
+  -> Tm uid
   -> Vector (Vector Text, Tm uid)
   -> Tm uid
-case_ uid tms =
+case_ uid tm tms =
   let f (vars, tm) = (vars, close (`elemIndex` vars) tm)
-  in Case uid (f <$> tms)
+  in Case uid tm (f <$> tms)
 
 uncase
   :: Tm uid
-  -> Maybe (uid, Vector (Vector Text, Tm uid))
-uncase (Case uid tms) =
+  -> Maybe (uid, Tm uid, Vector (Vector Text, Tm uid))
+uncase (Case uid tm tms) =
   let f (vars, tm) = (vars, let vars' = FV <$> vars in open (vars' !!) tm)
-  in Just (uid, f <$> tms)
+  in Just (uid, tm, f <$> tms)
 uncase _ = Nothing
 
 pattern CaseP
   :: IsUid uid
   => uid
+  -> Tm uid
   -> Vector (Vector Text, Tm uid)
   -> Tm uid
-pattern CaseP uid tms <- (uncase -> Just (uid, tms)) where
-  CaseP vars body = case_ vars body
+pattern CaseP uid tm tms <- (uncase -> Just (uid, tm, tms)) where
+  CaseP vars tm body = case_ vars tm body
 
 handle
   :: forall uid.
-     Adjustment uid
+     Tm uid
+  -> Adjustment uid
   -> Peg uid
   -> UIdMap uid (Vector (Vector Text, Text, Tm uid))
   -> (Text, Tm uid)
   -> Tm uid
-handle adj peg handlers (bodyVar, body) =
+handle tm adj peg handlers (bodyVar, body) =
   let abstractor vars kVar var
         | var == kVar = Just 0
         | otherwise   = succ <$> elemIndex var vars
@@ -91,7 +102,7 @@ handle adj peg handlers (bodyVar, body) =
         (\(vars, kVar, rhs) -> (vars, close (abstractor vars kVar) rhs))
         handlers
       body' = close1 bodyVar body
-  in Handle adj peg handlers' (bodyVar, body')
+  in Handle tm adj peg handlers' (bodyVar, body')
 
 let_
   :: Text
@@ -99,18 +110,13 @@ let_
   -> Tm uid
   -> Tm uid
   -> Tm uid
-let_ name pty rhs body = Cut
-  -- Dragons: `rhs` and `body` are in the opposite positions of what you'd
-  -- expect because body is the continuation and rhs is the term / value we're
-  -- cutting against. `let_` matches the order they appear in the typical
-  -- syntax.
-
-  (Let pty name (close1 name body)) -- continuation
-  rhs -- term
+let_ name pty rhs body = Let rhs pty name (close1 name body)
 
 letrec
   :: Vector Text
   -> Vector (Polytype uid, Tm uid)
   -> Tm uid
-letrec names binderVals = Letrec names $
-  (fmap . second) (close (`elemIndex` names)) binderVals
+  -> Tm uid
+letrec names binderVals body = Letrec names
+  ((fmap . second) (close (`elemIndex` names)) binderVals)
+  (close (`elemIndex` names) body)

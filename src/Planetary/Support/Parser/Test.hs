@@ -152,9 +152,9 @@ unitTests = testGroup "parsing"
             ])
     in parserTest decl parseInterfaceDecl expected
 
-  , parserTest "Z!" parseTm $ Cut (Application []) (FV"Z")
+  , parserTest "Z!" parseTm $ AppT (FV"Z") []
   , parserTest "Z Z Z" parseTm $
-      Cut (Application [FV"Z", FV"Z"]) (FV"Z")
+      AppT (FV"Z") [FV"Z", FV"Z"]
 
   , parserTest "let Z: forall. X = W in Z" parseLet $
     let_ "Z" (Polytype [] (VTy"X")) (FV"W") (FV"Z")
@@ -169,18 +169,17 @@ unitTests = testGroup "parsing"
         polyBinders = [("X", ValTyK), ("Y", ValTyK)]
         pty = Polytype polyBinders polyVal
         expected = let_ "on" pty
-          (Lam ["x", "f"] (Cut (Application [FV"x"]) (FV"f")))
-          (Cut (Application [FV"n", Lam ["x"] (FV"body")]) (FV"on"))
+          (Lam ["x", "f"] (AppT (FV"f") [FV"x"]))
+          (AppT (FV"on") [FV"n", Lam ["x"] (FV"body")])
     in parserTest defn parseLet expected
 
   , let defn = "on n (\\x -> body)"
-        expected = Cut
-          (Application [FV"n", Lam ["x"] (FV"body")])
-          (FV"on")
+        expected = AppT (FV"on") [FV"n", Lam ["x"] (FV"body")]
+
     in parserTest defn parseTm expected
 
   , let defn = "\\x f -> f x"
-        expected = Lam ["x", "f"] (Cut (Application [FV"x"]) (FV"f"))
+        expected = Lam ["x", "f"] (AppT (FV"f") [FV"x"])
     in parserTest defn parseTm expected
 
   , let defn = T.unlines
@@ -189,11 +188,10 @@ unitTests = testGroup "parsing"
           , "    | <_> -> y"
           , "    | <_ a b c> -> z"
           ]
-        cont = CaseP "e829515d5"
+        expected = CaseP "e829515d5" (FV "x")
           [ ([], FV "y")
           , (["a", "b", "c"], FV "z")
           ]
-        expected = Cut cont (FV "x")
     in testGroup "case"
          [ parserTest defn parseTm expected
          , parserTest defn parseCase expected
@@ -223,18 +221,17 @@ unitTests = testGroup "parsing"
           , "    | <receive -> r> -> abort!"
           , "  | y -> y"
           ]
-        scrutinee = Cut (Application []) (FV"y")
+        scrutinee = AppT (FV"y") []
         adj = Adjustment
           [ ("Receive", [TyArgVal (FreeVariableTy"X")])
           ]
         peg = Peg (Ability OpenAbility [("Abort", [])])
                   (FreeVariableTy "Y")
         handlers =
-          [ ("Receive", [([], "r", Cut (Application []) (FV"abort"))])
+          [ ("Receive", [([], "r", AppT (FV"abort") [])])
           ]
         fallthrough = ("y", FV"y")
-        cont = handle adj peg (fromList handlers) fallthrough
-        expected = Cut cont scrutinee
+        expected = handle scrutinee adj peg (fromList handlers) fallthrough
     in parserTest defn parseHandle expected
 
   , parserTest "X" parseTyVar ("X", ValTyK)
