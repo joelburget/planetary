@@ -36,6 +36,7 @@ library
     Planetary.Core.Syntax.Test
     Planetary.Core.Typecheck.Test
     Planetary.Support.Parser.Test
+    Planetary.Library.FrankExamples.Test
     Planetary.Library.HaskellForeign.Test
 
   other-modules:
@@ -47,7 +48,7 @@ library
 
   -- other-extensions:
   build-depends:
-    base >=4.9 && <4.10,
+    base >=4.9 && <4.11,
     mtl == 2.2.*,
     hashable == 1.2.*,
     vector >= 0.11,
@@ -63,7 +64,7 @@ library
     bytestring == 0.10.*,
     newtype == 0.2.*,
     binary == 0.8.*,
-    template-haskell == 2.11.*,
+    template-haskell >= 2.11 && < 2.13,
     base16-bytestring == 0.1.*,
     ipld,
     binary-serialise-cbor,
@@ -78,6 +79,11 @@ library
   default-language:    Haskell2010
   ghc-options:
     -Wall
+    -- https://www.reddit.com/r/haskell/comments/6q9tcp/ghc_warnings_you_should_use_in_addition_to_wall/
+    -Wincomplete-uni-patterns
+    -Wincomplete-record-updates
+    -Wmissing-import-lists
+    -Wredundant-constraints
     -fwarn-tabs
 
 executable planetary
@@ -95,6 +101,10 @@ executable planetary
   default-language : Haskell2010
   ghc-options:
     -Wall
+    -Wincomplete-uni-patterns
+    -Wincomplete-record-updates
+    -Wmissing-import-lists
+    -Wredundant-constraints
     -fwarn-tabs
     -threaded
     -rtsopts
