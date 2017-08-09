@@ -5,6 +5,7 @@
 {-# language TypeApplications #-}
 module Planetary.Library.FrankExamples (resolvedDecls) where
 
+import Control.Lens
 import Control.Monad.Except
 import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
@@ -29,53 +30,64 @@ eraseCharLit = mkForeignTm @Text textId [] "\b \b"
 
 -- TODO: we actually map with a data constructor
 textMap :: Handler
-textMap [Lambda _binderNames body, ForeignValue _ _ uid] stk= do
+textMap st
+  | [Lambda _binderNames body, ForeignValue _ _ uid] <- st ^. evalEnv . _head
+  = do
   fText <- lookupForeign uid
   let str = T.unpack fText
       fun :: Char -> ForeignM Char
       fun char = do
         charPtr <- ForeignValue charId [] <$> writeForeign char
         -- HACK XXX
-        ouch [charPtr] stk
+        ouch $ st & evalFocus .~ charPtr
         pure char
   result <- T.pack <$> traverse fun str
   result' <- writeForeign result
-  pure (ForeignValue textId [] result', stk)
-textMap _ _ = throwError FailedForeignFun
+  pure $ st & evalFocus .~ ForeignValue textId [] result'
+textMap _ = throwError FailedForeignFun
 
 -- charHandler1 :: TmI -> TmI -> Char -> TmI
 charHandler1 :: Handler
-charHandler1 [b1, b2, ForeignValue _ _ uid] stk = do
+charHandler1 st
+  | [b1, b2, ForeignValue _ _ uid] <- st ^. evalEnv . _head
+  = do
   char <- lookupForeign uid
-  pure $ case char of
-    '\b' -> (b1, stk)
-    c    -> (AppN (mkForeignTm @Char charId [] c) [b2], stk)
-charHandler1 _ _ = throwError FailedForeignFun
+  pure $ st & evalFocus .~ case char of
+    '\b' -> b1
+    c    -> AppN (mkForeignTm @Char charId [] c) [b2]
+charHandler1 _ = throwError FailedForeignFun
 
 -- charHandler2 :: TmI -> TmI -> TmI -> Char -> TmI
 charHandler2 :: Handler
-charHandler2 [b1, b2, b3, ForeignValue _ _ uid] stk=
-  flip fmap (lookupForeign uid) $ \case
-    '0' -> (b1, stk)
-    ' ' -> (b2, stk)
-    _   -> (b3, stk)
-charHandler2 _ _ = throwError FailedForeignFun
+charHandler2 st
+  | [b1, b2, b3, ForeignValue _ _ uid] <- st ^. evalEnv . _head
+  = do
+    focus <- flip fmap (lookupForeign uid) $ \case
+      '0' -> b1
+      ' ' -> b2
+      _   -> b3
+    pure $ st & evalFocus .~ focus
+charHandler2 _ = throwError FailedForeignFun
 
 inch :: Handler
-inch [] stk = do
+inch st
+  | [] <- st ^. evalEnv . _head
+  = do
   c <- liftIO getChar
   -- Taken from Shonky/Semantics
   let c' = if c == '\DEL' then '\b' else c
   c'' <- writeForeign c'
-  pure (ForeignValue charId [] c'', stk)
-inch _ _ = throwError FailedForeignFun
+  pure $ st & evalFocus .~ ForeignValue charId [] c''
+inch _ = throwError FailedForeignFun
 
 ouch :: Handler
-ouch [ForeignValue _ _ uid] stk = do
+ouch st
+  | [ForeignValue _ _ uid] <- st ^. evalEnv . _head
+  = do
   c <- lookupForeign uid
   liftIO $ putChar c >> hFlush stdout
-  pure (DataConstructor unitId 0 [], stk)
-ouch _ _ = throwError FailedForeignFun
+  pure $ st & evalFocus .~ DataConstructor unitId 0 []
+ouch _ = throwError FailedForeignFun
 
 externals :: Handlers
 externals =
@@ -97,7 +109,7 @@ env = AmbientEnv
 -- * fix up textMap
 -- * how is this actually run?
 
-decls :: [DeclS]
+decls :: [Decl Text]
 decls = forceDeclarations [text|
 data Zero = -- no constructors
 

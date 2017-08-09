@@ -36,6 +36,16 @@ import qualified Data.HashSet as HashSet
 import Planetary.Core
 import Planetary.Util
 
+type Ability'            = Ability Text
+type CompTy'             = CompTy Text
+type ConstructorDecl'    = ConstructorDecl Text
+type Peg'                = Peg Text
+type Polytype'           = Polytype Text
+type TyArg'              = TyArg Text
+type ValTy'              = ValTy Text
+type Tm'                 = Tm Text
+type Value'              = Tm Text
+
 newtype CoreParser t m a =
   CoreParser { runCoreParser :: IndentationParserT t m a }
   deriving (Functor, Alternative, Applicative, Monad, Parsing
@@ -158,7 +168,7 @@ parsePeg = Peg
   <*> parseValTy
   <?> "Peg"
 
-parseCompTy :: MonadicParsing m => m CompTy'
+parseCompTy :: MonadicParsing m => m (CompTy Text)
 parseCompTy = CompTy
   <$> many (try (parseValTy <* arr)) -- TODO: bad use of try
   <*> parsePeg
@@ -174,7 +184,7 @@ parseInterfaceInstances :: MonadicParsing m => m [(Text, [TyArg'])]
 parseInterfaceInstances = parseInterfaceInstance `sepBy` comma
   <?> "Interface Instances"
 
-parseDataDecl :: MonadicParsing m => m DataDeclS
+parseDataDecl :: MonadicParsing m => m (DataDecl Text)
 parseDataDecl = do
   reserved "data"
   name <- identifier
@@ -200,11 +210,11 @@ parseCommandType = do
   (args, result) <- maybe empty pure (unsnoc vs)
   pure (name, args, result)
 
-parseCommandDecl :: MonadicParsing m => m CommandDeclaration'
+parseCommandDecl :: MonadicParsing m => m (CommandDeclaration Text)
 parseCommandDecl = bar >> (uncurry3 CommandDeclaration <$> parseCommandType)
   <?> "Command Decl"
 
-parseInterfaceDecl :: MonadicParsing m => m InterfaceDeclS
+parseInterfaceDecl :: MonadicParsing m => m (InterfaceDecl Text)
 parseInterfaceDecl = (do
   reserved "interface"
   name <- identifier
@@ -215,7 +225,7 @@ parseInterfaceDecl = (do
   return (InterfaceDecl name (EffectInterface tyVars xs))
   ) <?> "Interface Decl"
 
-parseDecls :: MonadicParsing m => m [DeclS]
+parseDecls :: MonadicParsing m => m [Decl Text]
 parseDecls = some (choice
   [ DataDecl_      <$> parseDataDecl
   , InterfaceDecl_ <$> parseInterfaceDecl
@@ -226,7 +236,7 @@ parseDecls = some (choice
 -- ... `letrec x =
 -- ... this could be generalizd to let (but that would cost the complexity of
 -- multiple types of toplevel)
-parseTermDecl :: MonadicParsing m => m TermDeclS
+parseTermDecl :: MonadicParsing m => m (TermDecl Text)
 parseTermDecl =
   let parser = TermDecl <$> identifier <* assign <*> parseLetrec
   in parser <?> "definition"
@@ -437,7 +447,7 @@ runTokenParse
   :: CoreParser Token Parser b -> ParseLocation -> Text -> Either String b
 runTokenParse = lowLevelRunParse evalTokenIndentationParserT
 
-forceDeclarations :: Text -> [DeclS]
+forceDeclarations :: Text -> [Decl Text]
 forceDeclarations str = case runTokenParse parseDecls forceLocation str of
   Left bad -> error bad
   Right result -> result

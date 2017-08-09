@@ -81,13 +81,13 @@ resolveTm initState tm =
 -- hold types).
 resolveDecls
   :: ResolutionState
-  -> [DeclS]
+  -> [Decl Text]
   -> Either ResolutionErr ResolvedDecls
 resolveDecls initState xs =
   let ResolutionM action = nameResolutionM xs
   in (evalState (runReaderT (runExceptT action) []) initState)
 
-nameResolutionM :: [DeclS] -> ResolutionM ResolvedDecls
+nameResolutionM :: [Decl Text] -> ResolutionM ResolvedDecls
 nameResolutionM (DataDecl_ (DataDecl name ddecl):xs) = do
   (cid, ddeclI) <- convertDti ddecl
   modify (& at name ?~ cid)
@@ -236,8 +236,8 @@ convertDti (DataTypeInterface binders ctrs) = do
   pure (cidOf dti, dti)
 
 convertEi
-  :: Unresolved EffectInterface
-  -> ResolutionM (Cid, Resolved EffectInterface)
+  :: EffectInterface Text
+  -> ResolutionM (Cid, EffectInterface Cid)
 convertEi (EffectInterface binders cmds) = do
   let varNames = map fst binders
   cmds' <- withPushedTyVars varNames $ traverse convertCmd cmds

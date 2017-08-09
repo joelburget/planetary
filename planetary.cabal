@@ -82,7 +82,7 @@ library
     -- https://www.reddit.com/r/haskell/comments/6q9tcp/ghc_warnings_you_should_use_in_addition_to_wall/
     -Wincomplete-uni-patterns
     -Wincomplete-record-updates
-    -Wmissing-import-lists
+    -- -Wmissing-import-lists
     -Wredundant-constraints
     -fwarn-tabs
 
@@ -103,7 +103,7 @@ executable planetary
     -Wall
     -Wincomplete-uni-patterns
     -Wincomplete-record-updates
-    -Wmissing-import-lists
+    -- -Wmissing-import-lists
     -Wredundant-constraints
     -fwarn-tabs
     -threaded

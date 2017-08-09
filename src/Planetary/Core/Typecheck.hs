@@ -66,6 +66,7 @@ data TcErr
   | MismatchFailure (Ty Cid UTy') (Ty Cid UTy')
   | CheckFailure String
   | LfixShape
+  | NotAbility (UTy IntVar)
   deriving Show
 
 instance Eq TcErr where
@@ -241,6 +242,7 @@ check (Case uid1 m rows) ty = do
     withValTypes' dataConTys rhs (`check` ty)
 -- HANDLE
 check (Handle val adj peg handlers (_, vHandler)) ty = do
+  -- TODO why isn't peg checked?
   ambient <- getAmbient
   let adj' = unfreeze <$$> unAdjustment adj
   Just adjustedAmbient <- pure $ extendAbility' ambient adj'
@@ -282,10 +284,11 @@ dataInterface (DataTypeInterface _ ctors) =
 
 instantiateAbility :: UTy IntVar -> TcM' (UIdMap Cid [CommandDeclarationI])
 instantiateAbility (AbilityU _ uidmap) =
-  iforM uidmap $ \uid tyArgs -> lookupCommands uid
+  iforM uidmap $ \uid _tyArgs -> lookupCommands uid
     -- iforM cmds $ \row (CommandDeclaration as b) ->
     --   -- TODO should we be unifying the args and as? what's wrong here?
     --   todo "instantiateAbility" tyArgs as b
+instantiateAbility tm = throwError (NotAbility tm)
 
 uidZip
   :: MonadError TcErr m

@@ -26,7 +26,7 @@ vectorIdStr = cidText vectorId
 uidMapIdStr = cidText uidMapId
 lfixIdStr   = cidText lfixId
 
-decls :: [DeclS]
+decls :: [Decl Text]
 decls = forceDeclarations [text|
 data InitiateAbility =
   | <openAbility>

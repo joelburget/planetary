@@ -60,20 +60,19 @@ pattern Lam names tm <- (unlam -> Just (names, tm)) where
   Lam vars body = lam vars body
 
 case_
-  :: IsUid uid
-  => uid
+  :: uid
   -> Tm uid
   -> Vector (Vector Text, Tm uid)
   -> Tm uid
 case_ uid tm tms =
-  let f (vars, tm) = (vars, close (`elemIndex` vars) tm)
+  let f (vars, tm') = (vars, close (`elemIndex` vars) tm')
   in Case uid tm (f <$> tms)
 
 uncase
   :: Tm uid
   -> Maybe (uid, Tm uid, Vector (Vector Text, Tm uid))
 uncase (Case uid tm tms) =
-  let f (vars, tm) = (vars, let vars' = FV <$> vars in open (vars' !!) tm)
+  let f (vars, tm') = (vars, let vars' = FV <$> vars in open (vars' !!) tm')
   in Just (uid, tm, f <$> tms)
 uncase _ = Nothing
 
@@ -98,9 +97,8 @@ handle tm adj peg handlers (bodyVar, body) =
   let abstractor vars kVar var
         | var == kVar = Just 0
         | otherwise   = succ <$> elemIndex var vars
-      handlers' = (fmap . fmap)
+      handlers' = handlers <&&>
         (\(vars, kVar, rhs) -> (vars, close (abstractor vars kVar) rhs))
-        handlers
       body' = close1 bodyVar body
   in Handle tm adj peg handlers' (bodyVar, body')
 

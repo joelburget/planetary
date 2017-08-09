@@ -275,6 +275,7 @@ data TmF uid tm
     !(Vector (Polytype uid, tm)) -- ^ a typed lambda
     !tm                          -- ^ the body
 
+  -- TODO: can we get rid of this in the substitution-based semantics?
   | Hole_ -- ^ Used at execution only
   deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
 
@@ -325,16 +326,11 @@ data TermDecl uid = TermDecl
   !(Tm uid) -- ^ body
   deriving (Eq, Ord, Show, Typeable, Generic)
 
-type DeclS          = Decl          Text
-type DataDeclS      = DataDecl      Text
-type InterfaceDeclS = InterfaceDecl Text
-type TermDeclS      = TermDecl      Text
-
 data ResolvedDecls = ResolvedDecls
   { _datatypes  :: !(UIdMap Cid DataTypeInterfaceI)
   , _interfaces :: !(UIdMap Cid EffectInterfaceI)
   , _globalCids :: ![(Text, Cid)]
-  , _terms      :: ![Resolved TermDecl]
+  , _terms      :: ![TermDecl Cid]
   } deriving Show
 
 -- TODO: make traversals
@@ -368,36 +364,15 @@ extendAbility (Ability initAb uidMap) (Adjustment adj)
   = Ability initAb (uidMap <> adj)
 extendAbility _ _ = error "extendAbility called with non-ability"
 
--- executable
+-- a few common type synonyms
 
-type Resolved f = f Cid
-
-type CommandDeclarationI = Resolved CommandDeclaration
+type CommandDeclarationI = CommandDeclaration Cid
 type PolytypeI           = Polytype Cid
 type ValTyI              = ValTy Cid
 type TyArgI              = TyArg Cid
-type DataTypeInterfaceI  = Resolved DataTypeInterface
-type EffectInterfaceI    = Resolved EffectInterface
-type ConstructorDeclI    = Resolved ConstructorDecl
-
+type DataTypeInterfaceI  = DataTypeInterface Cid
+type EffectInterfaceI    = EffectInterface Cid
 type TmI                 = Tm Cid
-type SpineI              = Spine Cid
-
--- raw
-
-type Unresolved f = f Text
-
-type Ability'            = Ability Text
-type CommandDeclaration' = Unresolved CommandDeclaration
-type CompTy'             = CompTy Text
-type ConstructorDecl'    = Unresolved ConstructorDecl
-type Peg'                = Peg Text
-type Polytype'           = Polytype Text
-type TyArg'              = TyArg Text
-type ValTy'              = ValTy Text
-
-type Tm'                 = Tm Text
-type Value'              = Tm Text
 
 -- $ Judgements
 
@@ -434,6 +409,12 @@ isConstruction _                 = False
 
 -- $ Binding
 
+-- | shiftTraverse is the primitive used to implement @open@ and @close@.
+--
+-- We traverse the AST counting the the number of binders crossed, then call
+-- the callback upon finding either a free or bound variable. @close@ is
+-- implemented by converting @FreeVariable@ to @BoundVariable@ while @open@ is
+-- implemented by converting @BoundVariable@ to @FreeVariable@.
 shiftTraverse :: (Int -> Tm uid -> Tm uid) -> Tm uid -> Tm uid
 shiftTraverse f = go 0 where
 
@@ -447,17 +428,18 @@ shiftTraverse f = go 0 where
   go _ix cmd@Command{} = cmd
   go ix (Annotation tm ty) = Annotation (go ix tm) ty
   go ix (Letrec names defns body) =
-    let ix' = ix + length defns
+    let ix' = succ ix
     in Letrec names ((fmap . second) (go ix') defns) (go ix' body)
   go ix (Application tm spine) = Application (go ix tm) (go ix <$> spine)
-  go ix (Case uid tm rows) = Case uid (go ix tm) ((fmap . second) (go ix) rows)
+  go ix (Case uid tm rows) =
+    Case uid (go ix tm) ((fmap . second) (go (succ ix)) rows)
   go ix (Handle tm adj peg handlers (vName, vHandler)) =
-    let handlers' = (<$$> handlers) $ \(binders, handler) ->
-          (binders, go (ix + length binders + 1) handler)
+    let handlers' = (<$$> handlers) $ second (go (succ ix))
     in Handle (go ix tm) adj peg handlers' (vName, go (succ ix) vHandler)
   go ix (Let body pty name rhs) = Let (go ix body) pty name (go (succ ix) rhs)
   go _ _ = error "impossible: shiftTraverse"
 
+-- | Exit a scope, binding some free variables.
 close :: (Text -> Maybe Int) -> Tm uid -> Tm uid
 close f =
   let binder depth var = case var of
@@ -467,6 +449,7 @@ close f =
         _bv -> var
   in shiftTraverse binder
 
+-- | Exit a scope, binding one free variable.
 close1 :: Text -> Tm uid -> Tm uid
 close1 name = close
   (\free -> if name == free then Just 0 else Nothing)
@@ -479,7 +462,7 @@ open f =
         _fv -> var
   in shiftTraverse unbinder
 
--- | Enter a 'Scope' that binds one variable, instantiating it
+-- | Enter a scope that binds one variable, instantiating it
 open1 :: Tm uid -> Tm uid -> Tm uid
 open1 it = open (const it)
 
@@ -571,13 +554,13 @@ pattern LambdaIpld body                 = T1 "Lambda" body
 pattern ApplicationIpld tm spine        = T2 "Application" tm spine
 pattern CaseIpld uid tm branches        = T3 "Case" uid tm branches
 pattern HandleIpld tm adj peg handlers valHandler
-                                        = T5 "Handle" tm adj peg handlers valHandler
+  = T5 "Handle" tm adj peg handlers valHandler
 pattern LetIpld body pty scope          = T3 "LetIpld" body pty scope
 pattern BoundVariableIpld depth column  = T2 "BoundVariable" depth column
 pattern FreeVariableIpld name           = T1 "FreeVariable" name
 pattern InstantiatePolyVarIpld b args   = T2 "InstantiatePolyVar" b args
 pattern AnnotationIpld tm ty            = T2 "Annotation" tm ty
-pattern ValueIpld tm                    = T1 "Value" tm
+-- pattern ValueIpld tm                    = T1 "Value" tm
 pattern CutIpld cont scrutinee          = T2 "Cut" cont scrutinee
 pattern LetrecIpld names defns body     = T3 "Letrec" names defns body
 
@@ -588,7 +571,8 @@ instance IsUid uid => IsIpld (Tm uid) where
     Lambda _names body                    -> LambdaIpld body
     Application tm spine                  -> ApplicationIpld tm spine
     Case uid tm branches                  -> CaseIpld uid tm branches
-    Handle tm adj peg handlers valHandler -> HandleIpld tm adj peg handlers valHandler
+    Handle tm adj peg handlers valHandler
+      -> HandleIpld tm adj peg handlers valHandler
     Let body pty _name scope              -> LetIpld body pty scope
     BoundVariable depth column            -> BoundVariableIpld depth column
     FreeVariable name                     -> FreeVariableIpld name
@@ -616,9 +600,9 @@ instance IsUid uid => IsIpld (Tm uid) where
     _                                         -> Nothing
 
 instance IsUid uid => IsIpld (Polytype uid)
-instance (IsUid uid, IsIpld uid) => IsIpld (Adjustment uid)
-instance (IsUid uid) => IsIpld (ConstructorDecl uid)
-instance (IsUid uid) => IsIpld (CommandDeclaration uid)
+instance IsUid uid => IsIpld (Adjustment uid)
+instance IsUid uid => IsIpld (ConstructorDecl uid)
+instance IsUid uid => IsIpld (CommandDeclaration uid)
 instance IsIpld InitiateAbility
 instance IsIpld Kind
 instance IsIpld (DataTypeInterface Cid)

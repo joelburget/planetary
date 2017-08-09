@@ -58,7 +58,7 @@ textTy = DataTy (UidTy textId) []
 uidTy :: ValTyI
 uidTy = DataTy (UidTy uidId) []
 
-vector, uidMap, lfix :: Vector TyArgI -> ValTyI
+vector, uidMap, lfix :: Vector (TyArg Cid) -> ValTyI
 
 vector = DataTy (UidTy vectorId)
 uidMap = DataTy (UidTy uidMapId)
@@ -150,7 +150,6 @@ interfaceTable = _interfaces resolvedDecls
 
 lookupForeign :: IsIpld a => Cid -> ForeignM a
 lookupForeign cid = do
-  db <- get
   val <- gets (^? ix cid) >>= (?? IndexErr)
   case fromIpld val of
     Nothing -> throwError FailedIpldConversion
@@ -165,36 +164,41 @@ writeForeign a = do
 
 -- XXX
 liftBinaryOp :: IsIpld s => (s -> s -> s) -> Handler
-liftBinaryOp op [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2] env = do
+liftBinaryOp op st
+  | AppN _ [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2] <- st ^. evalFocus = do
   i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
   i' <- writeForeign i
-  pure (ForeignValue tyUid tySat i', env)
-liftBinaryOp _ _ _ = throwError FailedForeignFun
+  pure $ st & evalFocus .~ ForeignValue tyUid tySat i'
+liftBinaryOp _ st = traceShowM st >> throwError FailedForeignFun
 
 -- XXX
 liftUnaryOp :: IsIpld s => (s -> s) -> Handler
-liftUnaryOp op [ForeignValue tyUid tySat uid] env = do
+liftUnaryOp op st
+  | AppN _ [ForeignValue tyUid tySat uid] <- st ^. evalFocus = do
   i <- op <$> lookupForeign uid
   i' <- writeForeign i
-  pure (ForeignValue tyUid tySat i', env)
-liftUnaryOp _ _ _ = throwError FailedForeignFun
+  pure $ st & evalFocus .~ ForeignValue tyUid tySat i'
+liftUnaryOp _ _ = throwError FailedForeignFun
 
 mkFix :: Handler
-mkFix [a] env = do
+mkFix st
+  | AppN _ [a] <- st ^. evalFocus = do
   traceM $ "running mkfix on: " ++ show a
   a' <- writeForeign a
   traceM $ "mkfix returning: " ++ show a'
-  pure (ForeignValue lfixId [{- XXX -}] a', env)
+  pure $ st & evalFocus .~ ForeignValue lfixId [{- XXX -}] a'
+mkFix _ = throwError FailedForeignFun
 
 unFix :: Handler
 -- unFix [ForeignValue uid [val] tyUid]
-unFix [ForeignValue tyUid _vals valUid] env
-  | tyUid == lfixId = do
+unFix st
+  | AppN _ [ForeignValue tyUid _vals valUid] <- st ^. evalFocus
+  , tyUid == lfixId = do
     traceM "running unfix"
     val <- lookupForeign valUid
     traceM $ "unfix returning: " ++ show val
-    pure (val, env)
-unFix x _stk = traceShowM x >> throwError FailedForeignFun
+    pure $ st & evalFocus .~ val
+unFix x = traceShowM x >> throwError FailedForeignFun
 
 mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
 mkForeign val = let val' = toIpld val in (valueCid val', val')

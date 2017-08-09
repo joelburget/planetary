@@ -47,27 +47,27 @@ unitTests =
       world = mkForeignTm @Text textId [] "world"
       helloWorld = mkForeignTm @Text textId [] "hello world"
 
-      add spine = AppN (Command intOpsId 0)  spine
-      sub spine = AppN (Command intOpsId 1)  spine
-      cat spine = AppN (Command textOpsId 0) spine
+      add = AppN (Command intOpsId 0)
+      sub = AppN (Command intOpsId 1)
+      cat = AppN (Command textOpsId 0)
 
       env = emptyTypingEnv & typingInterfaces .~ interfaceTable
 
    in testGroup "haskell foreign"
        [ testGroup "evaluation"
-         [ stepTest "1 + 1" simpleEnv 1
+         [ stepTest "1 + 1" simpleEnv 3
            -- [tmExp| add one one |]
            (add [one, one])
-           (Right [two])
-         , stepTest "2 + 2" simpleEnv 1
+           (Right two)
+         , stepTest "2 + 2" simpleEnv 2
            (add [two, two])
-           (Right [four])
-         , stepTest "2 - 1" simpleEnv 1
+           (Right four)
+         , stepTest "2 - 1" simpleEnv 2
            (sub [two, one])
-           (Right [one])
-         , stepTest "\"hello \" <> \"world\"" simpleEnv 1
+           (Right one)
+         , stepTest "\"hello \" <> \"world\"" simpleEnv 2
            (cat [hello, world])
-           (Right [helloWorld])
+           (Right helloWorld)
          ]
 
        , testGroup "typechecking"

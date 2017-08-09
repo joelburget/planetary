@@ -28,23 +28,26 @@ import Planetary.Util (Stack)
 
 import Debug.Trace
 
+mkEmptyState :: TmI -> EvalState
+mkEmptyState tm = EvalState tm [] [] Nothing
+
 stepTest
   :: String
   -> AmbientEnv
   -> Int
   -> TmI
-  -> Either Err (Stack TmI)
+  -> Either Err TmI
   -> TestTree
 stepTest name env steps tm expected =
-  let applications :: [EvalM (Stack (TmI, LocalEnv))]
-      applications = iterate (step =<<) (pure [(tm, LocalEnv [] mempty)])
+  let applications :: [EvalM EvalState]
+      applications = iterate (step =<<) (pure (mkEmptyState tm))
       actual = applications !! steps
 
   in testCase name $ do
     result <- runEvalM env actual
 
     let result' = fst result
-        result'' = right (fst <$>) result'
+        result'' = right _evalFocus result'
 
     result'' @?= expected
 
@@ -55,7 +58,7 @@ runTest
   -> Either Err TmI
   -> TestTree
 runTest name env tm expected = testCase name $ do
-  result <- run env [(tm, LocalEnv [] mempty)]
+  result <- run env (mkEmptyState tm)
   fst result @?= expected
 
 boolId :: Cid
@@ -87,10 +90,10 @@ unitTests  =
              -- tm = forceTm "(\y -> y) x"
              lam = Lam ["X"] x
          in testGroup "functions"
-            [ stepTest "application 1" emptyEnv 1 (AppN lam [x]) (Right [x])
+            [ stepTest "application 1" emptyEnv 1 (AppN lam [x]) (Right x)
             , stepTest "application 2" emptyEnv 1
               (AppT lam [x])
-              (Right [x, AppT lam []])
+              (Right x)
             -- TODO: test further steps with bound variables
             ]
 
@@ -98,15 +101,15 @@ unitTests  =
            [ stepTest "case False of { False -> True; True -> False }"
                emptyEnv 1
                (not false)
-               (Right [true])
+               (Right true)
            , stepTest "case True of { False -> True; True -> False }"
                emptyEnv 1
                (not true)
-               (Right [false])
+               (Right false)
 
            , stepTest "not false" emptyEnv 1
              (not false)
-             (Right [true])
+             (Right true)
            ]
 
        , let ty :: Polytype Cid
@@ -115,11 +118,9 @@ unitTests  =
              tm = close1 "x" $ let_ "x" ty false (FV"x")
          in testGroup "let"
             [ stepTest "let x = false in x" emptyEnv 1 tm
-              (Right [false, Let Hole ty "x" (BV 0 0)])
+              (Right false)
             , stepTest "let x = false in x" emptyEnv 2 tm
-              (Right [BoundVariable 0 0])
-            , stepTest "let x = false in x" emptyEnv 3 tm
-              (Right [false])
+              (Right false)
             ]
 
        , let handler = forceTm [text|
@@ -171,8 +172,8 @@ unitTests  =
 --              |]
 
 --          in testGroup "let x = false in let y = not x in not y"
---               [ stepTest "tm"  emptyEnv 12 tm  (Right [false])
---               -- , stepTest "tm2" emptyEnv 3 tm2 (Right [false])
+--               [ stepTest "tm"  emptyEnv 12 tm  (Right false)
+--               -- , stepTest "tm2" emptyEnv 3 tm2 (Right false)
 --               ]
 
        , let evenodd = forceTm [text|
@@ -220,10 +221,10 @@ unitTests  =
 
              natBoolEnv = AmbientEnv haskellOracles []
          in testGroup "letrec"
-              -- [ stepTest "even 0"  natBoolEnv 16  (traceShowId $ mkTm "even" 0)  (Right [true])
-              -- [ stepTest "odd 0"   natBoolEnv 16  (mkTm "odd"  0)  (Right [false])
-              -- [ stepTest "even 3"  natBoolEnv 31 (traceShowId $ mkTm "even" 1)  (Right [false])
-              [ stepTest "even 3"  natBoolEnv 81 (traceShowId $ mkTm "even" 2)  (Right [true])
+              -- [ stepTest "even 0"  natBoolEnv 16  (traceShowId $ mkTm "even" 0)  (Right true)
+              -- [ stepTest "odd 0"   natBoolEnv 16  (mkTm "odd"  0)  (Right false)
+              -- [ stepTest "even 3"  natBoolEnv 31 (traceShowId $ mkTm "even" 1)  (Right false)
+              [ stepTest "even 3"  natBoolEnv 7 (traceShowId $ mkTm "even" 2)  (Right true)
               -- , stepTest "even 7"  natBoolEnv 8  (mkTm "even" 7)  (Right false)
               -- , stepTest "even 10" natBoolEnv 11 (mkTm "even" 10) (Right true)
               -- , stepTest "odd 7"   natBoolEnv 8  (mkTm "odd"  7)  (Right true)

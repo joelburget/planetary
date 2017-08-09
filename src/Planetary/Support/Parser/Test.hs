@@ -157,7 +157,8 @@ unitTests = testGroup "parsing"
       AppT (FV"Z") [FV"Z", FV"Z"]
 
   , parserTest "let Z: forall. X = W in Z" parseLet $
-    let_ "Z" (Polytype [] (VTy"X")) (FV"W") (FV"Z")
+    Let (FV"W") (Polytype [] (VTy"X")) "Z" (FV"Z")
+    -- let_ "Z" (Polytype [] (VTy"X")) (FV"W") (FV"Z")
 
   , let defn = T.unlines
           [ "let on : forall X Y. {X -> {X -> []Y} -> []Y} ="
@@ -168,8 +169,9 @@ unitTests = testGroup "parsing"
         polyVal = SuspendedTy (CompTy compDomain compCodomain)
         polyBinders = [("X", ValTyK), ("Y", ValTyK)]
         pty = Polytype polyBinders polyVal
-        expected = let_ "on" pty
+        expected = Let
           (Lam ["x", "f"] (AppT (FV"f") [FV"x"]))
+          pty "on"
           (AppT (FV"on") [FV"n", Lam ["x"] (FV"body")])
     in parserTest defn parseLet expected
 
