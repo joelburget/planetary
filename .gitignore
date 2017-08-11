@@ -1,5 +1,8 @@
+dist
+dist-newstyle
+.ghc.*
 .stack-work
 tower.agdai
-dist-newstyle
 detritus
 cabal.project.local
+tags
