@@ -6,7 +6,6 @@
 {-# language MultiParamTypeClasses #-}
 {-# language MultiWayIf #-}
 {-# language NamedFieldPuns #-}
-{-# language StandaloneDeriving #-}
 {-# language TypeSynonymInstances #-}
 {-# language TupleSections #-}
 module Planetary.Support.NameResolution
@@ -51,7 +50,7 @@ newtype ResolutionM a = ResolutionM
            , MonadState ResolutionState
            )
 
-data ClosureErr
+newtype ClosureErr
   = TmVarLookup Text
   deriving Show
 
@@ -68,7 +67,7 @@ resolveTm
   -> Either ResolutionErr (Tm Cid)
 resolveTm initState tm =
   let ResolutionM action = convertTm tm
-  in (evalState (runReaderT (runExceptT action) []) initState)
+  in evalState (runReaderT (runExceptT action) []) initState
 
 -- For each declaration, in order:
 -- * Close the term and type levels (convert Text free vars to Int)
@@ -85,7 +84,7 @@ resolveDecls
   -> Either ResolutionErr ResolvedDecls
 resolveDecls initState xs =
   let ResolutionM action = nameResolutionM xs
-  in (evalState (runReaderT (runExceptT action) []) initState)
+  in evalState (runReaderT (runExceptT action) []) initState
 
 nameResolutionM :: [Decl Text] -> ResolutionM ResolvedDecls
 nameResolutionM (DataDecl_ (DataDecl name ddecl):xs) = do
@@ -135,7 +134,7 @@ closeTm' :: Show a => Tm a -> CloseM (Tm a)
 closeTm' = anaM $ \case
   -- bind free variables
   FreeVariable name ->
-    ((\(depth, col) -> BoundVariable_ depth col) <$> lookupTmVar name) `catchError`
+    (uncurry BoundVariable_ <$> lookupTmVar name) `catchError`
     (\_ -> pure $ FreeVariable_ name)
 
   -- binding terms
@@ -148,7 +147,7 @@ closeTm' = anaM $ \case
     <*> ((vName,) <$> withTmVars [vName] (closeTm' vHandler))
   Case uid tm branches -> Case_ uid
     <$> closeTm' tm
-    <*> traverse (\(names, branch) -> (names,) <$> (withTmVars names $ closeTm' branch)) branches
+    <*> traverse (\(names, branch) -> (names,) <$> withTmVars names (closeTm' branch)) branches
 
   Let body pty name rhs -> Let_
     <$> closeTm' body
@@ -175,10 +174,10 @@ convertTm = cataM $ \case
   DataConstructor_ uid row tms -> DataConstructor
     <$> lookupUid uid <*> pure row <*> pure tms
   ForeignValue_ uid1 tys uid2 -> ForeignValue
-    <$> lookupUid uid1 <*> (mapM convertTy tys) <*> lookupUid uid2
+    <$> lookupUid uid1 <*> mapM convertTy tys <*> lookupUid uid2
   Lambda_ names tm -> pure $ Lambda names tm
   InstantiatePolyVar_ tm tyArgs
-    -> InstantiatePolyVar tm <$> (mapM convertTy tyArgs)
+    -> InstantiatePolyVar tm <$> mapM convertTy tyArgs
   Command_ uid row -> Command <$> lookupUid uid <*> pure row
   Annotation_ tm ty -> Annotation tm <$> convertTy ty
   Letrec_ names defns body -> do
@@ -197,7 +196,7 @@ convertTm = cataM $ \case
     <*> (Peg <$> convertTy ab <*> convertTy codom)
     <*> convertUidMap handlers
     <*> ((vName,) <$> pure vHandler)
-  Handle_ _ _ _ _ _ -> error "impossible: convertTm Handle_"
+  Handle_{} -> error "impossible: convertTm Handle_"
   Let_ body pty name rhs
     -> Let body <$> convertPolytype pty <*> pure name <*> pure body
 
