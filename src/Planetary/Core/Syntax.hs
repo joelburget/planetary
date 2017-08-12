@@ -27,21 +27,21 @@ import Control.Lens hiding (ix)
 import qualified Control.Lens as Lens
 import Control.Lens.TH (makeLenses)
 import Control.Unification
-import qualified Data.ByteString.Char8 as B8
 import Data.Data
 import qualified Data.Foldable as Foldable
 import Data.Functor.Fixedpoint
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.List (find, intersperse)
-import Data.Monoid ((<>))
+import Data.Semigroup ((<>))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Vector as V
 import GHC.Generics
 import Network.IPLD hiding (Row)
 import qualified Network.IPLD as IPLD
-import Text.PrettyPrint.ANSI.Leijen hiding ((<$>), (<$$>))
+import Data.Text.Encoding (decodeUtf8)
+import Data.Text.Prettyprint.Doc
 
 import Planetary.Core.UIdMap
 import Planetary.Util
@@ -96,7 +96,7 @@ instance (IsUid uid, Pretty uid) => Pretty (TyFix uid) where
   pretty = \case
     DataTy ty tys -> angles (sep $ pretty <$> ty : tys)
     SuspendedTy ty -> braces (pretty ty)
-    BoundVariableTy i -> "BV" <+> int i
+    BoundVariableTy i -> "BV" <+> pretty i
     FreeVariableTy t -> pretty t
     UidTy uid -> pretty uid
     CompTy args peg -> sep $ intersperse "->" $ pretty <$> args ++ [peg]
@@ -318,15 +318,15 @@ data TmF uid tm
 instance (IsUid uid, Pretty uid) => Pretty (Tm uid) where
   pretty = \case
     FreeVariable t -> pretty t
-    BoundVariable depth col -> parens $ "BV" <+> int depth <+> int col
+    BoundVariable depth col -> parens $ "BV" <+> pretty depth <+> pretty col
     DataConstructor uid row args -> angles $ sep $
-      (pretty uid <> "." <> int row) : (pretty <$> args)
+      (pretty uid <> "." <> pretty row) : (pretty <$> args)
     ForeignValue ty args locator -> sep $
       "Foreign @" <> pretty ty : (pretty <$> args) ++ [pretty locator]
     Lambda names body ->
       "\\" <> sep (pretty <$> names) <+> "->" <+>
         pretty (open (FreeVariable . (names !!)) body)
-    Command uid row -> pretty uid <> "." <> int row
+    Command uid row -> pretty uid <> "." <> pretty row
     Annotation tm ty -> sep [pretty tm, ":", pretty ty]
     -- TODO: show the division between normalized / non-normalized
     Application tm spine -> sep $ pretty <$> (tm : Foldable.toList spine)
@@ -367,11 +367,8 @@ instance (IsUid uid, Pretty uid) => Pretty (Tm uid) where
            ]
     Hole -> "_"
 
-instance Pretty Text where
-  pretty = text . Text.unpack
-
 instance Pretty Cid where
-  pretty = text . B8.unpack . compact
+  pretty = pretty . decodeUtf8 . compact
 
 pattern DataConstructor uid row tms           = Fix (DataConstructor_ uid row tms)
 pattern ForeignValue uid1 rows uid2           = Fix (ForeignValue_ uid1 rows uid2)

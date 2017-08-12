@@ -7,7 +7,7 @@ module Planetary.Library.HaskellForeign.Test (unitTests) where
 
 import Control.Lens
 import Control.Unification (unfreeze)
-import Data.Monoid ((<>))
+import Data.Semigroup ((<>))
 import Data.Text (Text)
 import NeatInterpolation
 import Prelude hiding (not)

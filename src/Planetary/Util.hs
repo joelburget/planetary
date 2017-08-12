@@ -14,11 +14,20 @@ module Planetary.Util
   , (<$$$>)
   , over2
   , uncurry3
+  , traceDoc
+  , traceDocM
+  , traceText
+  , traceTextM
   ) where
 
 import Control.Monad.State.Strict
 import Control.Monad.Except
 import Control.Newtype
+import Data.Text.Prettyprint.Doc
+import Data.Text.Prettyprint.Doc.Render.Terminal
+import Data.Text (Text)
+import qualified Data.Text.IO as Text
+import System.IO.Unsafe (unsafePerformIO)
 
 -- TODO change to Vector
 type Vector a = [a]
@@ -91,3 +100,21 @@ over2 _newtype f n1 n2 = pack (f (unpack n1) (unpack n2))
 
 uncurry3 :: (a -> b -> c -> d) -> (a, b, c) -> d
 uncurry3 f (a, b, c) = f a b c
+
+{-# noinline traceDoc #-}
+traceDoc :: Doc AnsiStyle -> a -> a
+traceDoc doc expr = unsafePerformIO $ do
+  putDoc doc
+  return expr
+
+traceDocM :: Applicative f => Doc AnsiStyle -> f ()
+traceDocM doc = traceDoc doc $ pure ()
+
+{-# noinline traceText #-}
+traceText :: Text -> a -> a
+traceText text expr = unsafePerformIO $ do
+  Text.putStrLn text
+  pure expr
+
+traceTextM :: Applicative f => Text -> f ()
+traceTextM text = traceText text $ pure ()

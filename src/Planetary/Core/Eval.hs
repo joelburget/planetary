@@ -1,3 +1,4 @@
+{-# language BangPatterns #-}
 {-# language DataKinds #-}
 {-# language FlexibleContexts #-}
 {-# language LambdaCase #-}
@@ -46,7 +47,8 @@ import Control.Monad.State
 import Data.List (intersperse)
 import Network.IPLD hiding (Row, Value, (.=))
 import qualified Network.IPLD as IPLD
-import Text.PrettyPrint.ANSI.Leijen hiding ((<$>), (<$$>))
+import Data.Text.Prettyprint.Doc
+import Data.Text.Prettyprint.Doc.Render.Terminal
 
 import Planetary.Core.Syntax
 import Planetary.Core.Syntax.Patterns
@@ -346,29 +348,36 @@ traceStackM = traceM . showStack
 traceEnvM :: Stack [TmI] -> EvalM ()
 traceEnvM = traceM . showEnv
 
+data Ann = Highlighted | Plain
+
+annToAnsi :: Ann -> AnsiStyle
+annToAnsi = \case
+  Highlighted -> colorDull Blue
+  Plain -> mempty
+
 traceReturnState :: String -> EvalState -> EvalM EvalState
 traceReturnState name st = do
-  traceM $ show $ pretty $ vsep
-    [ "Result of applying:" <+> dullblue (text name)
-    , pretty st
+  traceDocM $ reAnnotate annToAnsi $ vsep
+    [ "Result of applying:" <+> annotate Highlighted (pretty name)
+    , prettyEvalState st
     ]
   pure st
 
-prettyEnv :: Stack [TmI] -> Doc
+prettyEnv :: Stack [TmI] -> Doc Ann
 prettyEnv stk =
   let stkLines = vsep . fmap (("*" <+>) . pretty) <$> stk
   in vsep $ intersperse "---------------------" stkLines
 
-instance Pretty EvalState where
-  pretty (EvalState focus env cont fwdCont) = vsep
-    [ text "EvalState"
-    , indent 2 $ vsep
-      [ dullblue "focus:"    <+> pretty focus
-      , dullblue "env:"      <+> align (prettyEnv env)
-      , case fwdCont of
-          Nothing -> empty
-          Just cont -> dullblue "fwd cont:" <+> pretty cont
-      ]
+prettyEvalState :: EvalState -> Doc Ann
+prettyEvalState (EvalState focus env cont fwdCont) = vsep
+  [ "EvalState"
+  , indent 2 $ vsep
+    [ annotate Highlighted "focus:"    <+> pretty focus
+    , annotate Highlighted "env:"      <+> align (prettyEnv env)
+    , case fwdCont of
+        Nothing -> mempty
+        Just cont -> annotate Highlighted "fwd cont:" <+> pretty cont
     ]
+  ]
 
 -- }}}

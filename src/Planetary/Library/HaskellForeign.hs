@@ -24,7 +24,7 @@ module Planetary.Library.HaskellForeign
 import Control.Lens hiding ((??), op)
 import Control.Monad.Except
 import Control.Monad.State
-import Data.Monoid ((<>))
+import Data.Semigroup ((<>))
 import Data.Text (Text)
 import NeatInterpolation
 import Network.IPLD as IPLD

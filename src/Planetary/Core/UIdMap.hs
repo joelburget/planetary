@@ -28,7 +28,7 @@ import Data.Function (on)
 import Data.Hashable (Hashable)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
-import Data.Monoid ((<>))
+import Data.Semigroup (Semigroup, (<>))
 import GHC.Exts (IsList(..))
 import GHC.Generics
 import Network.IPLD
@@ -38,8 +38,8 @@ import Planetary.Util
 type IsUid uid = (Ord uid, IsIpld uid, Hashable uid)
 
 newtype UIdMap uid a = UIdMap (HashMap uid a)
-  deriving (Eq, Show, Functor, Foldable, Traversable, Monoid, Typeable, Data,
-            Generic)
+  deriving (Eq, Show, Functor, Foldable, Traversable, Semigroup, Monoid,
+            Typeable, Data, Generic)
 
 instance Newtype (UIdMap uid a) (HashMap uid a) where
   pack = UIdMap
