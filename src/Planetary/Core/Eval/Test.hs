@@ -24,9 +24,10 @@ import Planetary.Support.Parser (forceTm)
 import qualified Planetary.Library.FrankExamples as Frank
 import Planetary.Library.HaskellForeign (mkForeignTm, haskellOracles)
 import qualified Planetary.Library.HaskellForeign as HaskellForeign
-import Planetary.Util (Stack)
+import Planetary.Util (Stack, traceDocM)
 
 import Debug.Trace
+import Data.Text.Prettyprint.Doc
 
 mkEmptyState :: TmI -> EvalState
 mkEmptyState tm = EvalState tm [] [] Nothing
@@ -40,10 +41,13 @@ stepTest
   -> TestTree
 stepTest name env steps tm expected =
   let applications :: [EvalM EvalState]
-      applications = iterate (step =<<) (pure (mkEmptyState tm))
+      applications = iterate (step =<<) (pure initState)
+      initState = mkEmptyState tm
       actual = applications !! steps
 
   in testCase name $ do
+    traceM "stepTest on:"
+    traceDocM $ reAnnotate annToAnsi $ prettyEvalState initState
     result <- runEvalM env actual
 
     let result' = fst result
@@ -223,7 +227,7 @@ unitTests  =
 
              natBoolEnv = AmbientEnv haskellOracles []
          in testGroup "letrec"
-              [ stepTest "even 0"  natBoolEnv 4  (traceShowId $ mkTm "even" 0)  (Right true)
+              [ stepTest "even 0"  natBoolEnv 5  (mkTm "even" 0)  (Right true)
               -- [ stepTest "odd 0"   natBoolEnv 16  (mkTm "odd"  0)  (Right false)
               -- [ stepTest "even 3"  natBoolEnv 31 (traceShowId $ mkTm "even" 1)  (Right false)
               -- [ stepTest "even 3"  natBoolEnv 7 (traceShowId $ mkTm "even" 2)  (Right true)

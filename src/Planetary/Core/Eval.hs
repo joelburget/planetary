@@ -28,6 +28,10 @@ module Planetary.Core.Eval
   , evalEnv
   , evalCont
   , evalFwdCont
+
+  -- $pretty
+  , prettyEvalState
+  , annToAnsi
   ) where
 
 -- We use an abstract machine similar to the CEK-style machine of "Liberating

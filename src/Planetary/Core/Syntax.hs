@@ -94,12 +94,12 @@ data Ty uid ty
 
 instance (IsUid uid, Pretty uid) => Pretty (TyFix uid) where
   pretty = \case
-    DataTy ty tys -> angles (sep $ pretty <$> ty : tys)
+    DataTy ty tys -> angles (fillSep $ pretty <$> ty : tys)
     SuspendedTy ty -> braces (pretty ty)
     BoundVariableTy i -> "BV" <+> pretty i
     FreeVariableTy t -> pretty t
     UidTy uid -> pretty uid
-    CompTy args peg -> sep $ intersperse "->" $ pretty <$> args ++ [peg]
+    CompTy args peg -> fillSep $ intersperse "->" $ pretty <$> args ++ [peg]
     Peg ab ty -> brackets (pretty ab) <+> pretty ty
     TyArgVal ty -> pretty ty
     TyArgAbility ab -> brackets (pretty ab)
@@ -109,7 +109,9 @@ instance (IsUid uid, Pretty uid) => Pretty (TyFix uid) where
             OpenAbility -> "e"
             ClosedAbility -> "0"
           flatArgs = (\(i, r) -> pretty i <+> pretty r) <$> toList mapping
-      in sep $ initP : "+" : flatArgs
+          flatArgs' = if null flatArgs then [] else "+" : flatArgs
+
+      in fillSep $ initP : flatArgs'
 
 instance IsUid uid => Unifiable (Ty uid) where
   zipMatch (DataTy_ uid1 args1) (DataTy_ uid2 args2) =
@@ -217,7 +219,7 @@ instance (IsUid uid, Pretty uid) => Pretty (Polytype uid) where
     let prettyBinder (name, kind) = case kind of
           ValTyK -> pretty name
           EffTyK -> brackets (pretty name)
-        prettyBinders binders = sep (prettyBinder <$> binders)
+        prettyBinders binders = fillSep (prettyBinder <$> binders)
     in "forall" <+> prettyBinders binders <> "." <+> pretty val
 
 instance Show uid => Show (Polytype uid) where
@@ -319,25 +321,29 @@ instance (IsUid uid, Pretty uid) => Pretty (Tm uid) where
   pretty = \case
     FreeVariable t -> pretty t
     BoundVariable depth col -> parens $ "BV" <+> pretty depth <+> pretty col
-    DataConstructor uid row args -> angles $ sep $
+    DataConstructor uid row args -> angles $ fillSep $
       (pretty uid <> "." <> pretty row) : (pretty <$> args)
-    ForeignValue ty args locator -> sep $
+    ForeignValue ty args locator -> fillSep $
       "Foreign @" <> pretty ty : (pretty <$> args) ++ [pretty locator]
     Lambda names body ->
-      "\\" <> sep (pretty <$> names) <+> "->" <+>
+      "\\" <> fillSep (pretty <$> names) <+> "->" <+>
         pretty (open (FreeVariable . (names !!)) body)
     Command uid row -> pretty uid <> "." <> pretty row
-    Annotation tm ty -> sep [pretty tm, ":", pretty ty]
+    Annotation tm ty -> fillSep [pretty tm, ":", pretty ty]
     -- TODO: show the division between normalized / non-normalized
-    Application tm spine -> sep $ pretty <$> (tm : Foldable.toList spine)
+    Application tm spine -> fillSep $ pretty <$> (tm : Foldable.toList spine)
     Case uid scrutinee handlers -> vsep
       [ "case" <+> pretty scrutinee <+> "of"
       -- TODO: use align or hang?
-      , indent 2 (align $ vsep $ (\(names, body) -> sep
-          [ angles (sep $ pretty uid : fmap pretty names)
+      , indent 2 $ vsep
+        [ pretty uid <> ":"
+        , indent 2 $ vsep $ flip fmap handlers $ \(names, body) -> fillSep
+          [ "|"
+          , angles $ fillSep $ "_" : fmap pretty names
           , "->"
-          , pretty (open (FreeVariable . (names !!)) body)
-          ]) <$> handlers)
+          , pretty $ open (FreeVariable . (names !!)) body
+          ]
+        ]
       ]
     Handle tm _adj peg handlers (vName, vRhs) ->
       let handlers' = prettyHandler <$> toList handlers
@@ -346,13 +352,13 @@ instance (IsUid uid, Pretty uid) => Pretty (Tm uid) where
             , indent 2 (align $ vsep $ fmap prettyRow uidHandler)
             ]
           prettyRow (names, rhs)
-            = "|" <+> angles (sep ("_" : fmap pretty names)) <+> "->" <+> pretty rhs
+            = fillSep ["|", angles (fillSep ("_" : fmap pretty names)), "->", pretty rhs]
       in vsep
            [ "Handle" <+> pretty tm <+> colon <+> pretty peg <+> "with"
            , indent 2 (align $ vsep handlers')
-           , sep ["|", pretty vName, "->", pretty vRhs]
+           , fillSep ["|", pretty vName, "->", pretty vRhs]
            ]
-    Let tm ty body rhs -> sep
+    Let tm ty body rhs -> fillSep
       ["let", pretty tm, ":", pretty ty, "=", pretty body, "in", pretty rhs]
     Letrec names lambdas body ->
       let rowInfo = zip names lambdas
