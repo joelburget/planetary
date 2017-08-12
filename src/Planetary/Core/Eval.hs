@@ -3,6 +3,7 @@
 {-# language FlexibleContexts #-}
 {-# language LambdaCase #-}
 {-# language NamedFieldPuns #-}
+{-# language OverloadedStrings #-}
 {-# language PatternSynonyms #-}
 {-# language TemplateHaskell #-}
 {-# language TypeFamilies #-}
@@ -154,7 +155,7 @@ handleCommand :: Cid -> Row -> [TmI] -> EvalState -> EvalM EvalState
 handleCommand uid row spine st = case _evalFwdCont st of
   -- M-Op
   Nothing ->
-    traceReturnState "M-Op" $ st & evalFwdCont .~ Just []
+    logReturnState "M-Op" $ st & evalFwdCont .~ Just []
     -- M-Op-Handle / M-Op-Forward
   Just fwdCont
   -- Just (ContinuationFrame pureCont (handlerEnv, handler))
@@ -168,7 +169,7 @@ handleCommand uid row spine st = case _evalFwdCont st of
           newCont = case k of
             [] -> todo "[] case"
             Frame env' cont : k' -> Frame (env <> env') cont : k'
-      traceReturnState "M-Op-Handle" $ st
+      logReturnState "M-Op-Handle" $ st
         & evalFocus .~ handleTm
         & evalEnv %~ updateEnv
         & evalCont .~ newCont
@@ -178,7 +179,7 @@ handleCommand uid row spine st = case _evalFwdCont st of
          delta:rest -> do
            let delta:rest = st ^. evalCont
                Just alts = st ^. evalFwdCont
-           traceReturnState "M-Op-Forward" $ st
+           logReturnState "M-Op-Forward" $ st
              & evalCont .~ rest
              -- append the current continuation onto the bottom of the forwarding
              -- continuation
@@ -191,7 +192,7 @@ handleCommand uid row spine st = case _evalFwdCont st of
            ambient <- gets (^. ambientHandlers)
            handler <- (ambient ^? ix uid . ix row) ?? FailedHandlerLookup
            ret <- runForeignM $ handler st
-           traceReturnState "M-Op-Handle-Ambient" ret
+           logReturnState "M-Op-Handle-Ambient" ret
 
 pushBoundVars :: [TmI] -> EvalState -> EvalState
 pushBoundVars defns env = env & evalEnv %~ (defns:)
@@ -199,8 +200,8 @@ pushBoundVars defns env = env & evalEnv %~ (defns:)
 step :: EvalState -> EvalM EvalState
 step st@(EvalState focus env cont fwdCont) = case focus of
   -- M-App
-  AppN (Lambda _names scope) spine -> do
-    traceReturnState "M-App" $ st
+  AppN (Lambda _names scope) spine ->
+    logReturnState "M-App" $ st
       & evalFocus .~ open (spine !!) scope
       & pushBoundVars spine
 
@@ -209,7 +210,7 @@ step st@(EvalState focus env cont fwdCont) = case focus of
     let ret = st
           & evalFocus .~ tm
           & mkFrame (Application f (MixedSpine tms vals))
-    traceReturnState "M-AppCont" ret
+    logReturnState "M-AppCont" ret
 
   -- XXX
   -- * handle putting evaled args back in arg pos
@@ -218,13 +219,13 @@ step st@(EvalState focus env cont fwdCont) = case focus of
   -- M-Case
   Case _uid1 (DataConstructor _uid2 rowNum args) rows -> do
     row <- rows ^? ix rowNum . _2 ?? IndexErr
-    traceReturnState "M-Case" $ st
+    logReturnState "M-Case" $ st
       -- XXX do we actually bind n args or 1 data constr?
       & evalFocus .~ open (args !!) row
       & pushBoundVars args
 
-  Case uid tm rows -> do
-    traceReturnState "Unnamed (Case)" $ st
+  Case uid tm rows ->
+    logReturnState "Unnamed (Case)" $ st
       & evalFocus .~ tm
       & mkFrame (Case uid Hole rows)
 
@@ -235,14 +236,14 @@ step st@(EvalState focus env cont fwdCont) = case focus of
     -- TODO: decide what to do here. Options:
     -- 1. add a terminated flag to the state
     -- 2. have an ambient handler for when execution finishes
-    [] -> traceReturnState "M-RetTop" st
+    [] -> logReturnState "M-RetTop" st
 
     -- M-RetHandler -- invoke the value handler if there is no pure
     -- continuation in the current continuation frame but there is a
     -- handler
     Frame env' (Handle Hole _adj _peg _handlers (_name, valHandler)) : k ->
       -- todo "M-RetHandler"
-      traceReturnState "M-RetHandler" $ st
+      logReturnState "M-RetHandler" $ st
         & evalFocus .~ valHandler
         -- TODO:
         -- * I think we should have multiple return values
@@ -255,21 +256,21 @@ step st@(EvalState focus env cont fwdCont) = case focus of
     Frame env' cont : k ->
       -- focus <- _newFocus cont
       -- _XXX
-      traceReturnState "M-RetCont" $ st
-        & evalFocus .~ focus
+      logReturnState "M-RetCont" $ st
+        & evalFocus .~ cont
         & evalEnv   %~ ([val] :)
         & evalCont  .~ k
 
     -- TODO: again why are we making a let frame
     Frame env' (Let Hole polyty name body) : k ->
-      traceReturnState "Unnamed Let Frame" $ st
+      logReturnState "Unnamed Let Frame" $ st
         & evalFocus .~ body
         & pushBoundVars [val]
         & evalCont .~ k
 
     Frame env' (Letrec _names _lambdas Hole) : k -> do
       let ret = st & evalFocus .~ val
-      traceReturnState "Unnamed Letrec Frame" ret
+      logReturnState "Unnamed Letrec Frame" ret
 
   -- Handle (Command uid row) _adj _peg handlers _handleValue -> do
   --   let AdjustmentHandlers uidmap = handlers
@@ -281,7 +282,7 @@ step st@(EvalState focus env cont fwdCont) = case focus of
     --     mkHandler tm args env = pure (tm, pushBoundVars env args)
     --     -- env' = env & handlers %~ ((mkHandler . snd <$$> lambdas) <>)
     --     handlers = mkHandler . snd <$$> lambdas
-    traceReturnState "H-Handle" $ st
+    logReturnState "H-Handle" $ st
       & evalFocus .~ tm
       & mkFrame (Handle Hole adj peg lambdas valHandler)
 
@@ -291,7 +292,7 @@ step st@(EvalState focus env cont fwdCont) = case focus of
 
   -- M-App (duplicated?)
   AppN f spine ->
-    traceReturnState "m-App (duplicated?)" $ st
+    logReturnState "m-App (duplicated?)" $ st
       & evalFocus .~ f
       & mkFrame (AppN Hole spine)
 
@@ -302,18 +303,23 @@ step st@(EvalState focus env cont fwdCont) = case focus of
 
 -- XXX why are we even making a frame here? just modify env?
   Let rhs polyty name body ->
-    traceReturnState "Unnamed Let frame maker" $ st
+    logReturnState "Unnamed Let frame maker" $ st
       & evalFocus .~ rhs
       & mkFrame (Let Hole polyty name body)
 
   Letrec names lambdas rhs ->
     -- both the focus and lambdas close over the lambdas (use env')
-    traceReturnState "Unnamed Letrec frame maker" $ st
+    logReturnState "Unnamed Letrec frame maker" $ st
       & evalFocus .~ rhs
       & mkFrame (Letrec names lambdas Hole)
       & pushBoundVars (snd <$> lambdas)
 
-  _other -> error "incomplete"
+  _other -> do
+    traceDocM $ reAnnotate annToAnsi $ vsep
+      [ annotate Error "incomplete: no rule to handle"
+      , prettyEvalState st
+      ]
+    error "incomplete"
 
 mkFrame :: TmI -> EvalState -> EvalState
 mkFrame tm st@(EvalState _focus env cont _fwd)
@@ -321,16 +327,17 @@ mkFrame tm st@(EvalState _focus env cont _fwd)
 
 -- debugging {{{
 
-data Ann = Highlighted | Plain
+data Ann = Highlighted | Error | Plain
 
 annToAnsi :: Ann -> AnsiStyle
 annToAnsi = \case
   Highlighted -> colorDull Blue
+  Error -> color Red <> bold
   Plain -> mempty
 
-traceReturnState :: String -> EvalState -> EvalM EvalState
-traceReturnState name st = do
-  traceDocM $ reAnnotate annToAnsi $ vsep
+logReturnState :: String -> EvalState -> EvalM EvalState
+logReturnState name st = do
+  liftIO $ putDoc $ reAnnotate annToAnsi $ vsep
     [ "Result of applying:" <+> annotate Highlighted (pretty name)
     , prettyEvalState st
     ]
@@ -339,7 +346,15 @@ traceReturnState name st = do
 prettyEnv :: Stack [TmI] -> Doc Ann
 prettyEnv stk =
   let stkLines = vsep . fmap (("*" <+>) . pretty) <$> stk
-  in vsep $ intersperse "---------------------" stkLines
+  in lineVsep stkLines
+
+lineVsep :: [Doc ann] -> Doc ann
+lineVsep = vsep . intersperse "---------------------"
+
+-- TODO show pure continuation
+prettyCont :: Stack ContinuationFrame -> Doc Ann
+prettyCont = lineVsep . fmap prettyContFrame
+  where prettyContFrame (ContinuationFrame _stk handler) = pretty handler
 
 prettyEvalState :: EvalState -> Doc Ann
 prettyEvalState (EvalState focus env cont fwdCont) = vsep
@@ -347,9 +362,10 @@ prettyEvalState (EvalState focus env cont fwdCont) = vsep
   , indent 2 $ vsep
     [ annotate Highlighted "focus:"    <+> pretty focus
     , annotate Highlighted "env:"      <+> align (prettyEnv env)
+    , annotate Highlighted "cont:"     <+> align (prettyCont cont)
     , case fwdCont of
         Nothing -> mempty
-        Just cont -> annotate Highlighted "fwd cont:" <+> pretty cont
+        Just cont -> annotate Highlighted "fwd cont:" <+> align (prettyCont cont)
     ]
   ]
 
