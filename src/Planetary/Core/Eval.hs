@@ -19,14 +19,7 @@ module Planetary.Core.Eval
   , run
   , runEvalM
 
-  -- debugging
-  , showStack
-  , showEnv
-  , traceStack
-  , traceStackM
-  , traceEnvM
-
-  -- optics
+  -- $optics
   , ambientHandlers
   , valueStore
   , pureContinuation
@@ -323,30 +316,6 @@ mkFrame tm st@(EvalState _focus env cont _fwd)
   = st & evalCont .~ Frame env tm : cont
 
 -- debugging {{{
-
-showStack :: Stack TmI -> String
-showStack stk =
-  let lines = show <$> stk
-      indented = ("  " <>) <$> lines
-      headed = "stack:" : indented <> ["end stack"]
-  in unlines headed
-
-showEnv :: Stack [TmI] -> String
-showEnv env =
-  let env' = ("  " <>) . show <$$> env
-      env'' = flip imap env' $ \i stk ->
-        show i ++ ":\n" ++ unlines stk
-      headed = "env:" : env'' <> ["end env"]
-  in unlines headed
-
-traceStack :: Stack TmI -> Stack TmI
-traceStack stk = trace (showStack stk) stk
-
-traceStackM :: Stack TmI -> EvalM ()
-traceStackM = traceM . showStack
-
-traceEnvM :: Stack [TmI] -> EvalM ()
-traceEnvM = traceM . showEnv
 
 data Ann = Highlighted | Plain
 
