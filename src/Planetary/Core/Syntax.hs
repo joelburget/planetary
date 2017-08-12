@@ -27,17 +27,21 @@ import Control.Lens hiding (ix)
 import qualified Control.Lens as Lens
 import Control.Lens.TH (makeLenses)
 import Control.Unification
+import qualified Data.ByteString.Char8 as B8
 import Data.Data
+import qualified Data.Foldable as Foldable
 import Data.Functor.Fixedpoint
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
-import Data.List (find)
+import Data.List (find, intersperse)
 import Data.Monoid ((<>))
 import Data.Text (Text)
+import qualified Data.Text as Text
 import qualified Data.Vector as V
 import GHC.Generics
 import Network.IPLD hiding (Row)
 import qualified Network.IPLD as IPLD
+import Text.PrettyPrint.ANSI.Leijen hiding ((<$>), (<$$>))
 
 import Planetary.Core.UIdMap
 import Planetary.Util
@@ -59,6 +63,11 @@ data InitiateAbility = OpenAbility | ClosedAbility
 
 data Kind = ValTyK | EffTyK
   deriving (Show, Eq, Ord, Typeable, Generic)
+
+instance Pretty Kind where
+  pretty = \case
+    ValTyK -> "*"
+    EffTyK -> "#"
 
 data Ty uid ty
   -- ValTy
@@ -82,6 +91,25 @@ data Ty uid ty
   -- "For each UID, instantiate it with these args"
   | Ability_ !InitiateAbility !(UIdMap uid (Vector ty))
   deriving (Eq, Show, Ord, Typeable, Functor, Foldable, Traversable)
+
+instance (IsUid uid, Pretty uid) => Pretty (TyFix uid) where
+  pretty = \case
+    DataTy ty tys -> angles (sep $ pretty <$> ty : tys)
+    SuspendedTy ty -> braces (pretty ty)
+    BoundVariableTy i -> "BV" <+> int i
+    FreeVariableTy t -> pretty t
+    UidTy uid -> pretty uid
+    CompTy args peg -> sep $ intersperse "->" $ pretty <$> args ++ [peg]
+    Peg ab ty -> brackets (pretty ab) <+> pretty ty
+    TyArgVal ty -> pretty ty
+    TyArgAbility ab -> brackets (pretty ab)
+    Ability init mapping ->
+      let initP = case init of
+            -- TODO real name
+            OpenAbility -> "e"
+            ClosedAbility -> "0"
+          flatArgs = (\(i, r) -> pretty i <+> pretty r) <$> toList mapping
+      in sep $ initP : "+" : flatArgs
 
 instance IsUid uid => Unifiable (Ty uid) where
   zipMatch (DataTy_ uid1 args1) (DataTy_ uid2 args2) =
@@ -184,6 +212,14 @@ data Polytype uid = Polytype
   , polyVal :: !(TyFix uid)
   } deriving (Typeable, Generic)
 
+instance (IsUid uid, Pretty uid) => Pretty (Polytype uid) where
+  pretty (Polytype binders val) =
+    let prettyBinder (name, kind) = case kind of
+          ValTyK -> pretty name
+          EffTyK -> brackets (pretty name)
+        prettyBinders binders = sep (prettyBinder <$> binders)
+    in "forall" <+> prettyBinders binders <> "." <+> pretty val
+
 instance Show uid => Show (Polytype uid) where
   showsPrec d (Polytype binders val) = showParen (d > 10) $
       showString "Polytype "
@@ -278,6 +314,64 @@ data TmF uid tm
   -- TODO: can we get rid of this in the substitution-based semantics?
   | Hole_ -- ^ Used at execution only
   deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
+
+instance (IsUid uid, Pretty uid) => Pretty (Tm uid) where
+  pretty = \case
+    FreeVariable t -> pretty t
+    BoundVariable depth col -> parens $ "BV" <+> int depth <+> int col
+    DataConstructor uid row args -> angles $ sep $
+      (pretty uid <> "." <> int row) : (pretty <$> args)
+    ForeignValue ty args locator -> sep $
+      "Foreign @" <> pretty ty : (pretty <$> args) ++ [pretty locator]
+    Lambda names body ->
+      "\\" <> sep (pretty <$> names) <+> "->" <+>
+        pretty (open (FreeVariable . (names !!)) body)
+    Command uid row -> pretty uid <> "." <> int row
+    Annotation tm ty -> sep [pretty tm, ":", pretty ty]
+    -- TODO: show the division between normalized / non-normalized
+    Application tm spine -> sep $ pretty <$> (tm : Foldable.toList spine)
+    Case uid scrutinee handlers -> vsep
+      [ "case" <+> pretty scrutinee <+> "of"
+      -- TODO: use align or hang?
+      , indent 2 (align $ vsep $ (\(names, body) -> sep
+          [ angles (sep $ pretty uid : fmap pretty names)
+          , "->"
+          , pretty (open (FreeVariable . (names !!)) body)
+          ]) <$> handlers)
+      ]
+    Handle tm _adj peg handlers (vName, vRhs) ->
+      let handlers' = prettyHandler <$> toList handlers
+          prettyHandler (uid, uidHandler) = vsep
+            [ pretty uid <+> colon
+            , indent 2 (align $ vsep $ fmap prettyRow uidHandler)
+            ]
+          prettyRow (names, rhs)
+            = "|" <+> angles (sep ("_" : fmap pretty names)) <+> "->" <+> pretty rhs
+      in vsep
+           [ "Handle" <+> pretty tm <+> colon <+> pretty peg <+> "with"
+           , indent 2 (align $ vsep handlers')
+           , sep ["|", pretty vName, "->", pretty vRhs]
+           ]
+    Let tm ty body rhs -> sep
+      ["let", pretty tm, ":", pretty ty, "=", pretty body, "in", pretty rhs]
+    Letrec names lambdas body ->
+      let rowInfo = zip names lambdas
+          rows = flip fmap rowInfo $ \(name, (ty, lam)) -> vsep
+            [ pretty name <+> colon <+> pretty ty
+            , "=" <+> pretty lam
+            ]
+      in vsep
+           [ "letrec"
+           , indent 2 $ vsep rows
+           , "in" <+> pretty body
+           ]
+    Hole -> "_"
+
+instance Pretty Text where
+  pretty = text . Text.unpack
+
+instance Pretty Cid where
+  pretty = text . B8.unpack . compact
 
 pattern DataConstructor uid row tms           = Fix (DataConstructor_ uid row tms)
 pattern ForeignValue uid1 rows uid2           = Fix (ForeignValue_ uid1 rows uid2)

@@ -43,8 +43,10 @@ import Control.Arrow (left)
 import Control.Lens hiding ((??))
 import Control.Monad.Except
 import Control.Monad.State
+import Data.List (intersperse)
 import Network.IPLD hiding (Row, Value, (.=))
 import qualified Network.IPLD as IPLD
+import Text.PrettyPrint.ANSI.Leijen hiding ((<$>), (<$$>))
 
 import Planetary.Core.Syntax
 import Planetary.Core.Syntax.Patterns
@@ -94,6 +96,9 @@ data ContinuationFrame = ContinuationFrame
   -- invariant -- snd is a Handle, Case, or Application
   , _handler          :: TmI
   } deriving Show
+
+instance Pretty ContinuationFrame where
+  pretty (ContinuationFrame stk handler) = "ContinuationFrame (TODO)"
 
 pattern Frame :: Stack [TmI] -> TmI -> ContinuationFrame
 pattern Frame c h = ContinuationFrame c h
@@ -149,9 +154,8 @@ run ambient st@(EvalState tm _ _ _)
 handleCommand :: Cid -> Row -> [TmI] -> EvalState -> EvalM EvalState
 handleCommand uid row spine st = case _evalFwdCont st of
   -- M-Op
-  Nothing -> do
-    traceRule "M-Op"
-    pure $ st & evalFwdCont .~ Just []
+  Nothing ->
+    traceReturnState "M-Op" $ st & evalFwdCont .~ Just []
     -- M-Op-Handle / M-Op-Forward
   Just fwdCont
   -- Just (ContinuationFrame pureCont (handlerEnv, handler))
@@ -160,13 +164,12 @@ handleCommand uid row spine st = case _evalFwdCont st of
     , Just (_name, handleTm) <- handlers ^? ix uid . ix row
     -- M-Op-Handle
     -> do
-      traceRule "M-Op-Handle"
       -- XXX is this the right order?
       let updateEnv = todo "updateEnv" -- ((fwdCont : todo "vals") :)
           newCont = case k of
             [] -> todo "[] case"
             Frame env' cont : k' -> Frame (env <> env') cont : k'
-      pure $ st
+      traceReturnState "M-Op-Handle" $ st
         & evalFocus .~ handleTm
         & evalEnv %~ updateEnv
         & evalCont .~ newCont
@@ -174,10 +177,9 @@ handleCommand uid row spine st = case _evalFwdCont st of
   _ -> case st ^. evalCont of
          -- M-Op-Forward
          delta:rest -> do
-           traceRule "M-Op-Forward"
            let delta:rest = st ^. evalCont
                Just alts = st ^. evalFwdCont
-           pure $ st
+           traceReturnState "M-Op-Forward" $ st
              & evalCont .~ rest
              -- append the current continuation onto the bottom of the forwarding
              -- continuation
@@ -187,10 +189,10 @@ handleCommand uid row spine st = case _evalFwdCont st of
          -- rule to cover this case -- the machine gets stuck. We have one
          -- recourse -- check the ambient environment for a handler.
          [] -> do
-           traceRule "M-Op-Handle-Ambient"
            ambient <- gets (^. ambientHandlers)
            handler <- (ambient ^? ix uid . ix row) ?? FailedHandlerLookup
-           runForeignM $ handler st
+           ret <- runForeignM $ handler st
+           traceReturnState "M-Op-Handle-Ambient" ret
 
 pushBoundVars :: [TmI] -> EvalState -> EvalState
 pushBoundVars defns env = env & evalEnv %~ (defns:)
@@ -199,17 +201,16 @@ step :: EvalState -> EvalM EvalState
 step st@(EvalState focus env cont fwdCont) = case focus of
   -- M-App
   AppN (Lambda _names scope) spine -> do
-    traceRule "M-App"
-    pure $ st
+    traceReturnState "M-App" $ st
       & evalFocus .~ open (spine !!) scope
       & pushBoundVars spine
 
   -- M-AppCont
   Application f (MixedSpine (tm:tms) vals) -> do
-    traceRule "M-AppCont"
-    pure $ st
-      & evalFocus .~ tm
-      & mkFrame (Application f (MixedSpine tms vals))
+    let ret = st
+          & evalFocus .~ tm
+          & mkFrame (Application f (MixedSpine tms vals))
+    traceReturnState "M-AppCont" ret
 
   -- XXX
   -- * handle putting evaled args back in arg pos
@@ -217,16 +218,14 @@ step st@(EvalState focus env cont fwdCont) = case focus of
 
   -- M-Case
   Case _uid1 (DataConstructor _uid2 rowNum args) rows -> do
-    traceRule "M-Case"
     row <- rows ^? ix rowNum . _2 ?? IndexErr
-    pure $ st
+    traceReturnState "M-Case" $ st
       -- XXX do we actually bind n args or 1 data constr?
       & evalFocus .~ open (args !!) row
       & pushBoundVars args
 
   Case uid tm rows -> do
-    traceRule "Unnamed (Case)"
-    pure $ st
+    traceReturnState "Unnamed (Case)" $ st
       & evalFocus .~ tm
       & mkFrame (Case uid Hole rows)
 
@@ -237,17 +236,14 @@ step st@(EvalState focus env cont fwdCont) = case focus of
     -- TODO: decide what to do here. Options:
     -- 1. add a terminated flag to the state
     -- 2. have an ambient handler for when execution finishes
-    [] -> do
-      traceRule "M-RetTop"
-      pure st
+    [] -> traceReturnState "M-RetTop" st
 
     -- M-RetHandler -- invoke the value handler if there is no pure
     -- continuation in the current continuation frame but there is a
     -- handler
-    Frame env' (Handle Hole _adj _peg _handlers (_name, valHandler)) : k -> do
+    Frame env' (Handle Hole _adj _peg _handlers (_name, valHandler)) : k ->
       -- todo "M-RetHandler"
-      traceRule "M-RetHandler"
-      pure $ st
+      traceReturnState "M-RetHandler" $ st
         & evalFocus .~ valHandler
         -- TODO:
         -- * I think we should have multiple return values
@@ -257,39 +253,36 @@ step st@(EvalState focus env cont fwdCont) = case focus of
 
     -- M-RetCont -- bind a returned value if there is a pure continuation
     -- in the current continuation frame
-    Frame env' cont : k -> do
-      traceRule "M-RetCont"
+    Frame env' cont : k ->
       -- focus <- _newFocus cont
       -- _XXX
-      pure $ st
+      traceReturnState "M-RetCont" $ st
         & evalFocus .~ focus
         & evalEnv   %~ ([val] :)
         & evalCont  .~ k
 
     -- TODO: again why are we making a let frame
-    Frame env' (Let Hole polyty name body) : k -> do
-      traceRule "Unnamed Let Frame"
-      pure $ st
+    Frame env' (Let Hole polyty name body) : k ->
+      traceReturnState "Unnamed Let Frame" $ st
         & evalFocus .~ body
         & pushBoundVars [val]
         & evalCont .~ k
 
     Frame env' (Letrec _names _lambdas Hole) : k -> do
-      traceRule "Unnamed Letrec Frame"
-      pure $ st & evalFocus .~ val
+      let ret = st & evalFocus .~ val
+      traceReturnState "Unnamed Letrec Frame" ret
 
   -- Handle (Command uid row) _adj _peg handlers _handleValue -> do
   --   let AdjustmentHandlers uidmap = handlers
   --   handler <- (uidmap ^? ix uid . ix row) -- >>= (??
 
   -- M-Handle
-  Handle tm adj peg lambdas valHandler -> do
-    traceRule "H-Handle"
+  Handle tm adj peg lambdas valHandler ->
     -- let mkHandler :: TmI -> Handler
     --     mkHandler tm args env = pure (tm, pushBoundVars env args)
     --     -- env' = env & handlers %~ ((mkHandler . snd <$$> lambdas) <>)
     --     handlers = mkHandler . snd <$$> lambdas
-    pure $ st
+    traceReturnState "H-Handle" $ st
       & evalFocus .~ tm
       & mkFrame (Handle Hole adj peg lambdas valHandler)
 
@@ -298,9 +291,8 @@ step st@(EvalState focus env cont fwdCont) = case focus of
   Command uid row              -> handleCommand uid row []    st
 
   -- M-App (duplicated?)
-  AppN f spine -> do
-    traceRule "m-App (duplicated?)"
-    pure $ st
+  AppN f spine ->
+    traceReturnState "m-App (duplicated?)" $ st
       & evalFocus .~ f
       & mkFrame (AppN Hole spine)
 
@@ -310,16 +302,14 @@ step st@(EvalState focus env cont fwdCont) = case focus of
   --   | otherwise -> error "impossible"
 
 -- XXX why are we even making a frame here? just modify env?
-  Let rhs polyty name body -> do
-    traceRule "Unnamed Let frame maker"
-    pure $ st
+  Let rhs polyty name body ->
+    traceReturnState "Unnamed Let frame maker" $ st
       & evalFocus .~ rhs
       & mkFrame (Let Hole polyty name body)
 
-  Letrec names lambdas rhs -> do
+  Letrec names lambdas rhs ->
     -- both the focus and lambdas close over the lambdas (use env')
-    traceRule "Unnamed Letrec frame maker"
-    pure $ st
+    traceReturnState "Unnamed Letrec frame maker" $ st
       & evalFocus .~ rhs
       & mkFrame (Letrec names lambdas Hole)
       & pushBoundVars (snd <$> lambdas)
@@ -356,7 +346,29 @@ traceStackM = traceM . showStack
 traceEnvM :: Stack [TmI] -> EvalM ()
 traceEnvM = traceM . showEnv
 
-traceRule :: String -> EvalM ()
-traceRule = traceM
+traceReturnState :: String -> EvalState -> EvalM EvalState
+traceReturnState name st = do
+  traceM $ show $ pretty $ vsep
+    [ "Result of applying:" <+> dullblue (text name)
+    , pretty st
+    ]
+  pure st
+
+prettyEnv :: Stack [TmI] -> Doc
+prettyEnv stk =
+  let stkLines = vsep . fmap (("*" <+>) . pretty) <$> stk
+  in vsep $ intersperse "---------------------" stkLines
+
+instance Pretty EvalState where
+  pretty (EvalState focus env cont fwdCont) = vsep
+    [ text "EvalState"
+    , indent 2 $ vsep
+      [ dullblue "focus:"    <+> pretty focus
+      , dullblue "env:"      <+> align (prettyEnv env)
+      , case fwdCont of
+          Nothing -> empty
+          Just cont -> dullblue "fwd cont:" <+> pretty cont
+      ]
+    ]
 
 -- }}}

@@ -71,6 +71,8 @@ library
     mmorph >= 1.0 && < 1.2,
     neat-interpolation == 0.3.*,
     unification-fd == 0.10.*,
+    ansi-wl-pprint == 0.6.*,
+    -- ansi-terminal?
 
     -- testing
     tasty == 0.11.*,

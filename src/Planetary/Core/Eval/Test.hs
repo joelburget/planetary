@@ -86,6 +86,7 @@ unitTests  =
       --   ]
 
   in testGroup "evaluation"
+       {-
        [ let x = BV 0 0
              -- tm = forceTm "(\y -> y) x"
              lam = Lam ["X"] x
@@ -175,16 +176,17 @@ unitTests  =
 --               [ stepTest "tm"  emptyEnv 12 tm  (Right false)
 --               -- , stepTest "tm2" emptyEnv 3 tm2 (Right false)
 --               ]
+-}
 
-       , let evenodd = forceTm [text|
+       [ let evenodd = forceTm [text|
                letrec
                  even : forall. {<Fix NatF> -> <Bool>}
-                      = \n -> case unFix n of
+                      = \n -> case n of
                         NatF:
                           | <z>       -> <Bool.1> -- true
                           | <succ n'> -> odd n'
                  odd : forall. {<Fix NatF> -> <Bool>}
-                     = \m -> case unFix m of
+                     = \m -> case m of
                        NatF:
                          | <z>       -> <Bool.0> -- false
                          | <succ m'> -> even m'
@@ -193,12 +195,12 @@ unitTests  =
 
              Right evenodd' = resolveTm
                -- Provides NatF, Bool
-               ((fromList $ Frank.resolvedDecls ^. globalCids) <>
+               (fromList (Frank.resolvedDecls ^. globalCids) <>
                 [("Fix", lfixId)])
                evenodd
 
-             mkFix = Command fixOpsId 0
-             unFix = Command fixOpsId 1
+             -- mkFix = Command fixOpsId 0
+             -- unFix = Command fixOpsId 1
              Just (natfId, _) = namedData "NatF" Frank.resolvedDecls
              Just (_, fixDecl) = namedInterface "FixOps" HaskellForeign.resolvedDecls
              EffectInterface fixBinders fixCtrs = fixDecl
@@ -209,11 +211,11 @@ unitTests  =
              -- mkTm n = [| evenOdd n |]
              mkTm :: Text -> Int -> Tm Cid
              mkTm fnName n =
-               let mkNat 0 = AppN mkFix [DataConstructor natfId 0 []]
-                   mkNat k = AppN mkFix [DataConstructor natfId 1 [mkNat (k - 1)]]
+               let mkNat 0 = DataConstructor natfId 0 []
+                   mkNat k = DataConstructor natfId 1 [mkNat (k - 1)]
 
                    Right tm = closeTm $
-                     substitute "unFix" unFix $
+                     -- substitute "unFix" unFix $
                        substitute "body"
                          (AppT (FV fnName) [mkNat n])
                          evenodd'
@@ -221,10 +223,10 @@ unitTests  =
 
              natBoolEnv = AmbientEnv haskellOracles []
          in testGroup "letrec"
-              -- [ stepTest "even 0"  natBoolEnv 16  (traceShowId $ mkTm "even" 0)  (Right true)
+              [ stepTest "even 0"  natBoolEnv 4  (traceShowId $ mkTm "even" 0)  (Right true)
               -- [ stepTest "odd 0"   natBoolEnv 16  (mkTm "odd"  0)  (Right false)
               -- [ stepTest "even 3"  natBoolEnv 31 (traceShowId $ mkTm "even" 1)  (Right false)
-              [ stepTest "even 3"  natBoolEnv 7 (traceShowId $ mkTm "even" 2)  (Right true)
+              -- [ stepTest "even 3"  natBoolEnv 7 (traceShowId $ mkTm "even" 2)  (Right true)
               -- , stepTest "even 7"  natBoolEnv 8  (mkTm "even" 7)  (Right false)
               -- , stepTest "even 10" natBoolEnv 11 (mkTm "even" 10) (Right true)
               -- , stepTest "odd 7"   natBoolEnv 8  (mkTm "odd"  7)  (Right true)
