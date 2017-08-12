@@ -474,7 +474,7 @@ type TmI                 = Tm Cid
 -- $ Judgements
 
 isValue :: Tm a -> Bool
--- isValue BoundVariable{}      = True
+isValue BoundVariable{}      = True
 isValue FreeVariable{}       = True
 isValue InstantiatePolyVar{} = True
 -- isValue Command{}            = True

@@ -242,7 +242,6 @@ step st@(EvalState focus env cont fwdCont) = case focus of
     -- continuation in the current continuation frame but there is a
     -- handler
     Frame env' (Handle Hole _adj _peg _handlers (_name, valHandler)) : k ->
-      -- todo "M-RetHandler"
       logReturnState "M-RetHandler" $ st
         & evalFocus .~ valHandler
         -- TODO:
@@ -268,9 +267,11 @@ step st@(EvalState focus env cont fwdCont) = case focus of
         & pushBoundVars [val]
         & evalCont .~ k
 
-    Frame env' (Letrec _names _lambdas Hole) : k -> do
-      let ret = st & evalFocus .~ val
-      logReturnState "Unnamed Letrec Frame" ret
+    Frame env' (Letrec _names lambdas Hole) : k ->
+      logReturnState "Unnamed Letrec Frame" $ st
+        & evalFocus .~ val
+        & pushBoundVars (snd <$> lambdas)
+        & evalCont .~ k
 
   -- Handle (Command uid row) _adj _peg handlers _handleValue -> do
   --   let AdjustmentHandlers uidmap = handlers
@@ -292,7 +293,7 @@ step st@(EvalState focus env cont fwdCont) = case focus of
 
   -- M-App (duplicated?)
   AppN f spine ->
-    logReturnState "m-App (duplicated?)" $ st
+    logReturnState "M-App (duplicated?)" $ st
       & evalFocus .~ f
       & mkFrame (AppN Hole spine)
 
