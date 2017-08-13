@@ -413,7 +413,7 @@ parseCommandOrIdent = do
 
 parseLambda :: MonadicParsing m => m Value'
 parseLambda = Lam
-  <$> (textSymbol "\\" *> some identifier) <*> (arr *> parseTm)
+  <$> (textSymbol "\\" *> many identifier) <*> (arr *> parseTm)
   <?> "Lambda"
 
 evalCharIndentationParserT

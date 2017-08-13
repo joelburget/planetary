@@ -20,7 +20,7 @@ import Planetary.Support.Parser
 -- "unit : Unit"
 
 parserTest
-  :: (Eq a, Show a)
+  :: Eq a
   => Text
   -> CoreParser Token Parser a
   -> a
@@ -237,6 +237,10 @@ unitTests = scope "parsing" $ tests
 
   , parserTest "X" parseTyVar ("X", ValTyK)
   , parserTest "[e]" parseTyVar ("e", EffTyK)
+
+  , parserTest "\\xs -> xs" parseLambda (Lam ["xs"] (FV"xs"))
+  , parserTest "\\ -> xs"   parseLambda (Lam [] (FV"xs"))
+  , parserTest "\\-> xs"    parseLambda (Lam [] (FV"xs"))
 
   -- , let defn = T.unlines
   --         [
