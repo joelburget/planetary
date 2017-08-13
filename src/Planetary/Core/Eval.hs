@@ -33,6 +33,9 @@ module Planetary.Core.Eval
   -- $pretty
   , prettyEvalState
   , annToAnsi
+  , Ann(..)
+
+  , putLogs
   ) where
 
 -- We use an abstract machine similar to the CEK-style machine of "Liberating
@@ -63,6 +66,9 @@ data Err
   | FailedForeignFun
   | VariableLookup
   deriving (Eq, Show)
+
+instance Pretty Err where
+  pretty = pretty . show
 
 type Handler    = EvalState -> ForeignM EvalState
 type Handlers   = UIdMap Cid [Handler]
@@ -154,9 +160,9 @@ run ambient st@(EvalState tm _ _ _)
 handleCommand :: Cid -> Row -> [TmI] -> EvalState -> EvalM EvalState
 handleCommand uid row spine st = case _evalFwdCont st of
   -- M-Op
-  Nothing ->
-    logReturnState "M-Op" $ st & evalFwdCont .~ Just []
-    -- M-Op-Handle / M-Op-Forward
+  Nothing -> logReturnState "M-Op" $ st & evalFwdCont .~ Just []
+
+  -- M-Op-Handle / M-Op-Forward
   Just fwdCont
   -- Just (ContinuationFrame pureCont (handlerEnv, handler))
     | Frame env  (Handle Hole _adj _peg handlers _valHandler) : k
@@ -199,6 +205,11 @@ pushBoundVars defns env = env & evalEnv %~ (defns:)
 
 step :: EvalState -> EvalM EvalState
 step st@(EvalState focus env cont fwdCont) = case focus of
+  BV level column -> case env ^? ix level . ix column of
+    Just newFocus -> logReturnState "BV lookup" $ st
+      & evalFocus .~ newFocus
+    Nothing -> throwError VariableLookup
+
   -- M-App
   AppN (Lambda _names scope) spine ->
     logReturnState "M-App" $ st
@@ -206,11 +217,10 @@ step st@(EvalState focus env cont fwdCont) = case focus of
       & pushBoundVars spine
 
   -- M-AppCont
-  Application f (MixedSpine (tm:tms) vals) -> do
-    let ret = st
-          & evalFocus .~ tm
-          & mkFrame (Application f (MixedSpine tms vals))
-    logReturnState "M-AppCont" ret
+  Application f (MixedSpine (tm:tms) vals) ->
+    logReturnState "M-AppCont" $ st
+      & evalFocus .~ tm
+      & mkFrame (Application f (MixedSpine tms vals))
 
   -- XXX
   -- * handle putting evaled args back in arg pos
@@ -250,6 +260,16 @@ step st@(EvalState focus env cont fwdCont) = case focus of
         & evalEnv   %~ ([val] :)
         & evalCont  .~ k
 
+    Frame env' (Application f (MixedSpine tms vals)) : k
+      | f /= Hole -> logReturnState "M-Ret Application 1" $ st
+        & evalFocus .~ Application f (MixedSpine tms (val:vals))
+        & evalCont  .~ k
+
+    Frame env' (Application f spine) : k
+      | f == Hole -> logReturnState "M-Ret Application 2" $ st
+        & evalFocus .~ Application val spine
+        & evalCont  .~ k
+
     -- M-RetCont -- bind a returned value if there is a pure continuation
     -- in the current continuation frame
     Frame env' cont : k ->
@@ -259,19 +279,6 @@ step st@(EvalState focus env cont fwdCont) = case focus of
         & evalFocus .~ cont
         & evalEnv   %~ ([val] :)
         & evalCont  .~ k
-
-    -- TODO: again why are we making a let frame
-    Frame env' (Let Hole polyty name body) : k ->
-      logReturnState "Unnamed Let Frame" $ st
-        & evalFocus .~ body
-        & pushBoundVars [val]
-        & evalCont .~ k
-
-    Frame env' (Letrec _names lambdas Hole) : k ->
-      logReturnState "Unnamed Letrec Frame" $ st
-        & evalFocus .~ val
-        & pushBoundVars (snd <$> lambdas)
-        & evalCont .~ k
 
   -- Handle (Command uid row) _adj _peg handlers _handleValue -> do
   --   let AdjustmentHandlers uidmap = handlers
@@ -302,17 +309,15 @@ step st@(EvalState focus env cont fwdCont) = case focus of
   --     pure $ (handleValue, pushBoundVars env [val]) : stk
   --   | otherwise -> error "impossible"
 
--- XXX why are we even making a frame here? just modify env?
-  Let rhs polyty name body ->
+  Let body polyty name rhs ->
     logReturnState "Unnamed Let frame maker" $ st
       & evalFocus .~ rhs
-      & mkFrame (Let Hole polyty name body)
+      & evalEnv %~ ([body] :)
 
   Letrec names lambdas rhs ->
     -- both the focus and lambdas close over the lambdas (use env')
     logReturnState "Unnamed Letrec frame maker" $ st
       & evalFocus .~ rhs
-      & mkFrame (Letrec names lambdas Hole)
       & pushBoundVars (snd <$> lambdas)
 
   _other -> do
@@ -336,12 +341,17 @@ annToAnsi = \case
   Error -> color Red <> bold
   Plain -> mempty
 
+putLogs :: Bool
+putLogs = False
+
 logReturnState :: String -> EvalState -> EvalM EvalState
 logReturnState name st = do
-  liftIO $ putDoc $ reAnnotate annToAnsi $ vsep
-    [ "Result of applying:" <+> annotate Highlighted (pretty name)
-    , prettyEvalState st
-    ]
+  when putLogs $
+    liftIO $ putDoc $ reAnnotate annToAnsi $ vsep
+      [ "Result of applying:" <+> annotate Highlighted (pretty name)
+      , prettyEvalState st
+      , ""
+      ]
   pure st
 
 prettyEnv :: Stack [TmI] -> Doc Ann
@@ -350,7 +360,7 @@ prettyEnv stk =
   in lineVsep stkLines
 
 lineVsep :: [Doc ann] -> Doc ann
-lineVsep = vsep . intersperse "---------------------"
+lineVsep = vsep . intersperse ""
 
 -- TODO show pure continuation
 prettyCont :: Stack ContinuationFrame -> Doc Ann

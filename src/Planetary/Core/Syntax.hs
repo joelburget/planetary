@@ -331,7 +331,9 @@ instance (IsUid uid, Pretty uid) => Pretty (Tm uid) where
     Command uid row -> pretty uid <> "." <> pretty row
     Annotation tm ty -> fillSep [pretty tm, ":", pretty ty]
     -- TODO: show the division between normalized / non-normalized
-    Application tm spine -> fillSep $ pretty <$> (tm : Foldable.toList spine)
+    Application tm spine -> case spine of
+      MixedSpine [] [] -> fillSep [pretty tm, "_"]
+      _ -> fillSep $ pretty <$> (tm : Foldable.toList spine)
     Case uid scrutinee handlers -> vsep
       [ "case" <+> pretty scrutinee <+> "of"
       -- TODO: use align or hang?
