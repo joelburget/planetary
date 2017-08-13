@@ -17,7 +17,7 @@ runOnlyTests :: String -> IO ()
 runOnlyTests name = runOnly name planetaryTests
 
 planetaryTests :: Test ()
-planetaryTests = scope "planetary" $ tests
+planetaryTests = tests
   [ Syntax.unitTests
   , Eval.unitTests
   , Typecheck.unitTests
