@@ -32,8 +32,9 @@ checkTest
   -> TmI
   -> UTy IntVar
   -> Test ()
-checkTest name tables tm ty = scope name $ expect $
-  runTcM tables (check tm ty) == Right ()
+checkTest name tables tm ty = scope name $ case runTcM tables (check tm ty) of
+  Right () -> ok
+  other -> fail (show other)
 
 inferTest
   :: String
@@ -159,12 +160,14 @@ unitTests = scope "typechecking" $ tests
 
   , scope "TODO: check lambda" $ tests []
 
-    , scope "check case" $ tests
+    , scope "case" $ tests
       [ let abcdUid = mockCid "abcd"
             defgUid = mockCid "123424321432"
             abcdTy = DataTy (UidTy abcdUid) []
             abcdVal = DataConstructor abcdUid 0 []
-            val = DataConstructor defgUid 1 [abcdVal, abcdVal]
+            val = Annotation
+              (DataConstructor defgUid 1 [abcdVal, abcdVal])
+              (DataTy (UidTy defgUid) [])
             resolutionState =
               [ ("abcd", abcdUid)
               , ("defg", defgUid)
