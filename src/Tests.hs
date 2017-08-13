@@ -1,12 +1,5 @@
 {-# language OverloadedLists #-}
-module Tests
-  ( runTests
-  , runEvalTests
-  , runTypecheckingTests
-  , runParserTests
-  , runHaskellForeignTests
-  , runFrankExamplesTests
-  ) where
+module Tests (runTests , runOnlyTests) where
 
 import EasyTest
 
@@ -20,6 +13,9 @@ import qualified Planetary.Library.FrankExamples.Test as FrankExamples
 runTests :: IO ()
 runTests = run planetaryTests
 
+runOnlyTests :: String -> IO ()
+runOnlyTests name = runOnly name planetaryTests
+
 planetaryTests :: Test ()
 planetaryTests = scope "planetary" $ tests
   [ Syntax.unitTests
@@ -29,21 +25,6 @@ planetaryTests = scope "planetary" $ tests
   , HaskellForeign.unitTests
   , FrankExamples.unitTests
   ]
-
-runEvalTests :: IO ()
-runEvalTests = run Eval.unitTests
-
-runTypecheckingTests :: IO ()
-runTypecheckingTests = run Typecheck.unitTests
-
-runParserTests :: IO ()
-runParserTests = run Parser.unitTests
-
-runHaskellForeignTests :: IO ()
-runHaskellForeignTests = run HaskellForeign.unitTests
-
-runFrankExamplesTests :: IO ()
-runFrankExamplesTests = run FrankExamples.unitTests
 
 -- unitTests :: TestTree
 -- unitTests = scope "ipc unit tests" $ tests
