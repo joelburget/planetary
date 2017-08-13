@@ -17,8 +17,7 @@ import Data.ByteString (ByteString)
 import qualified Data.HashMap.Strict as HashMap
 import NeatInterpolation
 import Network.IPLD
-import Test.Tasty
-import Test.Tasty.HUnit
+import EasyTest
 
 import Planetary.Core
 import Planetary.Library.HaskellForeign (intTy, boolTy)
@@ -32,18 +31,18 @@ checkTest
   -> TypingEnvI
   -> TmI
   -> UTy IntVar
-  -> TestTree
-checkTest name tables tm ty = testCase name $
-  runTcM tables (check tm ty) @?= Right ()
+  -> Test ()
+checkTest name tables tm ty = scope name $ expect $
+  runTcM tables (check tm ty) == Right ()
 
 inferTest
   :: String
   -> TypingEnvI
   -> TmI
   -> Either TcErr (UTy IntVar)
-  -> TestTree
-inferTest name tables tm expected = testCase name $
-  (freeze <$> runTcM tables (infer tm)) @?= (freeze <$> expected)
+  -> Test ()
+inferTest name tables tm expected = scope name $ expect $
+  (freeze <$> runTcM tables (infer tm)) == (freeze <$> expected)
 
 exampleInterfaces :: InterfaceTableI
 exampleInterfaces = mempty
@@ -60,20 +59,20 @@ emptyTypingEnv = TypingEnv dataTypeTable exampleInterfaces ambientAbility []
 mockCid :: ByteString -> Cid
 mockCid = mkCid
 
-unitTests :: TestTree
-unitTests = testGroup "typechecking"
-  [ testGroup "infer variable"
+unitTests :: Test ()
+unitTests = scope "typechecking" $ tests
+  [ scope "infer variable" $ tests
     [ let ty = FreeVariableTyU "hippo"
           env = emptyTypingEnv & varTypes .~ [[Left ty]]
       in inferTest "VAR 1" env (BV 0 0) (Right ty)
     , inferTest "VAR 2" emptyTypingEnv (BV 0 0) (Left (LookupVarTy 0 0))
     ]
 
-  , testGroup "TODO: infer polyvar"
+  , scope "TODO: infer polyvar" $ tests
     [
     ]
 
-  , testGroup "infer command"
+  , scope "infer command" $ tests
     [ let domTy = DataTy (UidTy (mockCid "domain")) []
           codomTy = DataTy (UidTy (mockCid "codomain")) []
           cmdUid = mockCid "fire missiles"
@@ -131,12 +130,12 @@ unitTests = testGroup "typechecking"
           , (v2Id, DataTypeInterface [] [constr2 []])
           ]
 
-    in testGroup "(sharing data defns)"
-         [ testGroup "infer app"
+    in scope "(sharing data defns)" $ tests
+         [ scope "infer app" $ tests
            [ inferTest "APP (1)" tables (app goodAnnF) expected
            , inferTest "APP (2)" tables (app baddAnnF) expectedBad
            ]
-         , testGroup "check data"
+         , scope "check data" $ tests
            [ let tables' = emptyTypingEnv & typingData .~
                    [ (v1Id, DataTypeInterface [] [ConstructorDecl "constr" [] []]) ]
              in checkTest "DATA (simple)" tables' tm1 (unfreeze ty1)
@@ -146,7 +145,7 @@ unitTests = testGroup "typechecking"
            ]
          ]
 
-  , testGroup "infer annotation"
+  , scope "infer annotation" $ tests
     [ let cid = mockCid "ty"
           ty = DataTy (UidTy cid) []
           tm = Annotation (DataConstructor cid 0 []) ty
@@ -158,9 +157,9 @@ unitTests = testGroup "typechecking"
       in inferTest "COERCE" env tm (Right (unfreeze ty))
     ]
 
-  , testGroup "TODO: check lambda" []
+  , scope "TODO: check lambda" $ tests []
 
-    , testGroup "check case"
+    , scope "check case" $ tests
       [ let abcdUid = mockCid "abcd"
             defgUid = mockCid "123424321432"
             abcdTy = DataTy (UidTy abcdUid) []
@@ -197,7 +196,7 @@ unitTests = testGroup "typechecking"
         in checkTest "CASE" env tm' expectedTy
       ]
 
-    , testGroup "check switch"
+    , scope "check switch" $ tests
       [ let tm = BV 0 0
             dataUid = mockCid "dataUid"
             dataTy = unfreeze $ DataTy (UidTy dataUid) []
@@ -212,7 +211,7 @@ unitTests = testGroup "typechecking"
             [ ("Int", intId)
             , ("Bool", boolId)
             ]
-      in testGroup "check handle"
+      in scope "check handle" $ tests
 
         -- both branches should give us a bool
         [ let Right tm = resolveTm resolutionState $
@@ -266,7 +265,7 @@ unitTests = testGroup "typechecking"
         ]
 
     , let
-      in testGroup "polyvar instantiation"
+      in scope "polyvar instantiation" $ tests
         [
         ]
 

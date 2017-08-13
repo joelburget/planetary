@@ -8,7 +8,7 @@ module Tests
   , runFrankExamplesTests
   ) where
 
-import Test.Tasty
+import EasyTest
 
 import qualified Planetary.Core.Eval.Test as Eval
 import qualified Planetary.Core.Syntax.Test as Syntax
@@ -18,10 +18,10 @@ import qualified Planetary.Library.HaskellForeign.Test as HaskellForeign
 import qualified Planetary.Library.FrankExamples.Test as FrankExamples
 
 runTests :: IO ()
-runTests = defaultMain tests
+runTests = run planetaryTests
 
-tests :: TestTree
-tests = testGroup "planetary"
+planetaryTests :: Test ()
+planetaryTests = scope "planetary" $ tests
   [ Syntax.unitTests
   , Eval.unitTests
   , Typecheck.unitTests
@@ -31,29 +31,29 @@ tests = testGroup "planetary"
   ]
 
 runEvalTests :: IO ()
-runEvalTests = defaultMain Eval.unitTests
+runEvalTests = run Eval.unitTests
 
 runTypecheckingTests :: IO ()
-runTypecheckingTests = defaultMain Typecheck.unitTests
+runTypecheckingTests = run Typecheck.unitTests
 
 runParserTests :: IO ()
-runParserTests = defaultMain Parser.unitTests
+runParserTests = run Parser.unitTests
 
 runHaskellForeignTests :: IO ()
-runHaskellForeignTests = defaultMain HaskellForeign.unitTests
+runHaskellForeignTests = run HaskellForeign.unitTests
 
 runFrankExamplesTests :: IO ()
-runFrankExamplesTests = defaultMain FrankExamples.unitTests
+runFrankExamplesTests = run FrankExamples.unitTests
 
 -- unitTests :: TestTree
--- unitTests = testGroup "ipc unit tests"
+-- unitTests = scope "ipc unit tests" $ tests
 --   [ testCase "expected failure" $ assertBool "" (isJust (topCheck badUnitT))
 --   , testCase "check nothingT" $ assertBool "" (isNothing (topCheck nothingT))
 --   , testCase "check computation" $ assertBool "" (isNothing (topCheck compT))
 --   ]
 
 -- unifyTests :: TestTree
--- unifyTests = testGroup "ipc unification tests"
+-- unifyTests = scope "ipc unification tests" $ tests
 --   [ testCase "1" $ assertBool "" $ isRight $ runTypingContext $ do
 --       v1 <- freeVar
 --       v2 <- freeVar

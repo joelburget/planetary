@@ -9,13 +9,13 @@ module Planetary.Core.Eval.Test (unitTests, stepTest, runTest) where
 import Control.Arrow (right)
 import Control.Lens
 import Control.Monad (when)
+import Control.Monad.IO.Class
 import qualified Data.HashMap.Strict as HashMap
 import Data.Text (Text)
 import NeatInterpolation
 import Network.IPLD as IPLD
 import Prelude hiding (not)
-import Test.Tasty
-import Test.Tasty.HUnit
+import EasyTest hiding (bool, run)
 
 import Planetary.Core
 import Planetary.Support.Ids hiding (boolId) -- XXX fix this
@@ -39,28 +39,28 @@ stepTest
   -> Int
   -> TmI
   -> Either Err TmI
-  -> TestTree
+  -> Test ()
 stepTest name env steps tm expected =
   let applications :: [EvalM EvalState]
       applications = iterate (step =<<) (pure initState)
       initState = mkEmptyState tm
       actual = applications !! steps
 
-  in testCase name $ do
-    when putLogs $
+  in scope name $ do
+    liftIO $ when putLogs $
       putDoc $ reAnnotate annToAnsi $ vsep
         [ "stepTest on:"
         , prettyEvalState initState
         ]
-    result <- runEvalM env actual
+    result <- liftIO $ runEvalM env actual
 
     let result' = fst result
         result'' = right _evalFocus result'
 
     if result'' == expected
-    then pure ()
+    then ok
     else do
-      putDoc $ reAnnotate annToAnsi $ vsep
+      liftIO $ putDoc $ reAnnotate annToAnsi $ vsep
         [ ""
         , annotate Error "fail with state:"
         , prettyEvalState initState
@@ -68,17 +68,17 @@ stepTest name env steps tm expected =
         , annotate Error "expected:"
         , either pretty pretty expected
         ]
-      assertString "failure: see above"
+      fail "failure: see above"
 
 runTest
   :: String
   -> AmbientEnv
   -> TmI
   -> Either Err TmI
-  -> TestTree
-runTest name env tm expected = testCase name $ do
-  result <- run env (mkEmptyState tm)
-  fst result @?= expected
+  -> Test ()
+runTest name env tm expected = scope name $ do
+  result <- liftIO $ run env (mkEmptyState tm)
+  expect $ fst result == expected
 
 boolId :: Cid
 Just (boolId, _) = namedData "Bool" Frank.resolvedDecls
@@ -86,7 +86,7 @@ Just (boolId, _) = namedData "Bool" Frank.resolvedDecls
 bool :: Int -> Tm Cid
 bool i = DataConstructor boolId i []
 
-unitTests :: TestTree
+unitTests :: Test ()
 unitTests  =
   let emptyEnv :: AmbientEnv
       emptyEnv = AmbientEnv mempty mempty
@@ -104,11 +104,11 @@ unitTests  =
       --   , ([], zero)
       --   ]
 
-  in testGroup "evaluation"
+  in scope "evaluation" $ tests
        [ let x = BV 0 0
              -- tm = forceTm "(\y -> y) x"
              lam = Lam ["X"] x
-         in testGroup "functions"
+         in scope "functions" $ tests
             [ stepTest "application 1" emptyEnv 1 (AppN lam [x]) (Right x)
             , stepTest "application 2" emptyEnv 1
               (AppT lam [x])
@@ -116,26 +116,26 @@ unitTests  =
             -- TODO: test further steps with bound variables
             ]
 
-       , testGroup "case"
-           [ stepTest "case False of { False -> True; True -> False }"
-               emptyEnv 1
-               (not false)
-               (Right true)
-           , stepTest "case True of { False -> True; True -> False }"
-               emptyEnv 1
-               (not true)
-               (Right false)
-
-           , stepTest "not false" emptyEnv 1
+       , scope "case" $ tests
+         [ stepTest "case False of { False -> True; True -> False }"
+             emptyEnv 1
              (not false)
              (Right true)
-           ]
+         , stepTest "case True of { False -> True; True -> False }"
+             emptyEnv 1
+             (not true)
+             (Right false)
+
+         , stepTest "not false" emptyEnv 1
+           (not false)
+           (Right true)
+         ]
 
        , let ty :: Polytype Cid
              ty = Polytype [] (DataTy (UidTy boolId) [])
              -- TODO: remove shadowing
              tm = close1 "x" $ let_ "x" ty false (FV"x")
-         in testGroup "let"
+         in scope "let" $ tests
             [ stepTest "let x = false in x" emptyEnv 2 tm
               (Right false)
             , stepTest "let x = false in x" emptyEnv 2 tm
@@ -169,7 +169,7 @@ unitTests  =
                globalCids . to HashMap.fromList . ix "Abort"
              abort = Command abortCid 0
              handleAbort = substitute "x" abort handler''
-         in testGroup "handle"
+         in scope "handle" $ tests
               -- [ runTest "handle val" emptyEnv handleVal (Right two)
               [ runTest "handle abort" emptyEnv handleAbort (Right one)
               -- XXX test continuing from handler
@@ -190,7 +190,7 @@ unitTests  =
 --                    not y
 --              |]
 
---          in testGroup "let x = false in let y = not x in not y"
+--          in scope "let x = false in let y = not x in not y" $ tests
 --               [ stepTest "tm"  emptyEnv 12 tm  (Right false)
 --               -- , stepTest "tm2" emptyEnv 3 tm2 (Right false)
 --               ]
@@ -239,7 +239,7 @@ unitTests  =
                in tm
 
              natBoolEnv = AmbientEnv haskellOracles []
-         in testGroup "letrec"
+         in scope "letrec" $ tests
               [ stepTest "even 0"  natBoolEnv 8  (mkTm "even" 0)  (Right true)
               , stepTest "odd 0"   natBoolEnv 8  (mkTm "odd"  0)  (Right false)
               , stepTest "even 1"  natBoolEnv 15 (mkTm "even" 1)  (Right false)

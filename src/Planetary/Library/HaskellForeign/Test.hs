@@ -11,7 +11,7 @@ import Data.Semigroup ((<>))
 import Data.Text (Text)
 import NeatInterpolation
 import Prelude hiding (not)
-import Test.Tasty
+import EasyTest
 
 import Planetary.Core
 import Planetary.Library.HaskellForeign
@@ -36,7 +36,7 @@ simpleEnv = AmbientEnv
   , mkForeign @Text "hello world"
   ]
 
-unitTests :: TestTree
+unitTests :: Test ()
 unitTests =
   let -- zero = mkForeignTm @Int 0
       one  = mkForeignTm @Int intId [] 1
@@ -53,8 +53,8 @@ unitTests =
 
       env = emptyTypingEnv & typingInterfaces .~ interfaceTable
 
-   in testGroup "haskell foreign"
-       [ testGroup "evaluation"
+   in scope "haskell foreign" $ tests
+       [ scope "evaluation" $ tests
          [ stepTest "1 + 1" simpleEnv 3
            -- [tmExp| add one one |]
            (add [one, one])
@@ -70,7 +70,7 @@ unitTests =
            (Right helloWorld)
          ]
 
-       , testGroup "typechecking"
+       , scope "typechecking" $ tests
          [ checkTest "1 : Int" env one (unfreeze intTy)
          , checkTest "1 + 1 : Int" env (add [one, one]) (unfreeze intTy)
          , checkTest "\"hello \" <> \"world\" : Text" env (cat [hello, world]) (unfreeze textTy)
@@ -82,7 +82,7 @@ unitTests =
          --     runTcM env (check tm intTy) @?= Left err
          ]
 
-       , testGroup "lfix" $
+       , scope "lfix" $
          let decls = forceDeclarations [text|
              data ListF a f =
                | <nilf>
@@ -127,7 +127,8 @@ unitTests =
 
              env' = emptyTypingEnv & typingData .~ dtypes
 
-         in [ checkTest "ListF []" env' lnil (unfreeze intListTy)
+         in tests
+            [ checkTest "ListF []" env' lnil (unfreeze intListTy)
             , checkTest "ListF [1]" env' oneList (unfreeze intListTy)
             ]
       ]

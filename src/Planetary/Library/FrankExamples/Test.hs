@@ -5,10 +5,11 @@
 {-# language TypeFamilies #-}
 module Planetary.Library.FrankExamples.Test (unitTests) where
 
+import Control.Applicative (some)
 import Control.Lens
 import Data.Text (Text)
 import NeatInterpolation
-import Test.Tasty
+import EasyTest
 
 import Planetary.Core
 import qualified Planetary.Library.FrankExamples as Frank
@@ -18,15 +19,15 @@ import Planetary.Support.Ids
 import Planetary.Support.NameResolution
 import Planetary.Support.Parser
 
-unitTests :: TestTree
+unitTests :: Test ()
 unitTests =
   let
-  in testGroup "frank examples"
-       [ testGroup "catch" []
-       , testGroup "pipe" []
-       , testGroup "spacer" []
-       , testGroup "state" []
-       , testGroup "next"
+  in scope "frank examples" $ tests
+       [ scope "catch" $ tests []
+       , scope "pipe" $ tests []
+       , scope "spacer" $ tests []
+       , scope "state" $ tests []
+       , scope "next" $ tests
          [ let
                emptyEnv :: AmbientEnv
                emptyEnv = AmbientEnv mempty mempty

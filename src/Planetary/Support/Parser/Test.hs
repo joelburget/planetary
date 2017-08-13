@@ -8,8 +8,7 @@ module Planetary.Support.Parser.Test (unitTests) where
 
 import Data.Text (Text)
 import qualified Data.Text as T
-import Test.Tasty
-import Test.Tasty.HUnit
+import EasyTest
 import Text.Trifecta hiding (expected)
 import "indentation-trifecta" Text.Trifecta.Indentation
 
@@ -25,17 +24,17 @@ parserTest
   => Text
   -> CoreParser Token Parser a
   -> a
-  -> TestTree
-parserTest input parser expected = testCase (T.unpack input) $
+  -> Test ()
+parserTest input parser expected = scope (T.unpack input) $
   case runTokenParse parser testLocation input of
-    Right actual -> expected @=? actual
-    Left errMsg -> assertFailure errMsg
+    Right actual -> expect $ expected == actual
+    Left errMsg -> fail errMsg
 
 data NestedList = NamedList Text [NestedList]
   deriving (Eq, Show)
 
-unitTests :: TestTree
-unitTests = testGroup "parsing"
+unitTests :: Test ()
+unitTests = scope "parsing" $ tests
   [ let defn = T.unlines
           [ "outer:"
           , "  node1:"
@@ -194,7 +193,7 @@ unitTests = testGroup "parsing"
           [ ([], FV "y")
           , (["a", "b", "c"], FV "z")
           ]
-    in testGroup "case"
+    in scope "case" $ tests
          [ parserTest defn parseTm expected
          , parserTest defn parseCase expected
          ]
