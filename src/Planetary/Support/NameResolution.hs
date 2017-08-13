@@ -162,7 +162,7 @@ closeTm' = anaM $ \case
   -- non-binding terms. just handle the recursive ones
   Annotation tm ty -> Annotation_ <$> closeTm' tm <*> pure ty
   Application f spine -> Application_ <$> closeTm' f <*> mapM closeTm' spine
-  DataConstructor uid row tms -> DataConstructor_ uid row <$> (traverse closeTm' tms)
+  DataConstructor uid row tms -> DataConstructor_ uid row <$> traverse closeTm' tms
   InstantiatePolyVar tm tyArgs -> InstantiatePolyVar_ <$> closeTm' tm <*> pure tyArgs
 
   other -> pure (unFix other)

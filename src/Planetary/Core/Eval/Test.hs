@@ -1,5 +1,4 @@
 {-# language DataKinds #-}
-{-# language LambdaCase #-}
 {-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
