@@ -5,9 +5,6 @@
 module Planetary.Support.Ids
   ( intId
   , boolId
-  , intOpsId
-  , boolOpsId
-  , strOpsId
   , concatStrsId
   , orId
   , andId
@@ -30,7 +27,6 @@ module Planetary.Support.Ids
   , uidOpsId
   , uidId
   , textId
-  , textOpsId
   , consoleId
   , charHandlerId
   , vectorId
@@ -38,7 +34,6 @@ module Planetary.Support.Ids
   , syntaxOpsId
   , rowId
   , tupleId
-  , fixOpsId
   ) where
 
 import Data.Byteable (toBytes)
@@ -58,9 +53,6 @@ generateCids = mkCid . toBytes @D . hashFinalize <$>
 
 intId
   : boolId
-  : intOpsId
-  : boolOpsId
-  : strOpsId
   : concatStrsId
   : orId
   : andId
@@ -83,7 +75,6 @@ intId
   : uidOpsId
   : uidId
   : textId
-  : textOpsId
   : consoleId
   : charHandlerId
   : vectorId
@@ -91,5 +82,4 @@ intId
   : syntaxOpsId
   : rowId
   : tupleId
-  : fixOpsId
   :_ = generateCids

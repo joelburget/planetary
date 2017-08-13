@@ -73,7 +73,7 @@ unitTests =
        , testGroup "typechecking"
          [ checkTest "1 : Int" env one (unfreeze intTy)
          , checkTest "1 + 1 : Int" env (add [one, one]) (unfreeze intTy)
-         , checkTest "\"hello \" <> \"world\" : String" env (cat [hello, world]) (unfreeze textTy)
+         , checkTest "\"hello \" <> \"world\" : Text" env (cat [hello, world]) (unfreeze textTy)
          -- , let tm = add [one, hello]
          --       err = TyUnification textTy intTy
 

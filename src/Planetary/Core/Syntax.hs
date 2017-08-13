@@ -444,6 +444,9 @@ namedInterface name decls = do
   (_, cid) <- find ((== name) . fst) (_globalCids decls)
   (cid,) <$> _interfaces decls ^? Lens.ix cid
 
+namedInterfaces :: [Text] -> ResolvedDecls -> Maybe [(Cid, EffectInterfaceI)]
+namedInterfaces names decls = sequence (flip namedInterface decls <$> names)
+
 -- simple abilities
 
 closedAbility :: IsUid uid => Ability uid

@@ -19,6 +19,12 @@ module Planetary.Library.HaskellForeign
   , vector
   , uidMap
   -- , lfix
+
+  -- $ interfaces
+  , intOpsId
+  , boolOpsId
+  , textOpsId
+  , fixOpsId
   ) where
 
 import Control.Lens hiding ((??), op)
@@ -45,6 +51,12 @@ haskellOracles =
   -- , (uidOpsId, [ generateUid ]
   , (fixOpsId, [ mkFix, unFix ])
   ]
+
+Just ifaces
+  = namedInterfaces ["IntOps", "BoolOps", "TextOps", "FixOps"] resolvedDecls
+
+intOpsId, boolOpsId, textOpsId, fixOpsId :: Cid
+[intOpsId, boolOpsId, textOpsId, fixOpsId] = fst <$> ifaces
 
 intTy :: ValTyI
 intTy = DataTy (UidTy intId) []
@@ -106,7 +118,11 @@ lfix   = DataTy (UidTy lfixId)
 
 -- interfaceTable :: UIdMap Cid EffectInterfaceI
 resolvedDecls :: ResolvedDecls
-Right resolvedDecls = resolveDecls mempty $ forceDeclarations [text|
+Right resolvedDecls = resolveDecls
+  [ ("Int", intId)
+  , ("Bool", boolId)
+  , ("Text", textId)
+  ] $ forceDeclarations [text|
 interface IntOps =
   | add : <Int> -> <Int> -> <Int>
   | sub : <Int> -> <Int> -> <Int>

@@ -13,7 +13,7 @@ import Test.Tasty
 import Planetary.Core
 import qualified Planetary.Library.FrankExamples as Frank
 import Planetary.Core.Eval.Test (runTest)
-import Planetary.Library.HaskellForeign (mkForeignTm)
+import Planetary.Library.HaskellForeign (mkForeignTm, intOpsId)
 import Planetary.Support.Ids
 import Planetary.Support.NameResolution
 import Planetary.Support.Parser
