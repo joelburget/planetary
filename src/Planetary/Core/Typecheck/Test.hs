@@ -15,6 +15,7 @@ import Control.Unification (freeze, unfreeze)
 import Control.Unification.IntVar
 import Data.ByteString (ByteString)
 import qualified Data.HashMap.Strict as HashMap
+import Data.Text (Text)
 import NeatInterpolation
 import Network.IPLD
 import EasyTest
@@ -27,7 +28,7 @@ import Planetary.Support.NameResolution
 import Planetary.Support.Parser
 
 checkTest
-  :: String
+  :: Text
   -> TypingEnvI
   -> TmI
   -> UTy IntVar
@@ -37,7 +38,7 @@ checkTest name tables tm ty = scope name $ case runTcM tables (check tm ty) of
   other -> fail (show other)
 
 inferTest
-  :: String
+  :: Text
   -> TypingEnvI
   -> TmI
   -> Either TcErr (UTy IntVar)

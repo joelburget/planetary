@@ -139,12 +139,13 @@ closeTm' = anaM $ \case
 
   -- binding terms
   Lambda names tm -> withTmVars names $ Lambda_ names <$> closeTm' tm
-  Handle tm adj (Peg ab codom) handlers (vName, vHandler) -> Handle_
-    <$> closeTm' tm
-    <*> pure adj
-    <*> pure (Peg ab codom)
-    <*> pure handlers
-    <*> ((vName,) <$> withTmVars [vName] (closeTm' vHandler))
+  Handle tm adj (Peg ab codom) handlers (vName, vHandler) -> do
+    tm' <- closeTm' tm
+    handlers' <- handlers & (traverse . traverse)
+      (\(names, kName, tm) ->
+        (names, kName,) <$> withTmVars (kName : names) (closeTm' tm))
+    vHandler' <- withTmVars [vName] (closeTm' vHandler)
+    pure $ Handle_ tm' adj (Peg ab codom) handlers' (vName, vHandler')
   Case uid tm branches -> Case_ uid
     <$> closeTm' tm
     <*> traverse (\(names, branch) -> (names,) <$> withTmVars names (closeTm' branch)) branches

@@ -251,7 +251,7 @@ check (Handle val adj peg handlers (_, vHandler)) ty = do
   cmds <- instantiateAbility adjustedEmpty
   pairs <- uidZip handlers cmds
   forMOf_ (traverse . traverse) pairs $
-    \((_, handler), CommandDeclaration _name as b) ->
+    \((_, _, handler), CommandDeclaration _name as b) ->
     let cTy = CompTyU [unfreeze b] (PegU ambient valTy)
         as' = unfreeze <$> as
     in openAdjustmentHandler handler as' cTy $ \tm ->

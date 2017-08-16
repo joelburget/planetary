@@ -16,8 +16,12 @@ module Planetary.Core.Eval
   , ForeignM
   , Handler
   , Handlers
+  , Stack
+  , ContinuationFrame(..)
+  , Logger(..)
   , step
   , run
+  , run'
   , runEvalM
 
   -- $optics
@@ -29,34 +33,24 @@ module Planetary.Core.Eval
   , evalEnv
   , evalCont
   , evalFwdCont
-
-  -- $pretty
-  , prettyEvalState
-  , annToAnsi
-  , Ann(..)
-
-  , putLogs
   ) where
 
 -- We use an abstract machine similar to the CEK-style machine of "Liberating
 -- Effects with Rows and Handlers" - Hillerström, Lindley.
 
-import Control.Arrow (left)
 import Control.Lens hiding ((??))
 import Control.Monad.Except
+import Control.Monad.Reader
 import Control.Monad.State
-import Data.List (intersperse)
+import Data.Text (Text)
 import Network.IPLD hiding (Row, Value, (.=))
 import qualified Network.IPLD as IPLD
 import Data.Text.Prettyprint.Doc
-import Data.Text.Prettyprint.Doc.Render.Terminal
 
 import Planetary.Core.Syntax
 import Planetary.Core.Syntax.Patterns
 import Planetary.Core.UIdMap
 import Planetary.Util
-
-import Debug.Trace hiding (traceStack)
 
 data Err
   = RowBound
@@ -90,12 +84,30 @@ type ForeignM =
   (StateT ValueStore
   IO)
 
+data Logger = Logger
+  { _logReturnState :: Text -> EvalState -> IO ()
+  , _logIncomplete :: EvalState -> IO ()
+  }
+
+logReturnState :: Text -> EvalState -> EvalM EvalState
+logReturnState label st = do
+  log <- asks _logReturnState
+  liftIO $ log label st
+  pure st
+
+logIncomplete :: EvalState -> EvalM a
+logIncomplete st = do
+  log <- asks _logIncomplete
+  liftIO $ log st
+  error "incomplete"
+
 -- Maintain a stack of continuations to resume as we evaluate the current
 -- target to a value
 type EvalM =
-  ExceptT Err
+  ReaderT Logger
+  (ExceptT Err
   (StateT AmbientEnv
-  IO)
+  IO))
 
 data ContinuationFrame = ContinuationFrame
   { _pureContinuation :: Stack [TmI]
@@ -120,6 +132,8 @@ data EvalState = EvalState
   -- * Nothing: an operation is not being handled
   -- * Just stk: this stack of continuations didn't handle the operation
   , _evalFwdCont :: Maybe (Stack ContinuationFrame)
+
+  , _finished :: Bool
   } deriving Show
 
 makeLenses ''AmbientEnv
@@ -138,9 +152,11 @@ runForeignM action = do
 
 runEvalM
   :: AmbientEnv
+  -> Logger
   -> EvalM EvalState
   -> IO (Either Err EvalState, AmbientEnv)
-runEvalM ambient state = runStateT (runExceptT state) ambient
+runEvalM ambient logger action
+  = runStateT (runExceptT (runReaderT action logger)) ambient
 
 -- runEval :: AmbientEnv -> TmI -> IO (Either Err TmI, AmbientEnv)
 -- runEval env tm = do
@@ -148,14 +164,22 @@ runEvalM ambient state = runStateT (runExceptT state) ambient
 --   -- TODO: make total
 --   pure $ left (\(EvalState [tm'] _ _ _) -> tm')
 
-run :: AmbientEnv -> EvalState -> IO (Either Err TmI, AmbientEnv)
-run ambient st@(EvalState tm _ _ _)
-  | isValue tm = pure (Right tm, ambient)
+run :: AmbientEnv -> Logger -> EvalState -> IO (Either Err TmI, AmbientEnv)
+run env logger st = do
+  (e, env') <- run' env logger st
+  -- TODO: do this with lens
+  pure $ case e of
+    Left err  -> (Left err, env')
+    Right st' -> (Right $ st' ^. evalFocus, env')
+
+run' :: AmbientEnv -> Logger -> EvalState -> IO (Either Err EvalState, AmbientEnv)
+run' ambient logger st@(EvalState tm _ _ _ done)
+  | done = pure (Right st, ambient)
   | otherwise = do
-    (eitherStack, env') <- runEvalM ambient (step st)
+    (eitherStack, env') <- runEvalM ambient logger (step st)
     case eitherStack of
-      Left err -> pure (Left err, env')
-      Right stack' -> run env' stack'
+      Left err     -> pure (Left err, env')
+      Right stack' -> run' env' logger stack'
 
 handleCommand :: Cid -> Row -> [TmI] -> EvalState -> EvalM EvalState
 handleCommand uid row spine st = case _evalFwdCont st of
@@ -167,18 +191,20 @@ handleCommand uid row spine st = case _evalFwdCont st of
   -- Just (ContinuationFrame pureCont (handlerEnv, handler))
     | Frame env  (Handle Hole _adj _peg handlers _valHandler) : k
       <- st ^. evalCont
-    , Just (_name, handleTm) <- handlers ^? ix uid . ix row
+    , Just (_names, _kName, handleTm) <- handlers ^? ix uid . ix row
     -- M-Op-Handle
+    --
+    -- Use the current handler to handle an operation.
     -> do
       -- XXX is this the right order?
       let updateEnv = todo "updateEnv" -- ((fwdCont : todo "vals") :)
           newCont = case k of
-            [] -> todo "[] case"
+            [] -> [] -- TODO is this right?
             Frame env' cont : k' -> Frame (env <> env') cont : k'
       logReturnState "M-Op-Handle" $ st
-        & evalFocus .~ handleTm
-        & evalEnv %~ updateEnv
-        & evalCont .~ newCont
+        & evalFocus   .~ handleTm
+        & evalEnv     %~ updateEnv
+        & evalCont    .~ newCont
         & evalFwdCont .~ Nothing
   _ -> case st ^. evalCont of
          -- M-Op-Forward
@@ -196,7 +222,7 @@ handleCommand uid row spine st = case _evalFwdCont st of
          -- recourse -- check the ambient environment for a handler.
          [] -> do
            ambient <- gets (^. ambientHandlers)
-           handler <- (ambient ^? ix uid . ix row) ?? FailedHandlerLookup
+           handler <- ambient ^? ix uid . ix row ?? FailedHandlerLookup
            ret <- runForeignM $ handler st
            logReturnState "M-Op-Handle-Ambient" ret
 
@@ -204,7 +230,7 @@ pushBoundVars :: [TmI] -> EvalState -> EvalState
 pushBoundVars defns env = env & evalEnv %~ (defns:)
 
 step :: EvalState -> EvalM EvalState
-step st@(EvalState focus env cont fwdCont) = case focus of
+step st@(EvalState focus env cont fwdCont done) = case focus of
   BV level column -> case env ^? ix level . ix column of
     Just newFocus -> logReturnState "BV lookup" $ st
       & evalFocus .~ newFocus
@@ -243,10 +269,10 @@ step st@(EvalState focus env cont fwdCont) = case focus of
   val | isValue val -> case cont of
     -- M-RetTop
     --
-    -- TODO: decide what to do here. Options:
-    -- 1. add a terminated flag to the state
-    -- 2. have an ambient handler for when execution finishes
-    [] -> logReturnState "M-RetTop" st
+    -- Options to signal termination:
+    -- 1. a terminated flag on the state (choosing this for now)
+    -- 2. an ambient handler for when execution finishes
+    [] -> logReturnState "M-RetTop" $ st & finished .~ True
 
     -- M-RetHandler -- invoke the value handler if there is no pure
     -- continuation in the current continuation frame but there is a
@@ -320,64 +346,8 @@ step st@(EvalState focus env cont fwdCont) = case focus of
       & evalFocus .~ rhs
       & pushBoundVars (snd <$> lambdas)
 
-  _other -> do
-    traceDocM $ reAnnotate annToAnsi $ vsep
-      [ annotate Error "incomplete: no rule to handle"
-      , prettyEvalState st
-      ]
-    error "incomplete"
+  _other -> logIncomplete st
 
 mkFrame :: TmI -> EvalState -> EvalState
-mkFrame tm st@(EvalState _focus env cont _fwd)
+mkFrame tm st@(EvalState _focus env cont _fwd _done)
   = st & evalCont .~ Frame env tm : cont
-
--- debugging {{{
-
-data Ann = Highlighted | Error | Plain
-
-annToAnsi :: Ann -> AnsiStyle
-annToAnsi = \case
-  Highlighted -> colorDull Blue
-  Error -> color Red <> bold
-  Plain -> mempty
-
-putLogs :: Bool
-putLogs = False
-
-logReturnState :: String -> EvalState -> EvalM EvalState
-logReturnState name st = do
-  when putLogs $
-    liftIO $ putDoc $ reAnnotate annToAnsi $ vsep
-      [ "Result of applying:" <+> annotate Highlighted (pretty name)
-      , prettyEvalState st
-      , ""
-      ]
-  pure st
-
-prettyEnv :: Stack [TmI] -> Doc Ann
-prettyEnv stk =
-  let stkLines = vsep . fmap (("*" <+>) . pretty) <$> stk
-  in lineVsep stkLines
-
-lineVsep :: [Doc ann] -> Doc ann
-lineVsep = vsep . intersperse ""
-
--- TODO show pure continuation
-prettyCont :: Stack ContinuationFrame -> Doc Ann
-prettyCont = lineVsep . fmap prettyContFrame
-  where prettyContFrame (ContinuationFrame _stk handler) = pretty handler
-
-prettyEvalState :: EvalState -> Doc Ann
-prettyEvalState (EvalState focus env cont fwdCont) = vsep
-  [ "EvalState"
-  , indent 2 $ vsep
-    [ annotate Highlighted "focus:"    <+> pretty focus
-    , annotate Highlighted "env:"      <+> align (prettyEnv env)
-    , annotate Highlighted "cont:"     <+> align (prettyCont cont)
-    , case fwdCont of
-        Nothing -> mempty
-        Just cont -> annotate Highlighted "fwd cont:" <+> align (prettyCont cont)
-    ]
-  ]
-
--- }}}

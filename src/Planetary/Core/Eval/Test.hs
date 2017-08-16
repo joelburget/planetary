@@ -4,37 +4,61 @@
 {-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
 {-# language TypeFamilies #-}
-module Planetary.Core.Eval.Test (unitTests, stepTest, runTest) where
+module Planetary.Core.Eval.Test (unitTests, stepTest, runTest, mkLogger) where
 
 import Control.Arrow (right)
 import Control.Lens
 import Control.Monad (when)
+import Control.Monad.Reader (asks)
 import Control.Monad.IO.Class
 import qualified Data.HashMap.Strict as HashMap
 import Data.Text (Text)
 import NeatInterpolation
 import Network.IPLD as IPLD
 import Prelude hiding (not)
-import EasyTest hiding (bool, run)
+import EasyTest hiding (bool, run')
 
 import Planetary.Core
 import Planetary.Support.Ids hiding (boolId) -- XXX fix this
 import Planetary.Support.NameResolution (resolveTm, closeTm)
 import Planetary.Support.Parser (forceTm)
+import Planetary.Support.Pretty
 import qualified Planetary.Library.FrankExamples as Frank
 import Planetary.Library.HaskellForeign (mkForeignTm, haskellOracles)
 import qualified Planetary.Library.HaskellForeign as HaskellForeign
-import Planetary.Util (Stack)
 
-import Debug.Trace
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Terminal
 
+noteFailureState
+  :: EvalState -> Either Err EvalState -> Either Err TmI -> Test ()
+noteFailureState initState result expected = do
+  note $ layout $ vsep
+    [ ""
+    , annotate Error "fail with initial state:"
+    , prettyEvalState initState
+    , ""
+    , annotate Error "got:"
+    , either pretty prettyEvalState result
+    , ""
+    , annotate Error "expected:"
+    , either pretty (prettyTmPrec 11) expected
+    ]
+  fail "failure: see above"
+
 mkEmptyState :: TmI -> EvalState
-mkEmptyState tm = EvalState tm [] [] Nothing
+mkEmptyState tm = EvalState tm [] [] Nothing False
+
+putLogs :: Bool
+putLogs = True
+
+mkLogger :: (Text -> IO ()) -> Logger
+mkLogger note_ = Logger
+  (\t st -> note_ (logReturnState t st))
+  (note_ . logIncomplete)
 
 stepTest
-  :: String
+  :: Text
   -> AmbientEnv
   -> Int
   -> TmI
@@ -52,33 +76,30 @@ stepTest name env steps tm expected =
         [ "stepTest on:"
         , prettyEvalState initState
         ]
-    result <- liftIO $ runEvalM env actual
+
+    logger <- mkLogger <$> asks note_
+    result <- liftIO $ runEvalM env logger actual
 
     let result' = fst result
         result'' = right _evalFocus result'
 
     if result'' == expected
     then ok
-    else do
-      liftIO $ putDoc $ reAnnotate annToAnsi $ vsep
-        [ ""
-        , annotate Error "fail with state:"
-        , prettyEvalState initState
-        , ""
-        , annotate Error "expected:"
-        , either pretty pretty expected
-        ]
-      fail "failure: see above"
+    else noteFailureState initState result' expected
 
 runTest
-  :: String
+  :: Text
   -> AmbientEnv
   -> TmI
   -> Either Err TmI
   -> Test ()
 runTest name env tm expected = scope name $ do
-  result <- liftIO $ run env (mkEmptyState tm)
-  expect $ fst result == expected
+  let initState = mkEmptyState tm
+  logger <- mkLogger <$> asks note_
+  (result, _) <- liftIO $ run' env logger initState
+  if right _evalFocus result == expected
+     then ok
+     else noteFailureState initState result expected
 
 boolId :: Cid
 Just (boolId, _) = namedData "Bool" Frank.resolvedDecls

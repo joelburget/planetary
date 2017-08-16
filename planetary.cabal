@@ -22,6 +22,7 @@ library
 
     -- support
     Planetary.Support.Parser
+    Planetary.Support.Pretty
     Planetary.Support.Ids
     Planetary.Support.NameResolution
 

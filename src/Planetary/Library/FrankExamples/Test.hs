@@ -5,23 +5,69 @@
 {-# language TypeFamilies #-}
 module Planetary.Library.FrankExamples.Test (unitTests) where
 
-import Control.Applicative (some)
+import Control.Exception (Exception, throw)
 import Control.Lens
+import Control.Monad.Except
 import Data.Text (Text)
+import qualified Data.Text.IO as T
+import Data.Text.Prettyprint.Doc
+import Data.Typeable (Typeable)
 import NeatInterpolation
-import EasyTest
+import EasyTest hiding (run)
 
 import Planetary.Core
 import qualified Planetary.Library.FrankExamples as Frank
-import Planetary.Core.Eval.Test (runTest)
+import Planetary.Core.Eval.Test (runTest, mkLogger)
 import Planetary.Library.HaskellForeign (mkForeignTm, intOpsId)
 import Planetary.Support.Ids
 import Planetary.Support.NameResolution
 import Planetary.Support.Parser
+import Planetary.Support.Pretty
+
+data NotGood = NotGood TmI TmI
+  deriving Typeable
+
+instance Exception NotGood
+
+instance Show NotGood where
+  show (NotGood a b)
+    = "(" ++ show (prettyTmPrec 11 a) ++ "), " ++
+      "(" ++ show (prettyTmPrec 11 b) ++ ")"
 
 unitTests :: Test ()
 unitTests =
-  let
+  let testingDecls :: ResolvedDecls
+      Right testingDecls = resolveDecls
+        [ ("Unit", unitId)
+        ] $ forceDeclarations [text|
+          interface TestingOps A B =
+            | checkEqual : A -> B -> <Unit>
+        |]
+
+      Just (checkingOpsId, _) = namedInterface "TestingOps" testingDecls
+
+      unit = DataConstructor unitId 0 []
+
+      -- This should check that the two terms are equal. If so it just exits
+      -- with unit, otherwise it throws (to easytest).
+      checkEqualImpl :: Handler
+      checkEqualImpl st
+        | AppN _ [tm1, tm2] <- st ^. evalFocus = do
+          -- XXX testingEnv hack. this is really offensive
+          let logger = mkLogger T.putStrLn
+          (Right v1, _) <- liftIO $ run testingEnv logger (st & evalFocus .~ tm1)
+          (Right v2, _) <- liftIO $ run testingEnv logger (st & evalFocus .~ tm2)
+          if v1 == v2
+             then pure $ st & evalFocus .~ unit
+             else throw $ NotGood v1 v2
+      checkEqualImpl _ = throwError FailedForeignFun
+
+      testingEnv :: AmbientEnv
+      testingEnv = AmbientEnv
+        [ (checkingOpsId, [ checkEqualImpl ]) ]
+        []
+
+      checkEqual = Command checkingOpsId 0
   in scope "frank examples" $ tests
        [ scope "catch" $ tests []
        , scope "pipe" $ tests []
@@ -32,18 +78,39 @@ unitTests =
                emptyEnv :: AmbientEnv
                emptyEnv = AmbientEnv mempty mempty
 
-               next = forceTm [text|
-                 test = letrec
-                   next : [State Int]Int
-                   next! = fst get! (put (add get! zero))
+               test = forceTm [text|
+                 letrec
+                   -- note: not `forall S X. {S -> <State S>X -> X}`
+                   state : forall S X. {S -> X -> X}
+                         = \s x -> handle x : X with
+                           State:
+                             | <get -> k>   -> state s (k s)
+                             | <put s -> k> -> state s (k <Unit.0>)
+                           | x -> x
 
-                   index : <List X> -> <List <Pair Int X>>
-                         = \xs -> state zero (map {\x -> pair next! x} xs)
+                   -- XXX make List typecheck
+                   map : forall X Y. {{X -> Y} -> <List X> -> <List Y>}
+                       = \f lst -> case lst of
+                         ListF:
+                           | <nil>       -> <ListF.0>
+                           | <cons x xs> -> <ListF.1 (f x) (map f xs)>
 
-                   actual = index abc
-                   expected = cons (pair zero a)
-                     (cons (pair one b)
-                       (cons (pair two c) nil))
+                   next : forall. {[<State <Int>>] <Int>}
+                        = \-> fst get! (put (add get! zero))
+
+                   index : forall. {<List X> -> <List <Pair <Int> X>>}
+                         = \xs -> state zero (map (\x -> <Pair.0 next! x>) xs)
+                         --                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+                   actual : forall. {[<State <Int>>] <Int>}
+                          = \-> index abc
+
+                   expected : forall. {[<State <Int>>] <Int>}
+                            = \-> cons <Pair.0 zero a>
+                                    (cons <Pair.0 one b>
+                                      (cons <Pair.0 two c> nil))
+
+                 in checkEqual actual! expected!
                |]
 
                add = Command intOpsId 0
@@ -57,13 +124,26 @@ unitTests =
                b = mkForeignTm @Text textId [] "b"
                c = mkForeignTm @Text textId [] "c"
 
+               Just (listfId, _) = namedData "ListF" Frank.resolvedDecls
+               Just (pairId,  _) = namedData "Pair"  Frank.resolvedDecls
+
+               pair a b  = DataConstructor pairId 0 [a, b]
+
+               -- TODO:
+               -- * these definitions are copied from HaskellForeign.Test
+               -- * HaskellForeign.Test duplicates the ListF defn
+               lfixTm x   = DataConstructor lfixId 0 [x]
+               lcons x xs = lfixTm (DataConstructor listfId 1 [x, xs])
+               lnil       = lfixTm (DataConstructor listfId 0 [])
+
                resolutionState = fromList $
                  -- Provides State, List, Pair
-                 (Frank.resolvedDecls ^. globalCids) ++
+                 Frank.resolvedDecls ^. globalCids <>
+                 testingDecls ^. globalCids <>
                  [("Int", intId)]
 
-               Right next' = resolveTm resolutionState next
-               Right next'' = closeTm $
+               Right test' = resolveTm resolutionState test
+               Right test'' = closeTm $
                  substituteAll
                    [ ("add", add)
                    , ("abc", abc)
@@ -73,22 +153,15 @@ unitTests =
                    , ("a", a)
                    , ("b", b)
                    , ("c", c)
+                   , ("checkEqual", checkEqual)
                    ]
-                   next'
-
-               state = forceTm [text|
-                 state = letrec
-                   state : forall S X. S -> <State S>X -> X
-                         = \s x -> handle x : X with
-                           State:
-                             | <get -> k> -> state s (k s)
-                             | <put s -> k> -> state s (k <Unit.0>)
-                           | x -> x
-               |]
-
-               Right state' = resolveTm resolutionState state
-               Right state'' = closeTm state'
-            in runTest "next one" emptyEnv next'' (Right one)
+                   test'
+            in do
+                  io $ print $ vsep
+                    [ ""
+                    , prettyTmPrec 11 test
+                    ]
+                  runTest "next one" testingEnv test'' (Right unit)
          ]
 
        -- Example from "Continuation Passing Style for Effect Handlers"
@@ -140,5 +213,7 @@ unitTests =
              composition2 : forall A. [<Choose <Bool>>, <Abort>] A -> <List A>
                           = \a -> allChoices (failure a)
              |]
-           in runTest "drunk toss" undefined undefined undefined
+           in do
+             skip
+             runTest "drunk toss TODO" undefined undefined undefined
        ]

@@ -25,7 +25,7 @@ parserTest
   -> CoreParser Token Parser a
   -> a
   -> Test ()
-parserTest input parser expected = scope (T.unpack input) $
+parserTest input parser expected = scope input $
   case runTokenParse parser testLocation input of
     Right actual -> expect $ expected == actual
     Left errMsg -> fail errMsg

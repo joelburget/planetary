@@ -22,26 +22,19 @@
 {-# options_ghc -fno-warn-missing-pattern-synonym-signatures #-}
 module Planetary.Core.Syntax (module Planetary.Core.Syntax) where
 
-import Control.Arrow (second)
 import Control.Lens hiding (ix)
 import qualified Control.Lens as Lens
 import Control.Lens.TH (makeLenses)
 import Control.Unification
 import Data.Data
-import qualified Data.Foldable as Foldable
 import Data.Functor.Fixedpoint
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
-import Data.List (find, intersperse)
+import Data.List (find)
 import Data.Semigroup ((<>))
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Vector as V
 import GHC.Generics
 import Network.IPLD hiding (Row)
-import qualified Network.IPLD as IPLD
-import Data.Text.Encoding (decodeUtf8)
-import Data.Text.Prettyprint.Doc
 
 import Planetary.Core.UIdMap
 import Planetary.Util
@@ -63,11 +56,6 @@ data InitiateAbility = OpenAbility | ClosedAbility
 
 data Kind = ValTyK | EffTyK
   deriving (Show, Eq, Ord, Typeable, Generic)
-
-instance Pretty Kind where
-  pretty = \case
-    ValTyK -> "*"
-    EffTyK -> "#"
 
 data Ty uid ty
   -- ValTy
@@ -91,27 +79,6 @@ data Ty uid ty
   -- "For each UID, instantiate it with these args"
   | Ability_ !InitiateAbility !(UIdMap uid (Vector ty))
   deriving (Eq, Show, Ord, Typeable, Functor, Foldable, Traversable)
-
-instance (IsUid uid, Pretty uid) => Pretty (TyFix uid) where
-  pretty = \case
-    DataTy ty tys -> angles (fillSep $ pretty <$> ty : tys)
-    SuspendedTy ty -> braces (pretty ty)
-    BoundVariableTy i -> "BV" <+> pretty i
-    FreeVariableTy t -> pretty t
-    UidTy uid -> pretty uid
-    CompTy args peg -> fillSep $ intersperse "->" $ pretty <$> args ++ [peg]
-    Peg ab ty -> brackets (pretty ab) <+> pretty ty
-    TyArgVal ty -> pretty ty
-    TyArgAbility ab -> brackets (pretty ab)
-    Ability init mapping ->
-      let initP = case init of
-            -- TODO real name
-            OpenAbility -> "e"
-            ClosedAbility -> "0"
-          flatArgs = (\(i, r) -> pretty i <+> pretty r) <$> toList mapping
-          flatArgs' = if null flatArgs then [] else "+" : flatArgs
-
-      in fillSep $ initP : flatArgs'
 
 instance IsUid uid => Unifiable (Ty uid) where
   zipMatch (DataTy_ uid1 args1) (DataTy_ uid2 args2) =
@@ -214,14 +181,6 @@ data Polytype uid = Polytype
   , polyVal :: !(TyFix uid)
   } deriving (Typeable, Generic)
 
-instance (IsUid uid, Pretty uid) => Pretty (Polytype uid) where
-  pretty (Polytype binders val) =
-    let prettyBinder (name, kind) = case kind of
-          ValTyK -> pretty name
-          EffTyK -> brackets (pretty name)
-        prettyBinders binders = fillSep (prettyBinder <$> binders)
-    in "forall" <+> prettyBinders binders <> "." <+> pretty val
-
 instance Show uid => Show (Polytype uid) where
   showsPrec d (Polytype binders val) = showParen (d > 10) $
       showString "Polytype "
@@ -303,7 +262,7 @@ data TmF uid tm
     !tm
     !(Adjustment uid)
     !(Peg uid)
-    !(UIdMap uid (Vector (Vector Text, tm)))
+    !(UIdMap uid (Vector (Vector Text, Text, tm)))
     !(Text, tm)
   | Let_ !tm !(Polytype uid) !Text !tm
   -- invariant: each value in a letrec is a lambda
@@ -316,67 +275,6 @@ data TmF uid tm
   -- TODO: can we get rid of this in the substitution-based semantics?
   | Hole_ -- ^ Used at execution only
   deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
-
-instance (IsUid uid, Pretty uid) => Pretty (Tm uid) where
-  pretty = \case
-    FreeVariable t -> pretty t
-    BoundVariable depth col -> parens $ "BV" <+> pretty depth <+> pretty col
-    DataConstructor uid row args -> angles $ fillSep $
-      (pretty uid <> "." <> pretty row) : (pretty <$> args)
-    ForeignValue ty args locator -> fillSep $
-      "Foreign @" <> pretty ty : (pretty <$> args) ++ [pretty locator]
-    Lambda names body ->
-      "\\" <> fillSep (pretty <$> names) <+> "->" <+>
-        pretty (open (FreeVariable . (names !!)) body)
-    Command uid row -> pretty uid <> "." <> pretty row
-    Annotation tm ty -> fillSep [pretty tm, ":", pretty ty]
-    -- TODO: show the division between normalized / non-normalized
-    Application tm spine -> case spine of
-      MixedSpine [] [] -> fillSep [pretty tm, "_"]
-      _ -> fillSep $ pretty <$> (tm : Foldable.toList spine)
-    Case uid scrutinee handlers -> vsep
-      [ "case" <+> pretty scrutinee <+> "of"
-      -- TODO: use align or hang?
-      , indent 2 $ vsep
-        [ pretty uid <> ":"
-        , indent 2 $ vsep $ flip fmap handlers $ \(names, body) -> fillSep
-          [ "|"
-          , angles $ fillSep $ "_" : fmap pretty names
-          , "->"
-          , pretty $ open (FreeVariable . (names !!)) body
-          ]
-        ]
-      ]
-    Handle tm _adj peg handlers (vName, vRhs) ->
-      let handlers' = prettyHandler <$> toList handlers
-          prettyHandler (uid, uidHandler) = vsep
-            [ pretty uid <+> colon
-            , indent 2 (align $ vsep $ fmap prettyRow uidHandler)
-            ]
-          prettyRow (names, rhs)
-            = fillSep ["|", angles (fillSep ("_" : fmap pretty names)), "->", pretty rhs]
-      in vsep
-           [ "Handle" <+> pretty tm <+> colon <+> pretty peg <+> "with"
-           , indent 2 (align $ vsep handlers')
-           , fillSep ["|", pretty vName, "->", pretty vRhs]
-           ]
-    Let tm ty body rhs -> fillSep
-      ["let", pretty tm, ":", pretty ty, "=", pretty body, "in", pretty rhs]
-    Letrec names lambdas body ->
-      let rowInfo = zip names lambdas
-          rows = flip fmap rowInfo $ \(name, (ty, lam)) -> vsep
-            [ pretty name <+> colon <+> pretty ty
-            , "=" <+> pretty lam
-            ]
-      in vsep
-           [ "letrec"
-           , indent 2 $ vsep rows
-           , "in" <+> pretty body
-           ]
-    Hole -> "_"
-
-instance Pretty Cid where
-  pretty = pretty . decodeUtf8 . compact
 
 pattern DataConstructor uid row tms           = Fix (DataConstructor_ uid row tms)
 pattern ForeignValue uid1 rows uid2           = Fix (ForeignValue_ uid1 rows uid2)
@@ -531,12 +429,12 @@ shiftTraverse f = go 0 where
   go ix (Annotation tm ty) = Annotation (go ix tm) ty
   go ix (Letrec names defns body) =
     let ix' = succ ix
-    in Letrec names ((fmap . second) (go ix') defns) (go ix' body)
+    in Letrec names (defns & traverse . _2 %~ go ix') (go ix' body)
   go ix (Application tm spine) = Application (go ix tm) (go ix <$> spine)
   go ix (Case uid tm rows) =
-    Case uid (go ix tm) ((fmap . second) (go (succ ix)) rows)
+    Case uid (go ix tm) (rows & traverse . _2 %~ go (succ ix))
   go ix (Handle tm adj peg handlers (vName, vHandler)) =
-    let handlers' = (<$$> handlers) $ second (go (succ ix))
+    let handlers' =  (_3 %~ go (succ ix)) <$$> handlers
     in Handle (go ix tm) adj peg handlers' (vName, go (succ ix) vHandler)
   go ix (Let body pty name rhs) = Let (go ix body) pty name (go (succ ix) rhs)
   go _ _ = error "impossible: shiftTraverse"
@@ -585,30 +483,6 @@ substituteAll vals body = flip ycata body $ \case
 -- Instance Hell:
 
 -- IsIpld
-
-pattern Vx :: [a] -> V.Vector a
-pattern Vx lst <- (V.toList -> lst) where
-  Vx lst = V.fromList lst
-
-pattern T1 :: IsIpld a => Text -> a -> IPLD.Value
-pattern T1 tag a <- (DagArray (Vx [fromIpld -> Just tag, fromIpld -> Just a])) where
-  T1 tag a = DagArray (Vx [toIpld tag, toIpld a])
-
-pattern T2 :: (IsIpld a, IsIpld b) => Text -> a -> b -> IPLD.Value
-pattern T2 tag a b <- (DagArray (Vx [fromIpld -> Just tag, fromIpld -> Just a, fromIpld -> Just b])) where
-  T2 tag a b = DagArray (Vx [toIpld tag, toIpld a, toIpld b])
-
-pattern T3 :: (IsIpld a, IsIpld b, IsIpld c) => Text -> a -> b -> c -> IPLD.Value
-pattern T3 tag a b c <- (DagArray (Vx [fromIpld -> Just tag, fromIpld -> Just a, fromIpld -> Just b, fromIpld -> Just c])) where
-  T3 tag a b c = DagArray (Vx [toIpld tag, toIpld a, toIpld b, toIpld c])
-
-pattern T4 :: (IsIpld a, IsIpld b, IsIpld c, IsIpld d) => Text -> a -> b -> c -> d -> IPLD.Value
-pattern T4 tag a b c d <- (DagArray (Vx [fromIpld -> Just tag, fromIpld -> Just a, fromIpld -> Just b, fromIpld -> Just c, fromIpld -> Just d])) where
-  T4 tag a b c d = DagArray (Vx [toIpld tag, toIpld a, toIpld b, toIpld c, toIpld d])
-
-pattern T5 :: (IsIpld a, IsIpld b, IsIpld c, IsIpld d, IsIpld e) => Text -> a -> b -> c -> d -> e -> IPLD.Value
-pattern T5 tag a b c d e <- (DagArray (Vx [fromIpld -> Just tag, fromIpld -> Just a, fromIpld -> Just b, fromIpld -> Just c, fromIpld -> Just d, fromIpld -> Just e])) where
-  T5 tag a b c d e = DagArray (Vx [toIpld tag, toIpld a, toIpld b, toIpld c, toIpld d, toIpld e])
 
 pattern DataTyIpld uid args     = T2 "DataTy" uid args
 pattern SuspendedTyIpld cty     = T1 "SuspendedTy" cty

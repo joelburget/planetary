@@ -21,10 +21,6 @@ import Planetary.Support.Ids
 import Planetary.Support.NameResolution
 import Planetary.Support.Parser
 
--- TODO: this is awfully kludgy:
--- * ids are duplicated here and in Interplanetary.Ids
--- * we shouldn't need to supply the Uid separately -- it can be derived from
--- the data
 simpleEnv :: AmbientEnv
 simpleEnv = AmbientEnv
   haskellOracles
@@ -73,7 +69,9 @@ unitTests =
        , scope "typechecking" $ tests
          [ checkTest "1 : Int" env one (unfreeze intTy)
          , checkTest "1 + 1 : Int" env (add [one, one]) (unfreeze intTy)
-         , checkTest "\"hello \" <> \"world\" : Text" env (cat [hello, world]) (unfreeze textTy)
+         , checkTest "\"hello \" <> \"world\" : Text" env
+           (cat [hello, world])
+           (unfreeze textTy)
          -- , let tm = add [one, hello]
          --       err = TyUnification textTy intTy
 

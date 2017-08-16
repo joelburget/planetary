@@ -98,7 +98,7 @@ handle tm adj peg handlers (bodyVar, body) =
         | var == kVar = Just 0
         | otherwise   = succ <$> elemIndex var vars
       handlers' = handlers <&&>
-        (\(vars, kVar, rhs) -> (vars, close (abstractor vars kVar) rhs))
+        (\(vars, kVar, rhs) -> (vars, kVar, close (abstractor vars kVar) rhs))
       body' = close1 bodyVar body
   in Handle tm adj peg handlers' (bodyVar, body')
 

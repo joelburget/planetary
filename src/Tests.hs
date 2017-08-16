@@ -1,6 +1,7 @@
 {-# language OverloadedLists #-}
 module Tests (runTests , runOnlyTests) where
 
+import Data.Text (Text)
 import EasyTest
 
 import qualified Planetary.Core.Eval.Test as Eval
@@ -13,7 +14,7 @@ import qualified Planetary.Library.FrankExamples.Test as FrankExamples
 runTests :: IO ()
 runTests = run planetaryTests
 
-runOnlyTests :: String -> IO ()
+runOnlyTests :: Text -> IO ()
 runOnlyTests name = runOnly name planetaryTests
 
 planetaryTests :: Test ()
