@@ -1,18 +1,9 @@
-{-# language DataKinds #-}
-{-# language FlexibleInstances #-}
 {-# language LambdaCase #-}
-{-# language MultiParamTypeClasses #-}
-{-# language NamedFieldPuns #-}
 {-# language OverloadedStrings #-}
-{-# language PatternSynonyms #-}
-{-# language Rank2Types #-}
-{-# language TupleSections #-}
-{-# language TypeFamilies #-}
 module Planetary.Support.Pretty where
 
-import Control.Lens hiding (ix)
+import Control.Lens
 import Data.List (intersperse)
-import Data.Semigroup ((<>))
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Network.IPLD hiding (Row)
