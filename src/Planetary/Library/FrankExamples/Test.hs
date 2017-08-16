@@ -91,9 +91,8 @@ unitTests =
                    -- XXX make List typecheck
                    map : forall X Y. {{X -> Y} -> <List X> -> <List Y>}
                        = \f lst -> case lst of
-                         ListF:
-                           | <nil>       -> <ListF.0>
-                           | <cons x xs> -> <ListF.1 (f x) (map f xs)>
+                         | <nil>       -> <ListF.0>
+                         | <cons x xs> -> <ListF.1 (f x) (map f xs)>
 
                    next : forall. {[<State <Int>>] <Int>}
                         = \-> fst get! (put (add get! zero))

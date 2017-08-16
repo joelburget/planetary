@@ -300,19 +300,14 @@ parseCase =
         _ <- reserved "case"
         m <- parseTm
         _ <- reserved "of"
-        (uid, branches) <- localIndentation Any $ do
-          uid <- parseUid
-          _ <- colon
-
-          branches <- localIndentation Gt $ absoluteIndentation $ many $ do
-            _ <- bar
-            idents <- angles $ some identifier
-            _ <- arr
-            rhs <- parseTm
-            let _uncheckedName:vars = idents
-            pure (vars, rhs)
-          pure (uid, branches)
-        pure $ CaseP uid m branches
+        branches <- localIndentation Any $ absoluteIndentation $ many $ do
+          _ <- bar
+          idents <- angles $ some identifier
+          _ <- arr
+          rhs <- parseTm
+          let _uncheckedName:vars = idents
+          pure (vars, rhs)
+        pure $ CaseP m branches
   in parser <?> "case"
 
 parseHandle :: MonadicParsing m => m Tm'

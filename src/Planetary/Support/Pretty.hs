@@ -131,17 +131,14 @@ prettyTmPrec d = \case
       fmap (annotate Term  . prettyTmPrec 11) tms
     -- _ -> fillSep $ prettyTmPrec d <$> (tm : Foldable.toList spine)
 
-  Case uid scrutinee handlers -> vsep
+  Case scrutinee handlers -> vsep
     [ "case" <+> prettyTmPrec 0 scrutinee <+> "of"
     -- TODO: use align or hang?
-    , indent 2 $ vsep
-      [ pretty uid <> ":"
-      , indent 2 $ vsep $ flip fmap handlers $ \(names, body) -> fillSep
-        [ "|"
-        , angles $ fillSep $ "_" : fmap pretty names
-        , "->"
-        , prettyTmPrec 0 $ open (FreeVariable . (names !!)) body
-        ]
+    , indent 2 $ vsep $ flip fmap handlers $ \(names, body) -> fillSep
+      [ "|"
+      , angles $ fillSep $ "_" : fmap pretty names
+      , "->"
+      , prettyTmPrec 0 $ open (FreeVariable . (names !!)) body
       ]
     ]
 

@@ -229,12 +229,11 @@ check (DataConstructor uid row tms) (UVar i) = do
 --   let ty = DataTy uid valTysAct
 --   n =:= ty -- TODO doesn't seem like this should escape from unification
 -- CASE
-check (Case uid1 m rows) ty = do
+check (Case m rows) ty = do
   -- args :: (Vector (TyArg a))
-  DataTyU uid2 _args <- infer m
-  _ <- unify' (UidTyU uid1) uid2
+  DataTyU (UidTyU uid) _args <- infer m
 
-  dataIface <- dataInterface <$> lookupDataType uid1
+  dataIface <- dataInterface <$> lookupDataType uid
   let dataRows = fst <$> dataIface -- :: Vector (Vector ValTyI)
       dataRows' = unfreeze <$$> dataRows
   zipped <- strictZip CaseMismatch dataRows' rows

@@ -12,18 +12,14 @@ addColor = letrec
   addConstructor
     : {<Data> -> [Abort]<Data>}
     = \data -> case data of
-      Data:
-        -- man, this would be nicer with patterns
-        | <sum ctrs> -> case ctrs of
-          List:
-            | <cons ctr ctrs'> -> case ctrs' of
-              List:
-                | <cons ctr' ctrs''> -> case ctrs'' of
-                  List:
-                    | <cons _ _> ->
-                    | <nil>      -> ...
-                | <nil> -> throw
-            | <nil> -> throw
+      -- man, this would be nicer with patterns
+      | <sum ctrs> -> case ctrs of
+        | <cons ctr ctrs'> -> case ctrs' of
+          | <cons ctr' ctrs''> -> case ctrs'' of
+            | <cons _ _> ->
+            | <nil>      -> ...
+          | <nil> -> throw
+        | <nil> -> throw
 
 reflection = letrec
   reified
@@ -45,7 +41,6 @@ reflection = letrec
   reified
     : {<Fix <ListF> <Int>>}
     = \-> case reify typechecked of
-      List:
-        | <nil> -> <List.0>
-        | <cons l ls> -> <List.1 (length l) ...>
+      | <nil> -> <List.0>
+      | <cons l ls> -> <List.1 (length l) ...>
 |]

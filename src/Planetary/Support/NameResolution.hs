@@ -146,7 +146,7 @@ closeTm' = anaM $ \case
         (names, kName,) <$> withTmVars (kName : names) (closeTm' tm))
     vHandler' <- withTmVars [vName] (closeTm' vHandler)
     pure $ Handle_ tm' adj (Peg ab codom) handlers' (vName, vHandler')
-  Case uid tm branches -> Case_ uid
+  Case tm branches -> Case_
     <$> closeTm' tm
     <*> traverse (\(names, branch) -> (names,) <$> withTmVars names (closeTm' branch)) branches
 
@@ -188,10 +188,7 @@ convertTm = cataM $ \case
     pure $ Letrec names defns' body
   Application_ f (MixedSpine tms vals) ->
     pure $ Application f (MixedSpine tms vals)
-  Case_ uid tm branches -> Case
-    <$> lookupUid uid
-    <*> pure tm
-    <*> pure branches
+  Case_ tm branches -> pure $ Case tm branches
   Handle_ tm adj (Peg ab codom) handlers (vName, vHandler) -> Handle tm
     <$> convertAdjustment adj
     <*> (Peg <$> convertTy ab <*> convertTy codom)

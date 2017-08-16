@@ -253,17 +253,17 @@ step st@(EvalState focus env cont fwdCont done) = case focus of
   -- * same with case scrutinee
 
   -- M-Case
-  Case _uid1 (DataConstructor _uid2 rowNum args) rows -> do
+  Case (DataConstructor _uid rowNum args) rows -> do
     row <- rows ^? ix rowNum . _2 ?? IndexErr
     logReturnState "M-Case" $ st
       -- XXX do we actually bind n args or 1 data constr?
       & evalFocus .~ open (args !!) row
       & pushBoundVars args
 
-  Case uid tm rows ->
+  Case tm rows ->
     logReturnState "Unnamed (Case)" $ st
       & evalFocus .~ tm
-      & mkFrame (Case uid Hole rows)
+      & mkFrame (Case Hole rows)
 
   -- We replace all uses of `return V` with an `isValue` check
   val | isValue val -> case cont of

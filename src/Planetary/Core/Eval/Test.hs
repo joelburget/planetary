@@ -116,7 +116,7 @@ unitTests  =
       false = bool 0
       true = bool 1
 
-      not tm = CaseP boolId tm
+      not tm = CaseP tm
         [ ([], true)
         , ([], false)
         ]
@@ -220,14 +220,12 @@ unitTests  =
                letrec
                  even : forall. {<Fix NatF> -> <Bool>}
                       = \n -> case n of
-                        NatF:
-                          | <z>       -> <Bool.1> -- true
-                          | <succ n'> -> odd n'
+                        | <z>       -> <Bool.1> -- true
+                        | <succ n'> -> odd n'
                  odd : forall. {<Fix NatF> -> <Bool>}
                      = \m -> case m of
-                       NatF:
-                         | <z>       -> <Bool.0> -- false
-                         | <succ m'> -> even m'
+                       | <z>       -> <Bool.0> -- false
+                       | <succ m'> -> even m'
                in body
              |]
 

@@ -185,11 +185,10 @@ unitTests = scope "parsing" $ tests
 
   , let defn = T.unlines
           [ "case x of"
-          , "  e829515d5:"
-          , "    | <_> -> y"
-          , "    | <_ a b c> -> z"
+          , "  | <_> -> y"
+          , "  | <_ a b c> -> z"
           ]
-        expected = CaseP "e829515d5" (FV "x")
+        expected = CaseP (FV "x")
           [ ([], FV "y")
           , (["a", "b", "c"], FV "z")
           ]

@@ -80,7 +80,7 @@ data Tm uid tyvar tmvar tm =
 
   -- Continuation
   | <application <vector tm>
-  | <case uid <vector <tuple <vector text> tm>>
+  | <case <vector <tuple <vector text> tm>>
   | <handle <adjustment uid tyvar> <Ty uid tyvar> <tm uid tyvar tmvar> tm>
   | <let <polytype uid tyvar> text tm>
 

@@ -172,26 +172,23 @@ main = letrec
         = \log buffer x -> handle x : X with
           LookAhead:
             | <peek -> k> -> case buffer of
-              Buffer:
-                | <hold c> -> input <Buffer.0 c> (k c)
-                | <empty> -> on Console.0! (charHandler1
-                  (rollback l)                                  -- '\b'
-                  (\c -> input <LogF.1 l k> <Buffer.0 c> (k c)) -- other char
-                  )
+              | <hold c> -> input <Buffer.0 c> (k c)
+              | <empty> -> on Console.0! (charHandler1
+                (rollback l)                                  -- '\b'
+                (\c -> input <LogF.1 l k> <Buffer.0 c> (k c)) -- other char
+                )
             | <accept -> k> -> case buffer of
-              Buffer:
-                | <hold c> -> snd (Console.1 c) (input <LogF.2 l> empty (k unit))
-                | <empty>  -> input l empty (k unit)
+              | <hold c> -> snd (Console.1 c) (input <LogF.2 l> empty (k unit))
+              | <empty>  -> input l empty (k unit)
           Abort:
             | <aborting -> k> -> rollback log
           | x -> x
 
   rollback : forall X. {<LogF [<LookAhead>, <Abort>, <Console>] X> -> [<Console>]X}
            = \x -> case x of
-    LogF:
-      | <start p> -> parse p
-      | <ouched l> -> snd (textMap Console.1 eraseCharLit) (rollback l)
-      | <inched l k> -> input l empty (k LookAhead.0!)
+    | <start p> -> parse p
+    | <ouched l> -> snd (textMap Console.1 eraseCharLit) (rollback l)
+    | <inched l k> -> input l empty (k LookAhead.0!)
 
   parse : forall X. {{[<LookAhead>, <Abort>, <Console>]X} -> [<Console>]X}
         = \p -> input <LogF.0 p> empty p!
@@ -219,9 +216,8 @@ fns = letrec
 
   if_ : forall X. {<Bool> -> {X} -> {X} -> X}
       = \val t f -> case val of
-        Bool:
-          | <tt> -> t!
-          | <ff> -> f!
+        | <tt> -> t!
+        | <ff> -> f!
 
   -- TODO: consider why Abort doesn't appear in the signature
   -- catch : forall X. {<Abort>X -> {X} -> X}
@@ -247,11 +243,10 @@ pipe = letrec
                | <receive -> r> -> pipe (s unit) (r x)
              | y -> y
          | x -> case x of
-           Unit:
-             | <unit> -> handle y! : [e, <Abort>] Y with
-               Receive X:
-                 | <aborting -> r> -> abort!
-               | y -> y
+           | <unit> -> handle y! : [e, <Abort>] Y with
+             Receive X:
+               | <aborting -> r> -> abort!
+             | y -> y
 in pipe
 |]
 

@@ -257,7 +257,7 @@ data TmF uid tm
   -- We pair each of these with 'Cut' to produce a computation. We also push
   -- these on a stack for a (call-by-push-value-esque) evaluation.
   | Application_ !tm !(Spine tm)
-  | Case_ !uid !tm !(Vector (Vector Text, tm))
+  | Case_ !tm !(Vector (Vector Text, tm))
   | Handle_
     !tm
     !(Adjustment uid)
@@ -280,7 +280,7 @@ pattern DataConstructor uid row tms           = Fix (DataConstructor_ uid row tm
 pattern ForeignValue uid1 rows uid2           = Fix (ForeignValue_ uid1 rows uid2)
 pattern Lambda names body                     = Fix (Lambda_ names body)
 pattern Application tm spine                  = Fix (Application_ tm spine)
-pattern Case uid tm rows                      = Fix (Case_ uid tm rows)
+pattern Case tm rows                          = Fix (Case_ tm rows)
 pattern Handle tm adj peg handlers valHandler = Fix (Handle_ tm adj peg handlers valHandler)
 pattern Let body pty name rhs                 = Fix (Let_ body pty name rhs)
 pattern FreeVariable name                     = Fix (FreeVariable_ name)
@@ -431,8 +431,8 @@ shiftTraverse f = go 0 where
     let ix' = succ ix
     in Letrec names (defns & traverse . _2 %~ go ix') (go ix' body)
   go ix (Application tm spine) = Application (go ix tm) (go ix <$> spine)
-  go ix (Case uid tm rows) =
-    Case uid (go ix tm) (rows & traverse . _2 %~ go (succ ix))
+  go ix (Case tm rows) =
+    Case (go ix tm) (rows & traverse . _2 %~ go (succ ix))
   go ix (Handle tm adj peg handlers (vName, vHandler)) =
     let handlers' =  (_3 %~ go (succ ix)) <$$> handlers
     in Handle (go ix tm) adj peg handlers' (vName, go (succ ix) vHandler)
@@ -528,7 +528,7 @@ pattern DataConstructorIpld uid row tms = T3 "DataConstructor" uid row tms
 pattern ForeignValueIpld uid1 tys uid2  = T3 "ForeignValue" uid1 tys uid2
 pattern LambdaIpld body                 = T1 "Lambda" body
 pattern ApplicationIpld tm spine        = T2 "Application" tm spine
-pattern CaseIpld uid tm branches        = T3 "Case" uid tm branches
+pattern CaseIpld tm branches            = T2 "Case" tm branches
 pattern HandleIpld tm adj peg handlers valHandler
   = T5 "Handle" tm adj peg handlers valHandler
 pattern LetIpld body pty scope          = T3 "LetIpld" body pty scope
@@ -546,7 +546,7 @@ instance IsUid uid => IsIpld (Tm uid) where
     ForeignValue uid1 tys uid2            -> ForeignValueIpld uid1 tys uid2
     Lambda _names body                    -> LambdaIpld body
     Application tm spine                  -> ApplicationIpld tm spine
-    Case uid tm branches                  -> CaseIpld uid tm branches
+    Case tm branches                      -> CaseIpld tm branches
     Handle tm adj peg handlers valHandler
       -> HandleIpld tm adj peg handlers valHandler
     Let body pty _name scope              -> LetIpld body pty scope
@@ -563,7 +563,7 @@ instance IsUid uid => IsIpld (Tm uid) where
     ForeignValueIpld uid1 tys uid2            -> Just $ ForeignValue uid1 tys uid2
     LambdaIpld body                           -> Just $ Lambda [] body
     ApplicationIpld tm spine                  -> Just $ Application tm spine
-    CaseIpld uid tm branches                  -> Just $ Case uid tm branches
+    CaseIpld tm branches                      -> Just $ Case tm branches
     HandleIpld tm adj peg handlers valHandler -> Just $
       Handle tm adj peg handlers valHandler
     LetIpld body pty scope                    -> Just $ Let body pty "" scope

@@ -60,30 +60,28 @@ pattern Lam names tm <- (unlam -> Just (names, tm)) where
   Lam vars body = lam vars body
 
 case_
-  :: uid
-  -> Tm uid
+  :: Tm uid
   -> Vector (Vector Text, Tm uid)
   -> Tm uid
-case_ uid tm tms =
+case_ tm tms =
   let f (vars, tm') = (vars, close (`elemIndex` vars) tm')
-  in Case uid tm (f <$> tms)
+  in Case tm (f <$> tms)
 
 uncase
   :: Tm uid
-  -> Maybe (uid, Tm uid, Vector (Vector Text, Tm uid))
-uncase (Case uid tm tms) =
+  -> Maybe (Tm uid, Vector (Vector Text, Tm uid))
+uncase (Case tm tms) =
   let f (vars, tm') = (vars, let vars' = FV <$> vars in open (vars' !!) tm')
-  in Just (uid, tm, f <$> tms)
+  in Just (tm, f <$> tms)
 uncase _ = Nothing
 
 pattern CaseP
   :: IsUid uid
-  => uid
-  -> Tm uid
+  => Tm uid
   -> Vector (Vector Text, Tm uid)
   -> Tm uid
-pattern CaseP uid tm tms <- (uncase -> Just (uid, tm, tms)) where
-  CaseP vars tm body = case_ vars tm body
+pattern CaseP tm tms <- (uncase -> Just (tm, tms)) where
+  CaseP tm tms = case_ tm tms
 
 handle
   :: forall uid.

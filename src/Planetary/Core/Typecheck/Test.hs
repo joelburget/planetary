@@ -175,9 +175,8 @@ unitTests = scope "typechecking" $ tests
               ]
             Right tm = resolveTm resolutionState $ forceTm [text|
               case val of
-                defg:
-                  | <_ x y z> -> x
-                  | <_ y z> -> z
+                | <_ x y z> -> x
+                | <_ y z> -> z
             |]
             tm' = substitute "val" val tm
             -- decls = forceDeclarations [text|

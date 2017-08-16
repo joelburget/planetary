@@ -13,11 +13,10 @@ data ExprF Expr =
 semantics = letrec
   eval : forall. {<Expr <Expr>> -> <Syntax <Syntax>>}
        = \expr -> case expr of
-         Expr:
-           | <nat n> -> <foreignTm n>
-           | <str str> -> <foreignTm str>
-           | <addExpr l r> -> <cut <apply <vector l r>> <value <foreignTm add>>
-           | <catExpr l r> -> <cut <apply <vector l r>> <value <foreignTm cat>>
+         | <nat n> -> <foreignTm n>
+         | <str str> -> <foreignTm str>
+         | <addExpr l r> -> <cut <apply <vector l r>> <value <foreignTm add>>
+         | <catExpr l r> -> <cut <apply <vector l r>> <value <foreignTm cat>>
 |]
 
 -- TODO:
