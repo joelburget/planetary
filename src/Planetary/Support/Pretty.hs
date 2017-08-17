@@ -158,7 +158,7 @@ prettyTmPrec d = \case
     in vsep
          [ "Handle" <+> prettyTmPrec 0 tm <+> colon <+> prettyTyPrec 0 peg <+> "with"
          , indent 2 (align $ vsep handlers')
-         , fillSep
+         , indent 2 $ fillSep
            [ "|"
            , pretty vName
            , "->"
@@ -179,14 +179,15 @@ prettyTmPrec d = \case
 
   Letrec names lambdas body ->
     let rowInfo = zip names lambdas
+        opener = open (FreeVariable . (names !!))
         rows = flip fmap rowInfo $ \(name, (ty, lam)) -> vsep
           [ pretty name <+> colon <+> prettyPolytype 0 ty
-          , indent 2 $ "=" <+> prettyTmPrec 0 lam
+          , indent 2 $ "=" <+> prettyTmPrec 0 (opener lam)
           ]
     in vsep
          [ "letrec"
          , indent 2 $ vsep rows
-         , "in" <+> prettyTmPrec 0 body
+         , "in" <+> prettyTmPrec 0 (opener body)
          ]
 
   Hole -> "_"
