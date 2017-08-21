@@ -55,17 +55,16 @@ unitTests =
         | AppN _ [tm1, tm2] <- st ^. evalFocus = do
           -- XXX testingEnv hack. this is really offensive
           let logger = mkLogger T.putStrLn
-          (Right v1, _) <- liftIO $ run testingEnv logger (st & evalFocus .~ tm1)
-          (Right v2, _) <- liftIO $ run testingEnv logger (st & evalFocus .~ tm2)
+          Right v1 <- liftIO $ run testingHandlers logger (st & evalFocus .~ tm1)
+          Right v2 <- liftIO $ run testingHandlers logger (st & evalFocus .~ tm2)
           if v1 == v2
              then pure $ st & evalFocus .~ unit
              else throw $ NotGood v1 v2
       checkEqualImpl _ = throwError FailedForeignFun
 
-      testingEnv :: AmbientEnv
-      testingEnv = AmbientEnv
+      testingHandlers :: AmbientHandlers
+      testingHandlers = AmbientHandlers
         [ (checkingOpsId, [ checkEqualImpl ]) ]
-        []
 
       checkEqual = Command checkingOpsId 0
   in scope "frank examples" $ tests
@@ -75,9 +74,6 @@ unitTests =
        , scope "state" $ tests []
        , scope "next" $ tests
          [ let
-               emptyEnv :: AmbientEnv
-               emptyEnv = AmbientEnv mempty mempty
-
                test = forceTm [text|
                  letrec
                    -- note: not `forall S X. {S -> <State S>X -> X}`
@@ -98,6 +94,9 @@ unitTests =
                         = \-> fst get! (put (add get! zero))
 
                    index : forall. {<List X> -> <List <Pair <Int> X>>}
+                         -- XXX what's evaluation order here -- we need state
+                         -- to run first before its computations to set up the
+                         -- handler
                          = \xs -> state zero (map (\x -> <Pair.0 next! x>) xs)
                          --                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -160,7 +159,7 @@ unitTests =
                     [ ""
                     , prettyTmPrec 11 test
                     ]
-                  runTest "next one" testingEnv test'' (Right unit)
+                  runTest "next one" testingHandlers emptyStore test'' (Right unit)
          ]
 
        -- Example from "Continuation Passing Style for Effect Handlers"
@@ -214,5 +213,5 @@ unitTests =
              |]
            in do
              skip
-             runTest "drunk toss TODO" undefined undefined undefined
+             runTest "drunk toss TODO" undefined undefined undefined undefined
        ]

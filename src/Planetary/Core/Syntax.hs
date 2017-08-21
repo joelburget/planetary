@@ -274,22 +274,40 @@ data TmF uid tm
 
   -- TODO: can we get rid of this in the substitution-based semantics?
   | Hole_ -- ^ Used at execution only
+
+  | K0_
   deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
 
-pattern DataConstructor uid row tms           = Fix (DataConstructor_ uid row tms)
-pattern ForeignValue uid1 rows uid2           = Fix (ForeignValue_ uid1 rows uid2)
-pattern Lambda names body                     = Fix (Lambda_ names body)
-pattern Application tm spine                  = Fix (Application_ tm spine)
-pattern Case tm rows                          = Fix (Case_ tm rows)
-pattern Handle tm adj peg handlers valHandler = Fix (Handle_ tm adj peg handlers valHandler)
-pattern Let body pty name rhs                 = Fix (Let_ body pty name rhs)
-pattern FreeVariable name                     = Fix (FreeVariable_ name)
-pattern BoundVariable lvl ix                  = Fix (BoundVariable_ lvl ix)
-pattern InstantiatePolyVar tm tyargs          = Fix (InstantiatePolyVar_ tm tyargs)
-pattern Command uid row                       = Fix (Command_ uid row)
-pattern Annotation tm ty                      = Fix (Annotation_ tm ty)
-pattern Letrec names lambdas body             = Fix (Letrec_ names lambdas body)
-pattern Hole                                  = Fix Hole_
+pattern DataConstructor uid row tms
+  = Fix (DataConstructor_ uid row tms)
+pattern ForeignValue uid1 rows uid2
+  = Fix (ForeignValue_ uid1 rows uid2)
+pattern Lambda names body
+  = Fix (Lambda_ names body)
+pattern Application tm spine
+  = Fix (Application_ tm spine)
+pattern Case tm rows
+  = Fix (Case_ tm rows)
+pattern Handle tm adj peg handlers valHandler
+  = Fix (Handle_ tm adj peg handlers valHandler)
+pattern Let body pty name rhs
+  = Fix (Let_ body pty name rhs)
+pattern FreeVariable name
+  = Fix (FreeVariable_ name)
+pattern BoundVariable lvl ix
+  = Fix (BoundVariable_ lvl ix)
+pattern InstantiatePolyVar tm tyargs
+  = Fix (InstantiatePolyVar_ tm tyargs)
+pattern Command uid row
+  = Fix (Command_ uid row)
+pattern Annotation tm ty
+  = Fix (Annotation_ tm ty)
+pattern Letrec names lambdas body
+  = Fix (Letrec_ names lambdas body)
+pattern Hole
+  = Fix Hole_
+pattern K0
+  = Fix K0_
 
 data Spine tm = MixedSpine
   ![tm] -- ^ non-normalized terms
@@ -437,6 +455,8 @@ shiftTraverse f = go 0 where
     let handlers' =  (_3 %~ go (succ ix)) <$$> handlers
     in Handle (go ix tm) adj peg handlers' (vName, go (succ ix) vHandler)
   go ix (Let body pty name rhs) = Let (go ix body) pty name (go (succ ix) rhs)
+  go _ix Hole = Hole
+  go _ix K0   = K0
   go _ _ = error "impossible: shiftTraverse"
 
 -- | Exit a scope, binding some free variables.

@@ -96,9 +96,11 @@ externals =
   , (charHandlerId, [ charHandler1, charHandler2 ])
   ]
 
-env :: AmbientEnv
-env = AmbientEnv
-  externals
+ambientHandlers :: AmbientHandlers
+ambientHandlers = AmbientHandlers externals
+
+store :: ValueStore
+store =
   [ mkForeign @Text "\b \b"
   ]
 

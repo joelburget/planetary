@@ -11,6 +11,8 @@ import Data.Text.Encoding (decodeUtf8)
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Terminal
 
+import Data.Either (rights)
+
 import Planetary.Core
 
 data Ann = Highlighted | Error | Plain | Value | Term
@@ -23,15 +25,28 @@ annToAnsi = \case
   Value       -> colorDull Green
   Term        -> color Magenta
 
-prettyEnv :: Stack [TmI] -> Doc Ann
-prettyEnv stk =
+prettyEnv :: Doc Ann -> Stack [TmI] -> Doc Ann
+prettyEnv name stk =
   let
       lineFormatter i tm = pretty i <> ": " <> prettyTmPrec 0 tm
       stkLines = vsep . imap lineFormatter <$> stk
   in vsep
-       [ annotate Highlighted "env:"
+       [ annotate Highlighted name
        , indent 2 (lineVsep "line" stkLines)
        ]
+
+prettyPureContFrame :: PureContinuationFrame -> Doc Ann
+prettyPureContFrame (Administrative tm) = "* Administrative " <> prettyTmPrec 11 tm
+prettyPureContFrame (Bindings isletrec bs) = sep
+  [ "* Bindings" <+> pretty (show isletrec)
+  , indent 2 $ list $ prettyTmPrec 0 <$> bs
+  ]
+
+prettyPureCont :: Doc Ann -> Stack PureContinuationFrame -> Doc Ann
+prettyPureCont name stk = vsep
+  [ annotate Highlighted name
+  , indent 2 $ vsep $ prettyPureContFrame <$> stk
+  ]
 
 lineVsep :: Text -> [Doc ann] -> Doc ann
 lineVsep head =
@@ -41,10 +56,12 @@ lineVsep head =
         ]
   in vsep . intersperse "" . imap lineFormatter
 
--- TODO show pure continuation
 prettyCont :: Doc Ann -> Stack ContinuationFrame -> Doc Ann
 prettyCont name stk =
-  let prettyContFrame (ContinuationFrame _stk handler) = prettyTmPrec 0 handler
+  let prettyContFrame (ContinuationFrame pureCont handler) = vsep
+        [ "handler: " <> prettyTmPrec 0 handler
+        , prettyPureCont "pure cont:" pureCont
+        ]
       lines = prettyContFrame <$> stk
   in vsep
        [ annotate Highlighted name
@@ -52,11 +69,11 @@ prettyCont name stk =
        ]
 
 prettyEvalState :: EvalState -> Doc Ann
-prettyEvalState (EvalState focus env cont fwdCont done) = vsep
+prettyEvalState (EvalState focus env _store cont fwdCont done) = vsep
   [ "EvalState" <> if done then " (done)" else ""
   , indent 2 $ vsep
     [ annotate Highlighted "focus:" <+> prettyTmPrec 0 focus
-    , prettyEnv env
+    , prettyEnv "env:" env
     , prettyCont "cont:" cont
     , case fwdCont of
         Nothing       -> mempty
@@ -191,6 +208,7 @@ prettyTmPrec d = \case
          ]
 
   Hole -> "_"
+  K0   -> "K0"
 
 instance Pretty Cid where
   pretty = pretty . Text.cons '…' . Text.takeEnd 5 . decodeUtf8 . compact

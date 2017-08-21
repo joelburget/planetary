@@ -34,3 +34,13 @@ Reliable builds
 We envision an ecosystem of interoperable languages. A community of language experimentation. Haskell language pragmas or babel, but lighter-weight.
 
 https://youtu.be/_ahvzDzKdB0
+
+## Differences from Core Frank
+
+We don't have an official syntax, however for testing we use a syntax similar to the one from the paper but more limited in some ways.
+
+We add fixed points so we can typecheck inductive data.
+
+We add a foreign value constructor.
+
+Case terms hold the cid they scrutinize. TODO: why? couldn't this be removed?

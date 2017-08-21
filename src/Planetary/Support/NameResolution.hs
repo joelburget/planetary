@@ -148,7 +148,9 @@ closeTm' = anaM $ \case
     pure $ Handle_ tm' adj (Peg ab codom) handlers' (vName, vHandler')
   Case tm branches -> Case_
     <$> closeTm' tm
-    <*> traverse (\(names, branch) -> (names,) <$> withTmVars names (closeTm' branch)) branches
+    <*> traverse
+      (\(names, branch) -> (names,) <$> withTmVars names (closeTm' branch))
+      branches
 
   Let body pty name rhs -> Let_
     <$> closeTm' body
@@ -182,9 +184,7 @@ convertTm = cataM $ \case
   Command_ uid row -> Command <$> lookupUid uid <*> pure row
   Annotation_ tm ty -> Annotation tm <$> convertTy ty
   Letrec_ names defns body -> do
-    defns' <- forM defns $ \(pty, tm) -> (,)
-      <$> convertPolytype pty
-      <*> pure tm
+    defns' <- forM defns $ \(pty, tm) -> (,tm) <$> convertPolytype pty
     pure $ Letrec names defns' body
   Application_ f (MixedSpine tms vals) ->
     pure $ Application f (MixedSpine tms vals)

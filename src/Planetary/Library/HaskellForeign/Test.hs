@@ -21,9 +21,8 @@ import Planetary.Support.Ids
 import Planetary.Support.NameResolution
 import Planetary.Support.Parser
 
-simpleEnv :: AmbientEnv
-simpleEnv = AmbientEnv
-  haskellOracles
+store :: ValueStore
+store =
   [ mkForeign @Int 1
   , mkForeign @Int 2
   , mkForeign @Int 4
@@ -49,19 +48,22 @@ unitTests =
 
       env = emptyTypingEnv & typingInterfaces .~ interfaceTable
 
+      simpleEnvStepTest desc
+        = stepTest desc (AmbientHandlers haskellOracles) store
+
    in scope "haskell foreign" $ tests
        [ scope "evaluation" $ tests
-         [ stepTest "1 + 1" simpleEnv 3
+         [ simpleEnvStepTest "1 + 1" 4
            -- [tmExp| add one one |]
            (add [one, one])
            (Right two)
-         , stepTest "2 + 2" simpleEnv 2
+         , simpleEnvStepTest "2 + 2" 4
            (add [two, two])
            (Right four)
-         , stepTest "2 - 1" simpleEnv 2
+         , simpleEnvStepTest "2 - 1" 4
            (sub [two, one])
            (Right one)
-         , stepTest "\"hello \" <> \"world\"" simpleEnv 2
+         , simpleEnvStepTest "\"hello \" <> \"world\"" 4
            (cat [hello, world])
            (Right helloWorld)
          ]
