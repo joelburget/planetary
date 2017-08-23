@@ -16,7 +16,7 @@ import Data.Text (Text)
 import NeatInterpolation
 import Network.IPLD as IPLD
 import Prelude hiding (not)
-import EasyTest hiding (bool, run')
+import EasyTest hiding (bool, run)
 
 import Planetary.Core hiding (logIncomplete, logReturnState)
 import Planetary.Support.Ids hiding (boolId) -- XXX fix this
@@ -46,11 +46,6 @@ noteFailureState initState result expected = do
     ]
   fail "failure: see above"
 
-mkEmptyState :: ValueStore -> TmI -> EvalState
-mkEmptyState store tm =
-  let k0 = ContinuationFrame [] K0
-  in EvalState tm [] store [k0] Nothing False
-
 putLogs :: Bool
 putLogs = True
 
@@ -70,7 +65,7 @@ stepTest
 stepTest name handlers store steps tm expected =
   let applications :: [EvalM EvalState]
       applications = iterate (step =<<) (pure initState)
-      initState = mkEmptyState store tm
+      initState = initEvalState store tm
       actual = applications !! steps
 
   in scope name $ do
@@ -96,9 +91,9 @@ runTest
   -> Either Err TmI
   -> Test ()
 runTest name handlers store tm expected = scope name $ do
-  let initState = mkEmptyState store tm
+  let initState = initEvalState store tm
   logger <- mkLogger <$> asks note_
-  result <- liftIO $ run' handlers logger initState
+  result <- liftIO $ run handlers logger initState
   if right _evalFocus result == expected
      then ok
      else noteFailureState initState result expected
@@ -128,31 +123,29 @@ unitTests  =
       --   , ([], zero)
       --   ]
 
-      emptyEnvStepTest desc = stepTest desc noAmbientHandlers emptyStore
+      evalEnvRunTest desc = runTest desc noAmbientHandlers emptyStore
 
   in scope "evaluation" $ tests
        [ let x = BV 0 0
              -- tm = forceTm "(\y -> y) x"
              lam = Lam ["X"] x
          in scope "functions" $ tests
-            [ emptyEnvStepTest "application 1" 1 (AppN lam [x]) (Right x)
-            , emptyEnvStepTest "application 2" 1
+            [ evalEnvRunTest "application 1" (AppN lam [x]) (Right x)
+            , evalEnvRunTest "application 2"
               (AppT lam [x])
               (Right x)
             -- TODO: test further steps with bound variables
             ]
 
        , scope "case" $ tests
-         [ emptyEnvStepTest "case False of { False -> True; True -> False }"
-             1
+         [ evalEnvRunTest "case False of { False -> True; True -> False }"
              (not false)
              (Right true)
-         , emptyEnvStepTest "case True of { False -> True; True -> False }"
-             1
+         , evalEnvRunTest "case True of { False -> True; True -> False }"
              (not true)
              (Right false)
 
-         , emptyEnvStepTest "not false" 1
+         , evalEnvRunTest "not false"
            (not false)
            (Right true)
          ]
@@ -162,9 +155,9 @@ unitTests  =
              -- TODO: remove shadowing
              tm = close1 "x" $ let_ "x" ty false (FV"x")
          in scope "let" $ tests
-            [ emptyEnvStepTest "let x = false in x" 2 tm
+            [ evalEnvRunTest "let x = false in x" tm
               (Right false)
-            , emptyEnvStepTest "let x = false in x" 2 tm
+            , evalEnvRunTest "let x = false in x" tm
               (Right false)
             ]
 
@@ -193,7 +186,7 @@ unitTests  =
 
              abortCid = Frank.resolvedDecls ^?!
                globalCids . to HashMap.fromList . ix "Abort"
-             abort = Command abortCid 0
+             abort = AppN (Command abortCid 0) []
              handleAbort = substitute "x" abort handler''
          in scope "handle" $ tests
               -- [ runTest "handle val" handleVal (Right two)
@@ -218,8 +211,8 @@ unitTests  =
 --              |]
 
 --          in scope "let x = false in let y = not x in not y" $ tests
---               [ emptyEnvStepTest "tm"  12 tm  (Right false)
---               -- , emptyEnvStepTest "tm2" 3 tm2 (Right false)
+--               [ evalEnvRunTest "tm"  tm  (Right false)
+--               -- , evalEnvRunTest "tm2" tm2 (Right false)
 --               ]
 
        , let evenodd = forceTm [text|

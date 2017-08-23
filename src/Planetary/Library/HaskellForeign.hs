@@ -167,7 +167,7 @@ interfaceTable = _interfaces resolvedDecls
 
 lookupForeign :: IsIpld a => Cid -> ForeignM a
 lookupForeign cid = do
-  val <- gets (^? ix cid) >>= (?? IndexErr)
+  val <- gets (^? ix cid) >>= ifNotJust IndexErr
   case fromIpld val of
     Nothing -> throwError FailedIpldConversion
     Just i  -> pure i
@@ -181,16 +181,12 @@ writeForeign a = do
 
 -- XXX
 liftBinaryOp :: IsIpld s => (s -> s -> s) -> Handler
-liftBinaryOp op st = do
-  -- | Just (Administrative (AppN Hole [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2]))
-  --   <- st ^? evalCont . _head . pureContinuation . _head = do
-  traceShowM $ st ^. evalFwdCont
-  case st ^? evalFwdCont . _Just . _head . pureContinuation . _head of
-    Just (Administrative (AppN Hole [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2])) -> do
-      i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
-      i' <- writeForeign i
-      pure $ st & evalFocus .~ ForeignValue tyUid tySat i'
-    _ -> error "other"
+liftBinaryOp op st
+  | AppN _ [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2]
+    <- st ^. evalFocus = do
+    i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
+    i' <- writeForeign i
+    pure $ st & evalFocus .~ ForeignValue tyUid tySat i'
 liftBinaryOp _ st = traceTextM (layout (prettyEvalState st)) >> throwError FailedForeignFun
 
 -- XXX

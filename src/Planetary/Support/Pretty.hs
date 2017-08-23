@@ -14,6 +14,7 @@ import Data.Text.Prettyprint.Doc.Render.Terminal
 import Data.Either (rights)
 
 import Planetary.Core
+import Planetary.Util
 
 data Ann = Highlighted | Error | Plain | Value | Term
 
@@ -36,11 +37,7 @@ prettyEnv name stk =
        ]
 
 prettyPureContFrame :: PureContinuationFrame -> Doc Ann
-prettyPureContFrame (Administrative tm) = "* Administrative " <> prettyTmPrec 11 tm
-prettyPureContFrame (Bindings isletrec bs) = sep
-  [ "* Bindings" <+> pretty (show isletrec)
-  , indent 2 $ list $ prettyTmPrec 0 <$> bs
-  ]
+prettyPureContFrame (PFrame tm _env) = "* PFrame " <> prettyTmPrec 11 tm
 
 prettyPureCont :: Doc Ann -> Stack PureContinuationFrame -> Doc Ann
 prettyPureCont name stk = vsep
@@ -58,10 +55,11 @@ lineVsep head =
 
 prettyCont :: Doc Ann -> Stack ContinuationFrame -> Doc Ann
 prettyCont name stk =
-  let prettyContFrame (ContinuationFrame pureCont handler) = vsep
+  let prettyContFrame (ContinuationFrame pureCont (Handler handler _env)) = vsep
         [ "handler: " <> prettyTmPrec 0 handler
         , prettyPureCont "pure cont:" pureCont
         ]
+      prettyContFrame (ContinuationFrame _pureContinuation K0) = "k0"
       lines = prettyContFrame <$> stk
   in vsep
        [ annotate Highlighted name
@@ -134,7 +132,7 @@ prettyTmPrec d = \case
   ForeignValue ty args locator -> showParens d $ fillSep $
     let d' = if length args > 1 then 11 else 0
     in "Foreign @" <> pretty ty : (prettyTyPrec d' <$> args) ++ [pretty locator]
-  Lambda names body ->
+  Lambda names body -> showParens d $
     "\\" <> fillSep (pretty <$> names) <+> "->" <+>
       prettyTmPrec 0 (open (FreeVariable . (names !!)) body)
   Command uid row -> pretty uid <> "." <> pretty row
@@ -208,7 +206,7 @@ prettyTmPrec d = \case
          ]
 
   Hole -> "_"
-  K0   -> "K0"
+  Closure env tm -> showParens d $ "Closure … " <> prettyTmPrec 11 tm
 
 instance Pretty Cid where
   pretty = pretty . Text.cons '…' . Text.takeEnd 5 . decodeUtf8 . compact

@@ -8,6 +8,7 @@ module Planetary.Util
   , strictZip
   , withState'
   , localState
+  , ifNotJust
   , (??)
   , (<$$>)
   , (<&&>)
@@ -71,6 +72,9 @@ infix 0 ??
 (??) :: MonadError e m => Maybe a -> e -> m a
 (Just a) ?? _  = pure a
 Nothing ?? err = throwError err
+
+ifNotJust :: MonadError e m => e -> Maybe a -> m a
+ifNotJust = flip (??)
 
 infixl 4 <$$>
 

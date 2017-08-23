@@ -53,7 +53,7 @@ unitTests =
 
    in scope "haskell foreign" $ tests
        [ scope "evaluation" $ tests
-         [ simpleEnvStepTest "1 + 1" 4
+         [ simpleEnvStepTest "1 + 1" 10
            -- [tmExp| add one one |]
            (add [one, one])
            (Right two)

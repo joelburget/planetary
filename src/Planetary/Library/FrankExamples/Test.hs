@@ -55,8 +55,10 @@ unitTests =
         | AppN _ [tm1, tm2] <- st ^. evalFocus = do
           -- XXX testingEnv hack. this is really offensive
           let logger = mkLogger T.putStrLn
-          Right v1 <- liftIO $ run testingHandlers logger (st & evalFocus .~ tm1)
-          Right v2 <- liftIO $ run testingHandlers logger (st & evalFocus .~ tm2)
+          Right st1 <- liftIO $ run testingHandlers logger (st & evalFocus .~ tm1)
+          Right st2 <- liftIO $ run testingHandlers logger (st & evalFocus .~ tm2)
+          let v1 = st1 ^. evalFocus
+              v2 = st2 ^. evalFocus
           if v1 == v2
              then pure $ st & evalFocus .~ unit
              else throw $ NotGood v1 v2

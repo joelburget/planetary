@@ -252,10 +252,7 @@ data TmF uid tm
   | Command_            !uid           !Row
   | Annotation_         !tm            !(ValTy uid)
 
-  -- Continuation:
-  --
-  -- We pair each of these with 'Cut' to produce a computation. We also push
-  -- these on a stack for a (call-by-push-value-esque) evaluation.
+  -- Computation:
   | Application_ !tm !(Spine tm)
   | Case_ !tm !(Vector (Vector Text, tm))
   | Handle_
@@ -274,8 +271,7 @@ data TmF uid tm
 
   -- TODO: can we get rid of this in the substitution-based semantics?
   | Hole_ -- ^ Used at execution only
-
-  | K0_
+  | Closure_ !(Stack [tm]) !tm
   deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
 
 pattern DataConstructor uid row tms
@@ -306,8 +302,8 @@ pattern Letrec names lambdas body
   = Fix (Letrec_ names lambdas body)
 pattern Hole
   = Fix Hole_
-pattern K0
-  = Fix K0_
+pattern Closure env tm
+  = Fix (Closure_ env tm)
 
 data Spine tm = MixedSpine
   ![tm] -- ^ non-normalized terms
@@ -456,7 +452,7 @@ shiftTraverse f = go 0 where
     in Handle (go ix tm) adj peg handlers' (vName, go (succ ix) vHandler)
   go ix (Let body pty name rhs) = Let (go ix body) pty name (go (succ ix) rhs)
   go _ix Hole = Hole
-  go _ix K0   = K0
+  -- go ix (Closure env tm) = Closure env
   go _ _ = error "impossible: shiftTraverse"
 
 -- | Exit a scope, binding some free variables.
