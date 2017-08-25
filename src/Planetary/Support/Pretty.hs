@@ -6,7 +6,7 @@ import Control.Lens
 import Data.List (intersperse)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Network.IPLD hiding (Row)
+import Network.IPLD hiding (Row, Value)
 import Data.Text.Encoding (decodeUtf8)
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Terminal
@@ -26,10 +26,10 @@ annToAnsi = \case
   Value       -> colorDull Green
   Term        -> color Magenta
 
-prettyEnv :: Doc Ann -> Stack [TmI] -> Doc Ann
+prettyEnv :: Doc Ann -> Stack [Value] -> Doc Ann
 prettyEnv name stk =
   let
-      lineFormatter i tm = pretty i <> ": " <> prettyTmPrec 0 tm
+      lineFormatter i tm = pretty i <> ": " <> prettyValuePrec 0 tm
       stkLines = vsep . imap lineFormatter <$> stk
   in vsep
        [ annotate Highlighted name
@@ -39,11 +39,15 @@ prettyEnv name stk =
 prettyPureContFrame :: PureContinuationFrame -> Doc Ann
 prettyPureContFrame (PFrame tm _env) = "* PFrame " <> prettyTmPrec 11 tm
 
-prettyPureCont :: Doc Ann -> Stack PureContinuationFrame -> Doc Ann
-prettyPureCont name stk = vsep
-  [ annotate Highlighted name
-  , indent 2 $ vsep $ prettyPureContFrame <$> stk
-  ]
+prettyPureCont :: Doc Ann -> Stack (Either PureContinuationFrame AdministrativeFrame) -> Doc Ann
+prettyPureCont name stk =
+  let pretty' = \case
+        Left pureCont -> prettyPureContFrame pureCont
+        Right administrative -> "TODO: Administrative"
+  in vsep
+       [ annotate Highlighted name
+       , indent 2 $ vsep $ pretty' <$> stk
+       ]
 
 lineVsep :: Text -> [Doc ann] -> Doc ann
 lineVsep head =
@@ -67,8 +71,10 @@ prettyCont name stk =
        ]
 
 prettyEvalState :: EvalState -> Doc Ann
-prettyEvalState (EvalState focus env _store cont fwdCont done) = vsep
-  [ "EvalState" <> if done then " (done)" else ""
+prettyEvalState (EvalState _focus _env _store _cont _fwdCont (Just val))
+  = "EvalState (done)" <+> prettyValuePrec 0 val
+prettyEvalState (EvalState focus env _store cont fwdCont Nothing) = vsep
+  [ "EvalState"
   , indent 2 $ vsep
     [ annotate Highlighted "focus:" <+> prettyTmPrec 0 focus
     , prettyEnv "env:" env
@@ -120,6 +126,17 @@ prettyPolytype d (Polytype binders val) =
 
 showParens :: Int -> Doc ann -> Doc ann
 showParens i = if i > 10 then parens else id
+
+prettyValuePrec :: Int -> Value -> Doc Ann
+prettyValuePrec d = \case
+  Closure env tm -> "TODO: pretty closure"
+  Continuation frames -> "TODO: pretty continuation"
+  DataConstructorV uid row args -> angles $ fillSep $
+    let d' = if length args > 1 then 11 else 0
+    in (pretty uid <> "." <> pretty row) : (prettyValuePrec d' <$> args)
+  ForeignValueV ty args locator -> showParens d $ fillSep $
+    let d' = if length args > 1 then 11 else 0
+    in "Foreign @" <> pretty ty : (prettyTyPrec d' <$> args) ++ [pretty locator]
 
 prettyTmPrec :: (IsUid uid, Pretty uid) => Int -> Tm uid -> Doc Ann
 prettyTmPrec d = \case
@@ -206,7 +223,6 @@ prettyTmPrec d = \case
          ]
 
   Hole -> "_"
-  Closure env tm -> showParens d $ "Closure … " <> prettyTmPrec 11 tm
 
 instance Pretty Cid where
   pretty = pretty . Text.cons '…' . Text.takeEnd 5 . decodeUtf8 . compact

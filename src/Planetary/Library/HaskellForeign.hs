@@ -6,6 +6,7 @@
 {-# language TypeFamilies #-}
 module Planetary.Library.HaskellForeign
   ( mkForeign
+  , mkForeignVal
   , mkForeignTm
   , lookupForeign
   , writeForeign
@@ -33,7 +34,8 @@ import Control.Monad.State
 import Data.Semigroup ((<>))
 import Data.Text (Text)
 import NeatInterpolation
-import Network.IPLD as IPLD
+import qualified Network.IPLD as IPLD
+import Network.IPLD (Cid, IsIpld(..), valueCid)
 
 import Planetary.Core
 import Planetary.Support.Ids
@@ -220,6 +222,9 @@ unFix x = traceShowM x >> throwError FailedForeignFun
 
 mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
 mkForeign val = let val' = toIpld val in (valueCid val', val')
+
+mkForeignVal :: IsIpld a => Cid -> Vector ValTyI -> a -> Value
+mkForeignVal tyId tySat = ForeignValueV tyId tySat . fst . mkForeign
 
 mkForeignTm :: IsIpld a => Cid -> Vector ValTyI -> a -> TmI
 mkForeignTm tyId tySat = ForeignValue tyId tySat . fst . mkForeign

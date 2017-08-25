@@ -31,7 +31,7 @@ eraseCharLit = mkForeignTm @Text textId [] "\b \b"
 -- TODO: we actually map with a data constructor
 textMap :: Handler
 textMap st
-  | [Lambda _binderNames body, ForeignValue _ _ uid] <- st ^. evalEnv . _head
+  | [Closure _binderNames body, ForeignValueV _ _ uid] <- st ^. evalEnv . _head
   = do
   fText <- lookupForeign uid
   let str = T.unpack fText
@@ -49,7 +49,8 @@ textMap _ = throwError FailedForeignFun
 -- charHandler1 :: TmI -> TmI -> Char -> TmI
 charHandler1 :: Handler
 charHandler1 st
-  | [b1, b2, ForeignValue _ _ uid] <- st ^. evalEnv . _head
+  | [Closure env1 b1, Closure env2 b2, ForeignValueV _ _ uid]
+    <- st ^. evalEnv . _head
   = do
   char <- lookupForeign uid
   pure $ st & evalFocus .~ case char of
@@ -60,13 +61,18 @@ charHandler1 _ = throwError FailedForeignFun
 -- charHandler2 :: TmI -> TmI -> TmI -> Char -> TmI
 charHandler2 :: Handler
 charHandler2 st
-  | [b1, b2, b3, ForeignValue _ _ uid] <- st ^. evalEnv . _head
+  | [b1@Closure{}, b2@Closure{}, b3@Closure{}, ForeignValueV _ _ uid]
+    <- st ^. evalEnv . _head
   = do
-    focus <- flip fmap (lookupForeign uid) $ \case
+    Closure env focus <- (<$> lookupForeign uid) $ \case
       '0' -> b1
       ' ' -> b2
       _   -> b3
-    pure $ st & evalFocus .~ focus
+    pure $ st
+      & evalFocus .~ focus
+      -- TODO: really not sure if this method of setting env is right. If so,
+      -- duplicate in charHandler1
+      & evalEnv   .~ env
 charHandler2 _ = throwError FailedForeignFun
 
 inch :: Handler
@@ -82,7 +88,7 @@ inch _ = throwError FailedForeignFun
 
 ouch :: Handler
 ouch st
-  | [ForeignValue _ _ uid] <- st ^. evalEnv . _head
+  | [ForeignValueV _ _ uid] <- st ^. evalEnv . _head
   = do
   c <- lookupForeign uid
   liftIO $ putChar c >> hFlush stdout

@@ -24,15 +24,15 @@ import Planetary.Support.NameResolution
 import Planetary.Support.Parser
 import Planetary.Support.Pretty
 
-data NotGood = NotGood TmI TmI
+data NotGood = NotGood (Either Err Value) (Either Err Value)
   deriving Typeable
 
 instance Exception NotGood
 
 instance Show NotGood where
   show (NotGood a b)
-    = "(" ++ show (prettyTmPrec 11 a) ++ "), " ++
-      "(" ++ show (prettyTmPrec 11 b) ++ ")"
+    = "(" ++ either show (show . prettyValuePrec 11) a ++ "), " ++
+      "(" ++ either show (show . prettyValuePrec 11) b ++ ")"
 
 unitTests :: Test ()
 unitTests =
@@ -47,6 +47,7 @@ unitTests =
       Just (checkingOpsId, _) = namedInterface "TestingOps" testingDecls
 
       unit = DataConstructor unitId 0 []
+      unitV = DataConstructorV unitId 0 []
 
       -- This should check that the two terms are equal. If so it just exits
       -- with unit, otherwise it throws (to easytest).
@@ -55,10 +56,8 @@ unitTests =
         | AppN _ [tm1, tm2] <- st ^. evalFocus = do
           -- XXX testingEnv hack. this is really offensive
           let logger = mkLogger T.putStrLn
-          Right st1 <- liftIO $ run testingHandlers logger (st & evalFocus .~ tm1)
-          Right st2 <- liftIO $ run testingHandlers logger (st & evalFocus .~ tm2)
-          let v1 = st1 ^. evalFocus
-              v2 = st2 ^. evalFocus
+          v1 <- liftIO $ run testingHandlers logger (st & evalFocus .~ tm1)
+          v2 <- liftIO $ run testingHandlers logger (st & evalFocus .~ tm2)
           if v1 == v2
              then pure $ st & evalFocus .~ unit
              else throw $ NotGood v1 v2
@@ -161,7 +160,7 @@ unitTests =
                     [ ""
                     , prettyTmPrec 11 test
                     ]
-                  runTest "next one" testingHandlers emptyStore test'' (Right unit)
+                  runTest "next one" testingHandlers emptyStore test'' (Right unitV)
          ]
 
        -- Example from "Continuation Passing Style for Effect Handlers"

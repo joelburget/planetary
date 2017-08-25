@@ -15,7 +15,7 @@ import EasyTest
 
 import Planetary.Core
 import Planetary.Library.HaskellForeign
-import Planetary.Core.Eval.Test (stepTest)
+import Planetary.Core.Eval.Test (runTest)
 import Planetary.Core.Typecheck.Test (checkTest, emptyTypingEnv)
 import Planetary.Support.Ids
 import Planetary.Support.NameResolution
@@ -38,9 +38,13 @@ unitTests =
       two  = mkForeignTm @Int intId [] 2
       four = mkForeignTm @Int intId [] 4
 
+      oneV  = mkForeignVal @Int intId [] 1
+      twoV  = mkForeignVal @Int intId [] 2
+      fourV = mkForeignVal @Int intId [] 4
+
       hello = mkForeignTm @Text textId [] "hello "
       world = mkForeignTm @Text textId [] "world"
-      helloWorld = mkForeignTm @Text textId [] "hello world"
+      helloWorld = mkForeignVal @Text textId [] "hello world"
 
       add = AppN (Command intOpsId 0)
       sub = AppN (Command intOpsId 1)
@@ -48,22 +52,22 @@ unitTests =
 
       env = emptyTypingEnv & typingInterfaces .~ interfaceTable
 
-      simpleEnvStepTest desc
-        = stepTest desc (AmbientHandlers haskellOracles) store
+      simpleEnvRunTest desc
+        = runTest desc (AmbientHandlers haskellOracles) store
 
    in scope "haskell foreign" $ tests
        [ scope "evaluation" $ tests
-         [ simpleEnvStepTest "1 + 1" 10
+         [ simpleEnvRunTest "1 + 1"
            -- [tmExp| add one one |]
            (add [one, one])
-           (Right two)
-         , simpleEnvStepTest "2 + 2" 4
+           (Right twoV)
+         , simpleEnvRunTest "2 + 2"
            (add [two, two])
-           (Right four)
-         , simpleEnvStepTest "2 - 1" 4
+           (Right fourV)
+         , simpleEnvRunTest "2 - 1"
            (sub [two, one])
-           (Right one)
-         , simpleEnvStepTest "\"hello \" <> \"world\"" 4
+           (Right oneV)
+         , simpleEnvRunTest "\"hello \" <> \"world\""
            (cat [hello, world])
            (Right helloWorld)
          ]

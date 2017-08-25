@@ -44,7 +44,6 @@ type Polytype'           = Polytype Text
 type TyArg'              = TyArg Text
 type ValTy'              = ValTy Text
 type Tm'                 = Tm Text
-type Value'              = Tm Text
 
 newtype CoreParser t m a =
   CoreParser { runCoreParser :: IndentationParserT t m a }
@@ -280,14 +279,14 @@ parseLet =
         pure (Let rhs ty name body)
   in parser <?> "Let"
 
-parseValue :: MonadicParsing m => m Value'
+parseValue :: MonadicParsing m => m Tm'
 parseValue = choice
   [ parseDataConstructor
   -- parseCommand
   , parseLambda
   ] <?> "Value"
 
-parseDataConstructor :: MonadicParsing m => m Value'
+parseDataConstructor :: MonadicParsing m => m Tm'
 parseDataConstructor = angles (DataConstructor
   <$> parseUid <* dot
   <*> (fromIntegral <$> natural)
@@ -406,7 +405,7 @@ parseCommandOrIdent = do
     -- TODO application of terms
     Just row -> AppT (Command name (fromIntegral row)) []
 
-parseLambda :: MonadicParsing m => m Value'
+parseLambda :: MonadicParsing m => m Tm'
 parseLambda = Lam
   <$> (textSymbol "\\" *> many identifier) <*> (arr *> parseTm)
   <?> "Lambda"

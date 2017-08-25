@@ -4,7 +4,7 @@
 {-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
 {-# language TypeFamilies #-}
-module Planetary.Core.Eval.Test (unitTests, stepTest, runTest, mkLogger) where
+module Planetary.Core.Eval.Test (unitTests, runTest, mkLogger) where
 
 import Control.Arrow (right)
 import Control.Lens
@@ -12,9 +12,9 @@ import Control.Monad (when)
 import Control.Monad.Reader (asks)
 import Control.Monad.IO.Class
 import qualified Data.HashMap.Strict as HashMap
-import Data.Text (Text)
+import Data.Text (Text, pack)
 import NeatInterpolation
-import Network.IPLD as IPLD
+import Network.IPLD (Cid)
 import Prelude hiding (not)
 import EasyTest hiding (bool, run)
 
@@ -24,14 +24,14 @@ import Planetary.Support.NameResolution (resolveTm, closeTm)
 import Planetary.Support.Parser (forceTm)
 import Planetary.Support.Pretty
 import qualified Planetary.Library.FrankExamples as Frank
-import Planetary.Library.HaskellForeign (mkForeignTm, haskellOracles)
+import Planetary.Library.HaskellForeign (mkForeignTm, mkForeignVal, haskellOracles)
 import qualified Planetary.Library.HaskellForeign as HaskellForeign
 
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Terminal
 
 noteFailureState
-  :: EvalState -> Either Err EvalState -> Either Err TmI -> Test ()
+  :: EvalState -> Either Err Value -> Either Err Value -> Test ()
 noteFailureState initState result expected = do
   note $ layout $ vsep
     [ ""
@@ -39,10 +39,10 @@ noteFailureState initState result expected = do
     , prettyEvalState initState
     , ""
     , annotate Error "got:"
-    , either pretty prettyEvalState result
+    , either pretty (prettyValuePrec 11) result
     , ""
     , annotate Error "expected:"
-    , either pretty (prettyTmPrec 11) expected
+    , either pretty (prettyValuePrec 11) expected
     ]
   fail "failure: see above"
 
@@ -54,6 +54,7 @@ mkLogger note_ = Logger
   (\t st -> note_ (logReturnState t st))
   (note_ . logIncomplete)
 
+{-
 stepTest
   :: Text
   -> AmbientHandlers
@@ -82,27 +83,31 @@ stepTest name handlers store steps tm expected =
     if result' == expected
     then ok
     else noteFailureState initState result expected
+-}
 
 runTest
   :: Text
   -> AmbientHandlers
   -> ValueStore
   -> TmI
-  -> Either Err TmI
+  -> Either Err Value
   -> Test ()
 runTest name handlers store tm expected = scope name $ do
   let initState = initEvalState store tm
   logger <- mkLogger <$> asks note_
   result <- liftIO $ run handlers logger initState
-  if right _evalFocus result == expected
+  if result == expected
      then ok
      else noteFailureState initState result expected
 
 boolId :: Cid
 Just (boolId, _) = namedData "Bool" Frank.resolvedDecls
 
-bool :: Int -> Tm Cid
+bool :: Int -> TmI
 bool i = DataConstructor boolId i []
+
+boolV :: Int -> Value
+boolV i = DataConstructorV boolId i []
 
 unitTests :: Test ()
 unitTests  =
@@ -113,6 +118,9 @@ unitTests  =
       -- true, false :: forall a b. Tm Cid a b
       false = bool 0
       true = bool 1
+
+      falseV = boolV 0
+      trueV = boolV 1
 
       not tm = CaseP tm
         [ ([], true)
@@ -130,24 +138,25 @@ unitTests  =
              -- tm = forceTm "(\y -> y) x"
              lam = Lam ["X"] x
          in scope "functions" $ tests
-            [ evalEnvRunTest "application 1" (AppN lam [x]) (Right x)
+            [ evalEnvRunTest "application 1" (AppN lam [true])
+              (Right trueV)
             , evalEnvRunTest "application 2"
-              (AppT lam [x])
-              (Right x)
+              (AppT lam [true])
+              (Right trueV)
             -- TODO: test further steps with bound variables
             ]
 
        , scope "case" $ tests
          [ evalEnvRunTest "case False of { False -> True; True -> False }"
              (not false)
-             (Right true)
+             (Right trueV)
          , evalEnvRunTest "case True of { False -> True; True -> False }"
              (not true)
-             (Right false)
+             (Right falseV)
 
          , evalEnvRunTest "not false"
            (not false)
-           (Right true)
+           (Right trueV)
          ]
 
        , let ty :: Polytype Cid
@@ -156,9 +165,9 @@ unitTests  =
              tm = close1 "x" $ let_ "x" ty false (FV"x")
          in scope "let" $ tests
             [ evalEnvRunTest "let x = false in x" tm
-              (Right false)
+              (Right falseV)
             , evalEnvRunTest "let x = false in x" tm
-              (Right false)
+              (Right falseV)
             ]
 
        , let handler = forceTm [text|
@@ -171,6 +180,10 @@ unitTests  =
              zero = mkForeignTm @Int intId [] 0
              one  = mkForeignTm @Int intId [] 1
              two  = mkForeignTm @Int intId [] 2
+
+             zeroV = mkForeignVal @Int intId [] 0
+             oneV  = mkForeignVal @Int intId [] 1
+             twoV  = mkForeignVal @Int intId [] 2
 
              resolutionState = fromList $
                -- Provides Abort
@@ -191,7 +204,7 @@ unitTests  =
          in scope "handle" $ tests
               -- [ runTest "handle val" handleVal (Right two)
               [ runTest "handle abort" noAmbientHandlers emptyStore
-                handleAbort (Right one)
+                handleAbort (Right oneV)
               -- XXX test continuing from handler
               ]
 
@@ -257,16 +270,16 @@ unitTests  =
                in tm
 
              handlers = AmbientHandlers haskellOracles
-             stepTest' desc = stepTest desc handlers emptyStore
+             runTest' desc = runTest desc handlers emptyStore
 
          in scope "letrec" $ tests
-              [ stepTest' "even 0"  12  (mkTm "even" 0)  (Right true)
-              , stepTest' "odd 0"   12  (mkTm "odd"  0)  (Right false)
-              , stepTest' "even 1"  25 (mkTm "even" 1)  (Right false)
-              -- , stepTest' "even 2"  16 (mkTm "even" 2)  (Right true)
-              -- , stepTest' "even 7"  8  (mkTm "even" 7)  (Right false)
-              -- , stepTest' "even 10" 11 (mkTm "even" 10) (Right true)
-              -- , stepTest' "odd 7"   8  (mkTm "odd"  7)  (Right true)
-              -- , stepTest' "odd 10"  11 (mkTm "odd"  10) (Right false)
+              [ runTest' "even 0"  (mkTm "even" 0)  (Right trueV)
+              , runTest' "odd 0"   (mkTm "odd"  0)  (Right falseV)
+              , runTest' "even 1"  (mkTm "even" 1)  (Right falseV)
+              -- , runTest' "even 2"  (mkTm "even" 2)  (Right true)
+              -- , runTest' "even 7"  (mkTm "even" 7)  (Right false)
+              -- , runTest' "even 10" (mkTm "even" 10) (Right true)
+              -- , runTest' "odd 7"   (mkTm "odd"  7)  (Right true)
+              -- , runTest' "odd 10"  (mkTm "odd"  10) (Right false)
               ]
        ]
