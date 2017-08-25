@@ -45,6 +45,7 @@ instance Pretty Err where
 data Logger = Logger
   { _logReturnState :: Text -> EvalState -> IO ()
   , _logIncomplete :: EvalState -> IO ()
+  , _logValue :: Value -> IO ()
   }
 
 type Handler    = EvalState -> ForeignM EvalState
@@ -72,18 +73,19 @@ type EvalM =
 
 data PureContinuationFrame = PureContinuationFrame
   { _tm  :: !TmI
-  , _env :: !(Stack [Value])
+  , _env :: !(Stack EnvRow)
   } deriving Show
 
 newtype AdministrativeFrame = AdministrativeFrame TmI
   deriving Show
 
-pattern PFrame :: TmI -> Stack [Value] -> PureContinuationFrame
+pattern PFrame :: TmI -> Stack EnvRow -> PureContinuationFrame
 pattern PFrame tm env = PureContinuationFrame tm env
 
 -- TODO: this pure / administrative split is silly. even the pure continuations
 -- are just administrative lets.
-pattern PFrame' :: TmI -> Stack [Value] -> Either PureContinuationFrame AdministrativeFrame
+pattern PFrame'
+  :: TmI -> Stack EnvRow -> Either PureContinuationFrame AdministrativeFrame
 pattern PFrame' tm env = Left (PureContinuationFrame tm env)
 
 pattern AFrame :: TmI -> Either PureContinuationFrame AdministrativeFrame
@@ -91,7 +93,7 @@ pattern AFrame tm = Right (AdministrativeFrame tm)
 
 data ContHandler
   = K0
-  | Handler !TmI !(Stack [Value])
+  | Handler !TmI !(Stack EnvRow)
   deriving Show
 
 data ContinuationFrame = ContinuationFrame
@@ -109,13 +111,18 @@ pattern Frame
   -> ContinuationFrame
 pattern Frame c h = ContinuationFrame c h
 
+data EnvRow
+  = RecRow !(Vector Value)
+  | Row    !(Vector Value)
+  deriving Show
+
 -- This is a CESK machine with the addition of a forwarding continuation and
 -- finished flag.
 data EvalState = EvalState
   { _evalFocus   :: !TmI
 
   -- | The environment maps variables to ~addresses~ values
-  , _evalEnv     :: !(Stack [Value])
+  , _evalEnv     :: !(Stack EnvRow)
 
   -- | The store / heap / memory maps addresses to values.
   , _evalStore   :: !ValueStore
@@ -137,7 +144,7 @@ data EvalState = EvalState
   } deriving Show
 
 data ValueF uid value
-  = Closure_          !(Stack [value]) !(Tm uid)
+  = Closure_          !(Stack EnvRow) !(Tm uid)
   | Continuation_     !(Stack ContinuationFrame)
   | DataConstructorV_ !uid !Row !(Vector value)
   | ForeignValueV_    !uid !(Vector (ValTy uid)) !uid
@@ -164,6 +171,7 @@ deriving instance Eq AdministrativeFrame
 deriving instance Eq ContinuationFrame
 deriving instance (Eq uid, Eq value) => Eq (ValueF uid value)
 deriving instance Eq ContHandler
+deriving instance Eq EnvRow
 
 emptyStore :: ValueStore
 emptyStore = mempty
@@ -182,6 +190,11 @@ logIncomplete st = do
   log <- asks (_logIncomplete . fst)
   liftIO $ log st
   error "incomplete"
+
+logValue :: Value -> EvalM ()
+logValue val = do
+  log <- asks (_logValue . fst)
+  liftIO $ log val
 
 runEvalM
   :: AmbientHandlers
@@ -203,14 +216,19 @@ initEvalState :: ValueStore -> TmI -> EvalState
 initEvalState store tm
   = EvalState tm [] store [ContinuationFrame [] K0] Nothing Nothing
 
-valueInterpretation :: Stack [Value] -> TmI -> Maybe Value
+valueInterpretation :: Stack EnvRow -> TmI -> Maybe Value
 valueInterpretation env = \case
   FreeVariable{} -> Nothing
   DataConstructor uid row args
     -> DataConstructorV uid row <$> sequence (valueInterpretation env <$> args)
   ForeignValue uid1 rows uid2 -> Just $ ForeignValueV uid1 rows uid2
   Lambda _names scope -> Just $ Closure env scope
-  BoundVariable row col -> env ^? ix row . ix col
+  BoundVariable row col -> case env ^? ix row of
+    Nothing -> Nothing
+    Just (Row vals)    -> vals ^? ix col
+    Just (RecRow vals) -> case vals ^? ix col of
+      Just (Closure env' body) -> Just (Closure (RecRow vals : env') body)
+      _ -> Nothing
 
   -- TODO: should these be translated to values?
   -- InstantiatePolyVar tm ty -> flip InstantiatePolyVar ty
@@ -231,7 +249,7 @@ step st@(EvalState focus env store cont mFwdCont done) = case focus of
       spine' <- traverse (valueInterpretation env) spine ?? NoValue 1
       logReturnState "M-App" $ st
         & evalFocus .~ scope
-        & evalEnv   .~ spine' : env'
+        & evalEnv   .~ Row spine' : env'
 
   AppN f spine
     -- applying some handler continuation k
@@ -254,7 +272,7 @@ step st@(EvalState focus env store cont mFwdCont done) = case focus of
         logReturnState "M-Op-Handle" $ st
           & evalFocus .~ handleCmd
           -- XXX what's gamma'
-          & evalEnv     .~ {- XXX bind k -} spine' : env
+          & evalEnv     .~ Row {- XXX bind k -} spine' : env
           & evalCont    .~ k
           & evalFwdCont .~ Nothing
 
@@ -291,12 +309,14 @@ step st@(EvalState focus env store cont mFwdCont done) = case focus of
 
   -- M-Case
   Case v rows -> do
-    DataConstructorV _uid rowNum args <- valueInterpretation env v ?? NoValue 3
+    -- DataConstructorV _uid rowNum args <- valueInterpretation env v ?? NoValue 3
+    val <- valueInterpretation env v ?? NoValue 3
+    logValue val
+    DataConstructorV _uid rowNum args <- pure val
     row <- rows ^? ix rowNum . _2 ?? IndexErr
     logReturnState "M-Case" $ st
       & evalFocus .~ row
-      -- XXX do we actually bind n args or 1 data constr?
-      & evalEnv   %~ cons args
+      & evalEnv   %~ cons (Row args)
 
   Let body polyty name rhs ->
     -- let Frame pureCont handler : k = cont
@@ -311,7 +331,7 @@ step st@(EvalState focus env store cont mFwdCont done) = case focus of
     lambdas' <- traverse (valueInterpretation env . snd) lambdas ?? NoValue 4
     logReturnState "M-Letrec" $ st
       & evalFocus .~ body
-      & evalEnv   %~ cons lambdas'
+      & evalEnv   %~ cons (RecRow lambdas')
 
   Handle tm adj peg handlers valHandler ->
     logReturnState "M-Handle" $ st
@@ -325,7 +345,7 @@ step st@(EvalState focus env store cont mFwdCont done) = case focus of
     Frame (PFrame' (Let Hole _ _ rhs) env' : pureCont) handler : k -> do
       val' <- valueInterpretation env val ?? NoValue 5
       logReturnState "M-RetCont" $ st
-        & evalEnv   .~ [val'] : env'
+        & evalEnv   .~ Row [val'] : env'
         & evalCont  .~ Frame pureCont handler : k
 
     Frame (AFrame (Application f (MixedSpine tms vals)) : pureCont) handler : k -> do
@@ -340,7 +360,7 @@ step st@(EvalState focus env store cont mFwdCont done) = case focus of
       val' <- valueInterpretation env val ?? NoValue 7
       logReturnState "M-RetHandler" $ st
         & evalFocus .~ valHandler
-        & evalEnv   %~ cons [val']
+        & evalEnv   %~ cons (Row [val'])
         & evalCont  .~ k
 
     Frame [] K0 : k -> do

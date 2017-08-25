@@ -18,7 +18,7 @@ import Network.IPLD (Cid)
 import Prelude hiding (not)
 import EasyTest hiding (bool, run)
 
-import Planetary.Core hiding (logIncomplete, logReturnState)
+import Planetary.Core hiding (logIncomplete, logReturnState, logValue)
 import Planetary.Support.Ids hiding (boolId) -- XXX fix this
 import Planetary.Support.NameResolution (resolveTm, closeTm)
 import Planetary.Support.Parser (forceTm)
@@ -47,12 +47,13 @@ noteFailureState initState result expected = do
   fail "failure: see above"
 
 putLogs :: Bool
-putLogs = True
+putLogs = False
 
 mkLogger :: (Text -> IO ()) -> Logger
 mkLogger note_ = Logger
-  (\t st -> note_ (logReturnState t st))
-  (note_ . logIncomplete)
+  (\t st -> if putLogs then note_ (logReturnState t st) else pure ())
+  (if putLogs then note_ . logIncomplete else const (pure ()))
+  (if putLogs then note_ . logValue else const (pure ()))
 
 {-
 stepTest
@@ -257,7 +258,7 @@ unitTests  =
              unfixTy = Polytype fixBinders unfixResult
 
              -- mkTm n = [| evenOdd n |]
-             mkTm :: Text -> Int -> Tm Cid
+             mkTm :: Text -> Int -> TmI
              mkTm fnName n =
                let mkNat 0 = DataConstructor natfId 0 []
                    mkNat k = DataConstructor natfId 1 [mkNat (k - 1)]
@@ -273,13 +274,15 @@ unitTests  =
              runTest' desc = runTest desc handlers emptyStore
 
          in scope "letrec" $ tests
-              [ runTest' "even 0"  (mkTm "even" 0)  (Right trueV)
-              , runTest' "odd 0"   (mkTm "odd"  0)  (Right falseV)
-              , runTest' "even 1"  (mkTm "even" 1)  (Right falseV)
-              -- , runTest' "even 2"  (mkTm "even" 2)  (Right true)
-              -- , runTest' "even 7"  (mkTm "even" 7)  (Right false)
-              -- , runTest' "even 10" (mkTm "even" 10) (Right true)
-              -- , runTest' "odd 7"   (mkTm "odd"  7)  (Right true)
-              -- , runTest' "odd 10"  (mkTm "odd"  10) (Right false)
+              [ runTest' "even 0"    (mkTm "even" 0)    (Right trueV)
+              , runTest' "odd 0"     (mkTm "odd"  0)    (Right falseV)
+              , runTest' "even 1"    (mkTm "even" 1)    (Right falseV)
+              , runTest' "odd 1"     (mkTm "odd"  1)    (Right trueV)
+              , runTest' "even 7"    (mkTm "even" 7)    (Right falseV)
+              , runTest' "odd 7"     (mkTm "odd"  7)    (Right trueV)
+              , runTest' "even 10"   (mkTm "even" 10)   (Right trueV)
+              , runTest' "odd 10"    (mkTm "odd"  10)   (Right falseV)
+              , runTest' "odd 20"    (mkTm "odd"  20)   (Right falseV)
+              , runTest' "even 1000" (mkTm "even" 1000) (Right trueV)
               ]
        ]

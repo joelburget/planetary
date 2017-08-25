@@ -18,7 +18,7 @@ module Planetary.Support.NameResolution
 import Control.Lens ((&), ix, at, (?~), (^?), (%~), _1, _2, imap)
 import Control.Monad.Except
 import Control.Monad.Reader
-import Control.Monad.State
+import Control.Monad.State.Strict
 import Data.Functor.Fixedpoint
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
@@ -106,10 +106,10 @@ nameResolutionM (TermDecl_ (TermDecl name recTm):xs) = do
 nameResolutionM [] = pure (ResolvedDecls mempty mempty [] [])
 
 lookupTyVar :: Text -> ResolutionM Int
-lookupTyVar var = asks (elemIndex var) >>= (?? TyVarLookup var)
+lookupTyVar var = asks (elemIndex var) >>= ifNotJust (TyVarLookup var)
 
 lookupUid :: Text -> ResolutionM Cid
-lookupUid name = gets (^? ix name) >>= (?? UnresolvedUid name)
+lookupUid name = gets (^? ix name) >>= ifNotJust (UnresolvedUid name)
 
 withPushedTyVars :: [Text] -> ResolutionM a -> ResolutionM a
 withPushedTyVars names = local (names ++)
@@ -123,7 +123,7 @@ withTmVars names = local $ \hmap ->
   in hmap''
 
 lookupTmVar :: Text -> CloseM (Int, Int)
-lookupTmVar name = asks (^? ix name) >>= (?? TmVarLookup name)
+lookupTmVar name = asks (^? ix name) >>= ifNotJust (TmVarLookup name)
 
 --
 
@@ -131,44 +131,45 @@ closeTm :: Show a => Tm a -> Either ClosureErr (Tm a)
 closeTm = runCloseM . closeTm'
 
 closeTm' :: Show a => Tm a -> CloseM (Tm a)
-closeTm' = anaM $ \case
+closeTm' = \case
   -- bind free variables
   FreeVariable name ->
-    (uncurry BoundVariable_ <$> lookupTmVar name) `catchError`
-    (\_ -> pure $ FreeVariable_ name)
+    (uncurry BoundVariable <$!> lookupTmVar name) `catchError`
+    (\_ -> pure $! FreeVariable name)
 
   -- binding terms
-  Lambda names tm -> withTmVars names $ Lambda_ names <$> closeTm' tm
-  Handle tm adj (Peg ab codom) handlers (vName, vHandler) -> do
+  Lambda names tm -> withTmVars names $! Lambda names <$!> closeTm' tm
+  Handle tm adj peg handlers (vName, vHandler) -> do
     tm' <- closeTm' tm
     handlers' <- handlers & (traverse . traverse)
       (\(names, kName, tm) ->
-        (names, kName,) <$> withTmVars (kName : names) (closeTm' tm))
+        (names, kName,) <$!> withTmVars (kName : names) (closeTm' tm))
     vHandler' <- withTmVars [vName] (closeTm' vHandler)
-    pure $ Handle_ tm' adj (Peg ab codom) handlers' (vName, vHandler')
-  Case tm branches -> Case_
-    <$> closeTm' tm
+    pure $! Handle tm' adj peg handlers' (vName, vHandler')
+  Case tm branches -> Case
+    <$!> closeTm' tm
     <*> traverse
-      (\(names, branch) -> (names,) <$> withTmVars names (closeTm' branch))
+      (\(names, branch) -> (names,) <$!> withTmVars names (closeTm' branch))
       branches
 
-  Let body pty name rhs -> Let_
-    <$> closeTm' body
-    <*> pure pty
-    <*> pure name
-    <*> withTmVars [name] (closeTm' rhs)
+  Let body pty name rhs -> do
+    body' <- closeTm' body
+    rhs' <- withTmVars [name] (closeTm' rhs)
+    pure $! Let body' pty name rhs'
 
-  Letrec names defns rhs -> withTmVars names $ Letrec_ names
-    <$> (traverse . _2) closeTm' defns
+  Letrec names defns rhs -> withTmVars names $! Letrec names
+    <$!> (traverse . _2) closeTm' defns
     <*> closeTm' rhs
 
   -- non-binding terms. just handle the recursive ones
-  Annotation tm ty -> Annotation_ <$> closeTm' tm <*> pure ty
-  Application f spine -> Application_ <$> closeTm' f <*> mapM closeTm' spine
-  DataConstructor uid row tms -> DataConstructor_ uid row <$> traverse closeTm' tms
-  InstantiatePolyVar tm tyArgs -> InstantiatePolyVar_ <$> closeTm' tm <*> pure tyArgs
+  Annotation tm ty -> Annotation <$!> closeTm' tm <*> pure ty
+  Application f spine -> Application <$!> closeTm' f <*> mapM closeTm' spine
+  DataConstructor uid row tms
+    -> DataConstructor uid row <$!> traverse closeTm' tms
+  InstantiatePolyVar tm tyArgs
+    -> InstantiatePolyVar <$!> closeTm' tm <*> pure tyArgs
 
-  other -> pure (unFix other)
+  other -> pure other
 
 convertTm :: Tm Text -> ResolutionM (Tm Cid)
 convertTm = cataM $ \case

@@ -1,4 +1,5 @@
 {-# language OverloadedLists #-}
+{-# language OverloadedStrings #-}
 {-# language TypeFamilies #-}
 module Planetary.Core.Syntax.Test (unitTests) where
 

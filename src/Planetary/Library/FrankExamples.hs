@@ -1,6 +1,7 @@
 {-# language LambdaCase #-}
 {-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
+{-# language PatternSynonyms #-}
 {-# language QuasiQuotes #-}
 {-# language TypeApplications #-}
 module Planetary.Library.FrankExamples (resolvedDecls) where
@@ -25,13 +26,15 @@ import Planetary.Support.Parser
 -- We need some ffi definitions for working with chars / strings
 --   (eraseCharLit, textMap, charHandler1, charHandler2)
 
+pattern Row' vals = Just (Row vals)
+
 eraseCharLit :: TmI
 eraseCharLit = mkForeignTm @Text textId [] "\b \b"
 
 -- TODO: we actually map with a data constructor
 textMap :: Handler
 textMap st
-  | [Closure _binderNames body, ForeignValueV _ _ uid] <- st ^. evalEnv . _head
+  | Row' [Closure _binderNames body, ForeignValueV _ _ uid] <- st ^? evalEnv . _head
   = do
   fText <- lookupForeign uid
   let str = T.unpack fText
@@ -49,8 +52,8 @@ textMap _ = throwError FailedForeignFun
 -- charHandler1 :: TmI -> TmI -> Char -> TmI
 charHandler1 :: Handler
 charHandler1 st
-  | [Closure env1 b1, Closure env2 b2, ForeignValueV _ _ uid]
-    <- st ^. evalEnv . _head
+  | Row' [Closure env1 b1, Closure env2 b2, ForeignValueV _ _ uid]
+    <- st ^? evalEnv . _head
   = do
   char <- lookupForeign uid
   pure $ st & evalFocus .~ case char of
@@ -61,8 +64,8 @@ charHandler1 _ = throwError FailedForeignFun
 -- charHandler2 :: TmI -> TmI -> TmI -> Char -> TmI
 charHandler2 :: Handler
 charHandler2 st
-  | [b1@Closure{}, b2@Closure{}, b3@Closure{}, ForeignValueV _ _ uid]
-    <- st ^. evalEnv . _head
+  | Row' [b1@Closure{}, b2@Closure{}, b3@Closure{}, ForeignValueV _ _ uid]
+    <- st ^? evalEnv . _head
   = do
     Closure env focus <- (<$> lookupForeign uid) $ \case
       '0' -> b1
@@ -77,7 +80,7 @@ charHandler2 _ = throwError FailedForeignFun
 
 inch :: Handler
 inch st
-  | [] <- st ^. evalEnv . _head
+  | Row' [] <- st ^? evalEnv . _head
   = do
   c <- liftIO getChar
   -- Taken from Shonky/Semantics
@@ -88,7 +91,7 @@ inch _ = throwError FailedForeignFun
 
 ouch :: Handler
 ouch st
-  | [ForeignValueV _ _ uid] <- st ^. evalEnv . _head
+  | Row' [ForeignValueV _ _ uid] <- st ^? evalEnv . _head
   = do
   c <- lookupForeign uid
   liftIO $ putChar c >> hFlush stdout

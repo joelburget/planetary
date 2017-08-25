@@ -26,11 +26,14 @@ annToAnsi = \case
   Value       -> colorDull Green
   Term        -> color Magenta
 
-prettyEnv :: Doc Ann -> Stack [Value] -> Doc Ann
+prettyEnv :: Doc Ann -> Stack EnvRow -> Doc Ann
 prettyEnv name stk =
   let
+      envRowToList :: EnvRow -> [Value]
+      envRowToList (Row vals) = vals
+      envRowToList (RecRow vals) = vals
       lineFormatter i tm = pretty i <> ": " <> prettyValuePrec 0 tm
-      stkLines = vsep . imap lineFormatter <$> stk
+      stkLines = vsep . imap lineFormatter . envRowToList <$> stk
   in vsep
        [ annotate Highlighted name
        , indent 2 (lineVsep "line" stkLines)
@@ -129,7 +132,9 @@ showParens i = if i > 10 then parens else id
 
 prettyValuePrec :: Int -> Value -> Doc Ann
 prettyValuePrec d = \case
-  Closure env tm -> "TODO: pretty closure"
+  -- TODO: it would be great to open the term to show names but we don't have
+  -- names available
+  Closure _env tm -> showParens d $ "Closure" <+> prettyTmPrec 11 tm
   Continuation frames -> "TODO: pretty continuation"
   DataConstructorV uid row args -> angles $ fillSep $
     let d' = if length args > 1 then 11 else 0
@@ -243,4 +248,10 @@ logIncomplete :: EvalState -> Text
 logIncomplete st = layout $ vsep
   [ annotate Error "incomplete: no rule to handle"
   , prettyEvalState st
+  ]
+
+logValue :: Value -> Text
+logValue val = layout $ vsep
+  [ annotate Highlighted "logged value"
+  , prettyValuePrec 0 val
   ]
