@@ -1,21 +1,13 @@
-resolver: lts-8.13
+resolver: nightly-2017-09-04
 
 packages:
 - '.'
+- './easytest'
 - './ipld'
-- './ipld/binary-serialise-cbor'
 
 extra-deps:
-- indentation-trifecta-0.0.1
-- multihash-0.1.2
+- indentation-trifecta-0.0.2
 - base58-bytestring-0.1.0
-- hedgehog-0.2.1
-- bound-2
-- list-extras-0.4.1.4
+- hedgehog-0.5
 - wreq-0.5.0.1
-- cabal-doctest-1.0.1
-- monad-gen-0.3.0.1
-
-flags:
-  binary-serialise-cbor:
-    newtime15: true
+- cborg-0.1.1.0
