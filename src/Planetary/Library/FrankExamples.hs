@@ -10,6 +10,7 @@ import Control.Lens
 import Control.Monad.Except
 import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
+import Data.Traversable (for)
 import qualified Data.Text as T
 import System.IO (hFlush, stdout)
 import NeatInterpolation
@@ -20,13 +21,20 @@ import Planetary.Library.HaskellForeign hiding (resolvedDecls)
 import Planetary.Support.Ids
 import Planetary.Support.NameResolution
 import Planetary.Support.Parser
+import Planetary.Util
 
 -- Examples from the Frank paper.
 
 -- We need some ffi definitions for working with chars / strings
 --   (eraseCharLit, textMap, charHandler1, charHandler2)
 
-pattern Row' vals = Just (Row vals)
+lookupArgs :: EvalState -> Maybe (Vector TmI)
+lookupArgs st = do
+  (_, addrs) <- st ^? evalEnv . _head
+  let store = st ^. evalStore
+  for addrs $ \addr -> do
+    ipld <- store ^? ix addr
+    fromIpld ipld
 
 eraseCharLit :: TmI
 eraseCharLit = mkForeignTm @Text textId [] "\b \b"
@@ -34,7 +42,7 @@ eraseCharLit = mkForeignTm @Text textId [] "\b \b"
 -- TODO: we actually map with a data constructor
 textMap :: Handler
 textMap st
-  | Row' [Closure _binderNames body, ForeignValueV _ _ uid] <- st ^? evalEnv . _head
+  | Just [Closure _binderNames body, ForeignValue _ _ uid] <- lookupArgs st
   = do
   fText <- lookupForeign uid
   let str = T.unpack fText
@@ -52,8 +60,8 @@ textMap _ = throwError FailedForeignFun
 -- charHandler1 :: TmI -> TmI -> Char -> TmI
 charHandler1 :: Handler
 charHandler1 st
-  | Row' [Closure env1 b1, Closure env2 b2, ForeignValueV _ _ uid]
-    <- st ^? evalEnv . _head
+  | Just [Closure env1 b1, Closure env2 b2, ForeignValue _ _ uid]
+    <- lookupArgs st
   = do
   char <- lookupForeign uid
   pure $ st & evalFocus .~ case char of
@@ -64,8 +72,8 @@ charHandler1 _ = throwError FailedForeignFun
 -- charHandler2 :: TmI -> TmI -> TmI -> Char -> TmI
 charHandler2 :: Handler
 charHandler2 st
-  | Row' [b1@Closure{}, b2@Closure{}, b3@Closure{}, ForeignValueV _ _ uid]
-    <- st ^? evalEnv . _head
+  | Just [b1@Closure{}, b2@Closure{}, b3@Closure{}, ForeignValue _ _ uid]
+    <- lookupArgs st
   = do
     Closure env focus <- (<$> lookupForeign uid) $ \case
       '0' -> b1
@@ -80,22 +88,20 @@ charHandler2 _ = throwError FailedForeignFun
 
 inch :: Handler
 inch st
-  | Row' [] <- st ^? evalEnv . _head
-  = do
-  c <- liftIO getChar
-  -- Taken from Shonky/Semantics
-  let c' = if c == '\DEL' then '\b' else c
-  c'' <- writeForeign c'
-  pure $ st & evalFocus .~ ForeignValue charId [] c''
+  | Just [] <- lookupArgs st = do
+    c <- liftIO getChar
+    -- Taken from Shonky/Semantics
+    let c' = if c == '\DEL' then '\b' else c
+    c'' <- writeForeign c'
+    pure $ st & evalFocus .~ ForeignValue charId [] c''
 inch _ = throwError FailedForeignFun
 
 ouch :: Handler
 ouch st
-  | Row' [ForeignValueV _ _ uid] <- st ^? evalEnv . _head
-  = do
-  c <- lookupForeign uid
-  liftIO $ putChar c >> hFlush stdout
-  pure $ st & evalFocus .~ DataConstructor unitId 0 []
+  | Just [ForeignValue _ _ uid] <- lookupArgs st = do
+    c <- lookupForeign uid
+    liftIO $ putChar c >> hFlush stdout
+    pure $ st & evalFocus .~ DataConstructor unitId 0 []
 ouch _ = throwError FailedForeignFun
 
 externals :: Handlers

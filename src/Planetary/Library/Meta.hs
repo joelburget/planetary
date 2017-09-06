@@ -27,6 +27,9 @@ reflection = letrec
     -- an empty list in a list
     = \-> reify <List.1 <List.0> <List.0>>
 
+  -- TODO: do we need to supply a typechecker specific to the language we're
+  -- working in? `typecheck` should maybe be `typecheckCoreFrank`. Same deal
+  -- for the eval and reify.
   typechecked
     : {<TypecheckedTerm>}
     = \-> typecheck reified

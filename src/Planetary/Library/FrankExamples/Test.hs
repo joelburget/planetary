@@ -24,30 +24,29 @@ import Planetary.Support.NameResolution
 import Planetary.Support.Parser
 import Planetary.Support.Pretty
 
-data NotGood = NotGood (Either Err Value) (Either Err Value)
+data NotGood = NotGood (Either Err TmI) (Either Err TmI)
   deriving Typeable
 
 instance Exception NotGood
 
 instance Show NotGood where
   show (NotGood a b)
-    = "(" ++ either show (show . prettyValuePrec 11) a ++ "), " ++
-      "(" ++ either show (show . prettyValuePrec 11) b ++ ")"
+    = "(" ++ either show (show . prettyTmPrec 11) a ++ "), " ++
+      "(" ++ either show (show . prettyTmPrec 11) b ++ ")"
 
 unitTests :: Test ()
-unitTests =
-  let testingDecls :: ResolvedDecls
-      Right testingDecls = resolveDecls
-        [ ("Unit", unitId)
-        ] $ forceDeclarations [text|
-          interface TestingOps A B =
-            | checkEqual : A -> B -> <Unit>
-        |]
+unitTests = do
+  Right testingDecls <- pure $ resolveDecls
+    [ ("Unit", unitId)
+    ] $ forceDeclarations [text|
+      interface TestingOps A B =
+        | checkEqual : A -> B -> <Unit>
+    |]
 
-      Just (checkingOpsId, _) = namedInterface "TestingOps" testingDecls
+  Just (checkingOpsId, _) <- pure $ namedInterface "TestingOps" testingDecls
 
+  let
       unit = DataConstructor unitId 0 []
-      unitV = DataConstructorV unitId 0 []
 
       -- This should check that the two terms are equal. If so it just exits
       -- with unit, otherwise it throws (to easytest).
@@ -68,13 +67,18 @@ unitTests =
         [ (checkingOpsId, [ checkEqualImpl ]) ]
 
       checkEqual = Command checkingOpsId 0
-  in scope "frank examples" $ tests
+
+  scope "frank examples" $ tests
        [ scope "catch" $ tests []
        , scope "pipe" $ tests []
        , scope "spacer" $ tests []
        , scope "state" $ tests []
        , scope "next" $ tests
-         [ let
+         [ do
+
+              -- Just (listfId, _) <- pure $ namedData "ListF" Frank.resolvedDecls
+              -- Just (pairId,  _) <- pure $ namedData "Pair"  Frank.resolvedDecls
+              let
                test = forceTm [text|
                  letrec
                    -- note: not `forall S X. {S -> <State S>X -> X}`
@@ -94,7 +98,7 @@ unitTests =
                    next : forall. {[<State <Int>>] <Int>}
                         = \-> fst get! (put (add get! zero))
 
-                   index : forall. {<List X> -> <List <Pair <Int> X>>}
+                   index : forall X. {<List X> -> <List <Pair <Int> X>>}
                          -- XXX what's evaluation order here -- we need state
                          -- to run first before its computations to set up the
                          -- handler
@@ -123,17 +127,14 @@ unitTests =
                b = mkForeignTm @Text textId [] "b"
                c = mkForeignTm @Text textId [] "c"
 
-               Just (listfId, _) = namedData "ListF" Frank.resolvedDecls
-               Just (pairId,  _) = namedData "Pair"  Frank.resolvedDecls
-
-               pair a b  = DataConstructor pairId 0 [a, b]
+               -- pair a b  = DataConstructor pairId 0 [a, b]
 
                -- TODO:
                -- * these definitions are copied from HaskellForeign.Test
                -- * HaskellForeign.Test duplicates the ListF defn
-               lfixTm x   = DataConstructor lfixId 0 [x]
-               lcons x xs = lfixTm (DataConstructor listfId 1 [x, xs])
-               lnil       = lfixTm (DataConstructor listfId 0 [])
+               -- lfixTm x   = DataConstructor lfixId 0 [x]
+               -- lcons x xs = lfixTm (DataConstructor listfId 1 [x, xs])
+               -- lnil       = lfixTm (DataConstructor listfId 0 [])
 
                resolutionState = fromList $
                  -- Provides State, List, Pair
@@ -141,31 +142,31 @@ unitTests =
                  testingDecls ^. globalCids <>
                  [("Int", intId)]
 
-               Right test' = resolveTm resolutionState test
-               Right test'' = closeTm $
-                 substituteAll
-                   [ ("add", add)
-                   , ("abc", abc)
-                   , ("zero", zero)
-                   , ("one", one)
-                   , ("two", two)
-                   , ("a", a)
-                   , ("b", b)
-                   , ("c", c)
-                   , ("checkEqual", checkEqual)
-                   ]
-                   test'
-            in do
-                  io $ print $ vsep
-                    [ ""
-                    , prettyTmPrec 11 test
-                    ]
-                  runTest "next one" testingHandlers emptyStore test'' (Right unitV)
+              Right test' <- pure $ resolveTm resolutionState test
+              Right test'' <- pure $ closeTm $
+                substituteAll
+                  [ ("add", add)
+                  , ("abc", abc)
+                  , ("zero", zero)
+                  , ("one", one)
+                  , ("two", two)
+                  , ("a", a)
+                  , ("b", b)
+                  , ("c", c)
+                  , ("checkEqual", checkEqual)
+                  ]
+                  test'
+              io $ print $ vsep
+                [ ""
+                , prettyTmPrec 11 test
+                ]
+              runTest "next one" testingHandlers emptyStore test'' (Right unit)
          ]
 
        -- Example from "Continuation Passing Style for Effect Handlers"
        -- - Hillerström, Lindley, Atkey, Sivaramakrishnan
-       , let tm = forceTm [text|
+       , do
+            let tm = forceTm [text|
              drunkToss : [<Choose <Bool>>, <Abort>] Toss
                        -- decide whether the coin is caught
                        = ifthenelse (Choose.0!)
@@ -212,7 +213,8 @@ unitTests =
              composition2 : forall A. [<Choose <Bool>>, <Abort>] A -> <List A>
                           = \a -> allChoices (failure a)
              |]
-           in do
-             skip
-             runTest "drunk toss TODO" undefined undefined undefined undefined
+
+            skip
+            runTest "drunk toss TODO"
+              (undefined tm)undefined undefined undefined
        ]

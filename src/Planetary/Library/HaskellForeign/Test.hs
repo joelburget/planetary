@@ -38,13 +38,9 @@ unitTests =
       two  = mkForeignTm @Int intId [] 2
       four = mkForeignTm @Int intId [] 4
 
-      oneV  = mkForeignVal @Int intId [] 1
-      twoV  = mkForeignVal @Int intId [] 2
-      fourV = mkForeignVal @Int intId [] 4
-
       hello = mkForeignTm @Text textId [] "hello "
       world = mkForeignTm @Text textId [] "world"
-      helloWorld = mkForeignVal @Text textId [] "hello world"
+      helloWorld = mkForeignTm @Text textId [] "hello world"
 
       add = AppN (Command intOpsId 0)
       sub = AppN (Command intOpsId 1)
@@ -60,13 +56,13 @@ unitTests =
          [ simpleEnvRunTest "1 + 1"
            -- [tmExp| add one one |]
            (add [one, one])
-           (Right twoV)
+           (Right two)
          , simpleEnvRunTest "2 + 2"
            (add [two, two])
-           (Right fourV)
+           (Right four)
          , simpleEnvRunTest "2 - 1"
            (sub [two, one])
-           (Right oneV)
+           (Right one)
          , simpleEnvRunTest "\"hello \" <> \"world\""
            (cat [hello, world])
            (Right helloWorld)
@@ -86,17 +82,18 @@ unitTests =
          --     runTcM env (check tm intTy) @?= Left err
          ]
 
-       , scope "lfix" $
+       , scope "lfix" $ do
          let decls = forceDeclarations [text|
              data ListF a f =
                | <nilf>
                | <consf a f>
              |]
 
-             Right resolved = resolveDecls mempty decls
-             listFDecl = resolved ^. datatypes
+         Right resolved <- pure $ resolveDecls mempty decls
+         Just (listfId, _) <- pure $ namedData "ListF" resolved
 
-             Just (listfId, _) = namedData "ListF" resolved
+         let listFDecl = resolved ^. datatypes
+
 
              lfixTm x   = DataConstructor lfixId 0 [x]
              lcons x xs = lfixTm (DataConstructor listfId 1 [x, xs])
@@ -131,8 +128,8 @@ unitTests =
 
              env' = emptyTypingEnv & typingData .~ dtypes
 
-         in tests
-            [ checkTest "ListF []" env' lnil (unfreeze intListTy)
-            , checkTest "ListF [1]" env' oneList (unfreeze intListTy)
-            ]
+         tests
+           [ checkTest "ListF []" env' lnil (unfreeze intListTy)
+           , checkTest "ListF [1]" env' oneList (unfreeze intListTy)
+           ]
       ]

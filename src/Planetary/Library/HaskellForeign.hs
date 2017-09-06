@@ -6,7 +6,6 @@
 {-# language TypeFamilies #-}
 module Planetary.Library.HaskellForeign
   ( mkForeign
-  , mkForeignVal
   , mkForeignTm
   , lookupForeign
   , writeForeign
@@ -188,7 +187,9 @@ liftBinaryOp op st
     <- st ^. evalFocus = do
     i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
     i' <- writeForeign i
-    pure $ st & evalFocus .~ ForeignValue tyUid tySat i'
+    pure $ st
+      & evalFocus   .~ ForeignValue tyUid tySat i'
+      & isReturning .~ True
 liftBinaryOp _ st = traceTextM (layout (prettyEvalState st)) >> throwError FailedForeignFun
 
 -- XXX
@@ -197,7 +198,9 @@ liftUnaryOp op st
   | AppN _ [ForeignValue tyUid tySat uid] <- st ^. evalFocus = do
   i <- op <$> lookupForeign uid
   i' <- writeForeign i
-  pure $ st & evalFocus .~ ForeignValue tyUid tySat i'
+  pure $ st
+    & evalFocus   .~ ForeignValue tyUid tySat i'
+    & isReturning .~ True
 liftUnaryOp _ _ = throwError FailedForeignFun
 
 mkFix :: Handler
@@ -206,7 +209,9 @@ mkFix st
   traceM $ "running mkfix on: " ++ show a
   a' <- writeForeign a
   traceM $ "mkfix returning: " ++ show a'
-  pure $ st & evalFocus .~ ForeignValue lfixId [{- XXX -}] a'
+  pure $ st
+    & evalFocus   .~ ForeignValue lfixId [{- XXX -}] a'
+    & isReturning .~ True
 mkFix _ = throwError FailedForeignFun
 
 unFix :: Handler
@@ -217,14 +222,13 @@ unFix st
     traceM "running unfix"
     val <- lookupForeign valUid
     traceM $ "unfix returning: " ++ show val
-    pure $ st & evalFocus .~ val
+    pure $ st
+      & evalFocus   .~ val
+      & isReturning .~ True
 unFix x = traceShowM x >> throwError FailedForeignFun
 
 mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
 mkForeign val = let val' = toIpld val in (valueCid val', val')
-
-mkForeignVal :: IsIpld a => Cid -> Vector ValTyI -> a -> Value
-mkForeignVal tyId tySat = ForeignValueV tyId tySat . fst . mkForeign
 
 mkForeignTm :: IsIpld a => Cid -> Vector ValTyI -> a -> TmI
 mkForeignTm tyId tySat = ForeignValue tyId tySat . fst . mkForeign

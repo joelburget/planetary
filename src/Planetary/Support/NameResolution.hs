@@ -15,7 +15,7 @@ module Planetary.Support.NameResolution
   , ResolutionErr(..)
   ) where
 
-import Control.Lens ((&), ix, at, (?~), (^?), (%~), _1, _2, imap)
+import Control.Lens ((&), ix, at, (?~), (^?), (%~), _1, _2, _3, imap)
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State.Strict
@@ -172,32 +172,46 @@ closeTm' = \case
   other -> pure other
 
 convertTm :: Tm Text -> ResolutionM (Tm Cid)
-convertTm = cataM $ \case
-  FreeVariable_ name -> pure $ FreeVariable name
-  BoundVariable_ depth column -> pure $ BoundVariable depth column
-  DataConstructor_ uid row tms -> DataConstructor
-    <$> lookupUid uid <*> pure row <*> pure tms
-  ForeignValue_ uid1 tys uid2 -> ForeignValue
+convertTm = \case
+  FreeVariable name -> pure $ FreeVariable name
+  BoundVariable depth column -> pure $ BoundVariable depth column
+  DataConstructor uid row tms -> DataConstructor
+    <$> lookupUid uid <*> pure row <*> traverse convertTm tms
+  ForeignValue uid1 tys uid2 -> ForeignValue
     <$> lookupUid uid1 <*> mapM convertTy tys <*> lookupUid uid2
-  Lambda_ names tm -> pure $ Lambda names tm
-  InstantiatePolyVar_ tm tyArgs
-    -> InstantiatePolyVar tm <$> mapM convertTy tyArgs
-  Command_ uid row -> Command <$> lookupUid uid <*> pure row
-  Annotation_ tm ty -> Annotation tm <$> convertTy ty
-  Letrec_ names defns body -> do
-    defns' <- forM defns $ \(pty, tm) -> (,tm) <$> convertPolytype pty
-    pure $ Letrec names defns' body
-  Application_ f (MixedSpine tms vals) ->
-    pure $ Application f (MixedSpine tms vals)
-  Case_ tm branches -> pure $ Case tm branches
-  Handle_ tm adj (Peg ab codom) handlers (vName, vHandler) -> Handle tm
-    <$> convertAdjustment adj
-    <*> (Peg <$> convertTy ab <*> convertTy codom)
-    <*> convertUidMap handlers
-    <*> ((vName,) <$> pure vHandler)
-  Handle_{} -> error "impossible: convertTm Handle_"
-  Let_ body pty name rhs
-    -> Let body <$> convertPolytype pty <*> pure name <*> pure body
+  Lambda names tm -> Lambda names <$> convertTm tm
+  InstantiatePolyVar tm tyArgs -> InstantiatePolyVar
+    <$> convertTm tm
+    <*> mapM convertTy tyArgs
+  Command uid row -> Command <$> lookupUid uid <*> pure row
+  Annotation tm ty -> Annotation <$> convertTm tm <*> convertTy ty
+  Letrec names defns body -> do
+    defns' <- forM defns $ \(pty@(Polytype binders _), tm) -> withPushedTyVars (fst <$> binders) $ (,)
+      <$> convertPolytype pty
+      <*> convertTm tm
+    body' <- convertTm body
+    pure $ Letrec names defns' body'
+  Application f s@(MixedSpine _tms _vals) -> do
+    f' <- convertTm f
+    s' <- traverse convertTm s
+    pure $ Application f' s'
+  Case tm branches -> do
+    tm' <- convertTm tm
+    branches' <- (traverse._2) convertTm branches
+    pure $ Case tm' branches'
+  Handle tm adj (Peg ab codom) handlers (vName, vHandler) -> do
+    tm' <- convertTm tm
+    adj' <- convertAdjustment adj
+    peg' <- Peg <$> convertTy ab <*> convertTy codom
+    handlers' <- convertUidMap =<< (traverse.traverse._3) convertTm handlers
+    vHandler' <- convertTm vHandler
+    pure $ Handle tm' adj' peg' handlers' (vName, vHandler')
+  Handle{} -> error "impossible: convertTm Handle"
+  Let body pty@(Polytype binders _) name rhs -> withPushedTyVars (fst <$> binders) $ do
+    body' <- convertTm body
+    pty' <- convertPolytype pty
+    rhs' <- convertTm rhs
+    pure $ Let body' pty' name rhs'
 
 convertTy :: TyFix Text -> ResolutionM (TyFix Cid)
 convertTy = cataM $ \case
@@ -265,5 +279,4 @@ convertAdjustment (Adjustment umap) = do
 -- Note: this function expects its binding variables to already be pushed. See
 -- `convertTm`
 convertPolytype :: Polytype Text -> ResolutionM (Polytype Cid)
-convertPolytype (Polytype binders scope) =
-  Polytype binders <$> convertTy scope
+convertPolytype (Polytype binders scope) = Polytype binders <$> convertTy scope

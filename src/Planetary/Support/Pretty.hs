@@ -3,54 +3,49 @@
 module Planetary.Support.Pretty where
 
 import Control.Lens
+import Control.Monad.State.Strict
+import Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
 import Data.List (intersperse)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import Network.IPLD hiding (Row, Value)
+import Network.IPLD hiding (Row, Value, (.=))
 import Data.Text.Encoding (decodeUtf8)
 import Data.Text.Prettyprint.Doc
 import Data.Text.Prettyprint.Doc.Render.Terminal
 
-import Data.Either (rights)
-
 import Planetary.Core
 import Planetary.Util
 
-data Ann = Highlighted | Error | Plain | Value | Term
+data Ann = Highlighted | Error | Plain | Val | Term
 
 annToAnsi :: Ann -> AnsiStyle
 annToAnsi = \case
   Highlighted -> colorDull Blue
   Error       -> color Red <> bold
   Plain       -> mempty
-  Value       -> colorDull Green
+  Val         -> colorDull Green
   Term        -> color Magenta
 
-prettyEnv :: Doc Ann -> Stack EnvRow -> Doc Ann
-prettyEnv name stk =
-  let
-      envRowToList :: EnvRow -> [Value]
-      envRowToList (Row vals) = vals
-      envRowToList (RecRow vals) = vals
-      lineFormatter i tm = pretty i <> ": " <> prettyValuePrec 0 tm
-      stkLines = vsep . imap lineFormatter . envRowToList <$> stk
-  in vsep
-       [ annotate Highlighted name
-       , indent 2 (lineVsep "line" stkLines)
-       ]
-
 prettyPureContFrame :: PureContinuationFrame -> Doc Ann
-prettyPureContFrame (PFrame tm _env) = "* PFrame " <> prettyTmPrec 11 tm
+prettyPureContFrame (PureFrame ty body tms vals _env) = vsep
+  [ annotate Highlighted "* PureFrame" <+> parens (pretty (show ty))
+  , indent 2 $ vsep
+    [ annotate Highlighted "body: "
+      <+> prettyTmPrec 11 body
+    , annotate Highlighted "tms: "
+      <+> annotate Term (vsep (prettyTmPrec 11 <$> tms))
+    , annotate Highlighted "vals: "
+      <+> annotate Val (vsep (prettyTmPrec 11 <$> vals))
+    ]
+  ]
 
-prettyPureCont :: Doc Ann -> Stack (Either PureContinuationFrame AdministrativeFrame) -> Doc Ann
-prettyPureCont name stk =
-  let pretty' = \case
-        Left pureCont -> prettyPureContFrame pureCont
-        Right administrative -> "TODO: Administrative"
-  in vsep
-       [ annotate Highlighted name
-       , indent 2 $ vsep $ pretty' <$> stk
-       ]
+prettyPureCont :: Doc Ann -> Stack PureContinuationFrame -> Doc Ann
+prettyPureCont name stk = vsep
+  [ annotate Highlighted name
+  , indent 2 $ vsep $ prettyPureContFrame <$> stk
+  ]
 
 lineVsep :: Text -> [Doc ann] -> Doc ann
 lineVsep head =
@@ -60,33 +55,69 @@ lineVsep head =
         ]
   in vsep . intersperse "" . imap lineFormatter
 
-prettyCont :: Doc Ann -> Stack ContinuationFrame -> Doc Ann
-prettyCont name stk =
-  let prettyContFrame (ContinuationFrame pureCont (Handler handler _env)) = vsep
-        [ "handler: " <> prettyTmPrec 0 handler
+prettyCont :: Doc Ann -> Continuation -> Doc Ann
+prettyCont name (Continuation stk) =
+  let prettyContFrame (ContinuationFrame pureCont (Handler _handlers _valHandler _env)) = vsep
+        [ "handler: TODO" -- <> prettyTmPrec 0 handler
         , prettyPureCont "pure cont:" pureCont
         ]
-      prettyContFrame (ContinuationFrame _pureContinuation K0) = "k0"
+      prettyContFrame (ContinuationFrame pureCont K0) = vsep
+        [ "k0"
+        , prettyPureCont "pure cont:" pureCont
+        ]
       lines = prettyContFrame <$> stk
   in vsep
        [ annotate Highlighted name
        , indent 2 (lineVsep "line" lines)
        ]
 
+prettyEnv :: ValueStore -> Env -> Doc Ann
+prettyEnv store env =
+  let prettyCidLookup :: Cid -> Doc Ann
+      prettyCidLookup cid = fromMaybe ("(cid failed lookup: " <> pretty cid) $ do
+        ipld <- store ^? ix cid
+        val  <- fromIpld ipld :: Maybe TmI
+        pure $ prettyTmPrec 11 val
+      prettyLine :: Int -> (Bool, [Cid]) -> State (HashMap Cid Int) (Doc Ann)
+      prettyLine lineNum (rec, cids) = if rec
+        -- trick for more concise pretty-printing: store a mapping of letrec
+        -- bindings in a state monad while printing the env. If we've already
+        -- printed a row of letrec bindings, don't print it again -- just point
+        -- to its original occurrence.
+        then do
+          let entryIx = cidOf $ toIpld cids
+          maybeEntry <- gets (^? ix entryIx)
+          lineInfo <- case maybeEntry of
+            Just i' -> pure $ "(same as line " <> pretty i' <> ")"
+            Nothing -> do
+              at entryIx ?= lineNum
+              pure $ indent 2 $ sep $ prettyCidLookup <$> cids
+          pure $ sep
+            [ "line" <+> pretty lineNum <+> "(recursive)"
+            , lineInfo
+            ]
+        else
+          pure $ sep
+            [ "line" <+> pretty lineNum
+            , indent 2 $ sep $ prettyCidLookup <$> cids
+            ]
+  in vsep $ evalState (imapM prettyLine env) HashMap.empty
+
 prettyEvalState :: EvalState -> Doc Ann
-prettyEvalState (EvalState _focus _env _store _cont _fwdCont (Just val))
-  = "EvalState (done)" <+> prettyValuePrec 0 val
-prettyEvalState (EvalState focus env _store cont fwdCont Nothing) = vsep
-  [ "EvalState"
-  , indent 2 $ vsep
-    [ annotate Highlighted "focus:" <+> prettyTmPrec 0 focus
-    , prettyEnv "env:" env
-    , prettyCont "cont:" cont
-    , case fwdCont of
-        Nothing       -> mempty
-        Just fwdCont' -> prettyCont "fwd cont:" fwdCont'
+prettyEvalState (EvalState focus env store cont fwdCont isReturning done)
+  | done = "EvalState (done)" <+> prettyTmPrec 0 focus
+  | otherwise = vsep
+    [ "EvalState"
+    , indent 2 $ vsep
+      [ annotate Highlighted "focus:" <+> prettyTmPrec 0 focus
+      , annotate Highlighted "env:"
+      , indent 2 (prettyEnv store env)
+      , prettyCont "cont:" cont
+      , case fwdCont of
+          Nothing       -> mempty
+          Just fwdCont' -> prettyCont "fwd cont:" fwdCont'
+      ]
     ]
-  ]
 
 -- prettySequence :: [Doc ann] -> Doc ann
 -- prettySequence xs =
@@ -130,19 +161,6 @@ prettyPolytype d (Polytype binders val) =
 showParens :: Int -> Doc ann -> Doc ann
 showParens i = if i > 10 then parens else id
 
-prettyValuePrec :: Int -> Value -> Doc Ann
-prettyValuePrec d = \case
-  -- TODO: it would be great to open the term to show names but we don't have
-  -- names available
-  Closure _env tm -> showParens d $ "Closure" <+> prettyTmPrec 11 tm
-  Continuation frames -> "TODO: pretty continuation"
-  DataConstructorV uid row args -> angles $ fillSep $
-    let d' = if length args > 1 then 11 else 0
-    in (pretty uid <> "." <> pretty row) : (prettyValuePrec d' <$> args)
-  ForeignValueV ty args locator -> showParens d $ fillSep $
-    let d' = if length args > 1 then 11 else 0
-    in "Foreign @" <> pretty ty : (prettyTyPrec d' <$> args) ++ [pretty locator]
-
 prettyTmPrec :: (IsUid uid, Pretty uid) => Int -> Tm uid -> Doc Ann
 prettyTmPrec d = \case
   FreeVariable t -> pretty t
@@ -164,7 +182,7 @@ prettyTmPrec d = \case
     MixedSpine [] [] -> prettyTmPrec d tm <> "!"
     MixedSpine vals tms -> showParens d $ fillSep $
       prettyTmPrec 11 tm :
-      fmap (annotate Value . prettyTmPrec 11) vals <>
+      fmap (annotate Val . prettyTmPrec 11) vals <>
       fmap (annotate Term  . prettyTmPrec 11) tms
     -- _ -> fillSep $ prettyTmPrec d <$> (tm : Foldable.toList spine)
 
@@ -227,7 +245,7 @@ prettyTmPrec d = \case
          , "in" <+> prettyTmPrec 0 (opener body)
          ]
 
-  Hole -> "_"
+  Closure _env tm -> showParens d $ "Closure" <+> prettyTmPrec 11 tm
 
 instance Pretty Cid where
   pretty = pretty . Text.cons '…' . Text.takeEnd 5 . decodeUtf8 . compact
@@ -250,8 +268,8 @@ logIncomplete st = layout $ vsep
   , prettyEvalState st
   ]
 
-logValue :: Value -> Text
+logValue :: TmI -> Text
 logValue val = layout $ vsep
   [ annotate Highlighted "logged value"
-  , prettyValuePrec 0 val
+  , prettyTmPrec 0 val
   ]

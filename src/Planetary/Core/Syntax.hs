@@ -239,21 +239,30 @@ newtype Adjustment uid = Adjustment
 
 -- Terms
 
+-- Note: we're not really being careful enough here with the term / value
+-- distinction. A value which isn't fully evaluated isn't really a value, even
+-- though our predicates will say it is.
 data TmF uid tm
-  = FreeVariable_       !Text
-  | BoundVariable_      !Int           !Int
+  -- The first section is the values (or rather, terms which can be values):
+  -- . uses (inferred)
+  = BoundVariable_      !Int           !Int
+  | InstantiatePolyVar_ !tm            !(Vector (TyArg uid))
+  | Command_            !uid           !Row
+  | Annotation_         !tm            !(ValTy uid)
+
+  -- . constructions (checked)
   | DataConstructor_    !uid           !Row                  !(Vector tm)
   | ForeignValue_
     !uid -- ^ type id
     !(Vector (ValTy uid))
     !uid -- ^ value locator
   | Lambda_             !(Vector Text) !tm
-  | InstantiatePolyVar_ !tm            !(Vector (TyArg uid))
-  | Command_            !uid           !Row
-  | Annotation_         !tm            !(ValTy uid)
 
-  -- Computation:
-  | Application_ !tm !(Spine tm)
+  -- Computations:
+  -- . uses (inferred)
+  | Application_ !tm !(Spine' tm)
+
+  -- . constructions (checked)
   | Case_ !tm !(Vector (Vector Text, tm))
   | Handle_
     !tm
@@ -269,8 +278,14 @@ data TmF uid tm
     !(Vector (Polytype uid, tm)) -- ^ a typed lambda
     !tm                          -- ^ the body
 
-  -- TODO: can we get rid of this in the substitution-based semantics?
-  | Hole_ -- ^ Used at execution only
+  -- Other:
+  -- We syntactically distinguish terms from values in evaluation. This form is
+  -- only used in the focus of the machine to mark it as a term.
+  -- | Value_ !tm
+  -- associate var to address
+  | Closure_ !(Stack (Bool, Vector uid)) !tm
+  -- used in parsing before closing terms
+  | FreeVariable_ !Text
   deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
 
 pattern DataConstructor uid row tms
@@ -299,20 +314,24 @@ pattern Annotation tm ty
   = Fix (Annotation_ tm ty)
 pattern Letrec names lambdas body
   = Fix (Letrec_ names lambdas body)
-pattern Hole
-  = Fix Hole_
+-- pattern Value val
+--   = Fix (Value_ val)
+pattern Closure env tm
+  = Fix (Closure_ env tm)
 
-data Spine tm = MixedSpine
+data Spine' tm = MixedSpine
   ![tm] -- ^ non-normalized terms
   ![tm] -- ^ normalized values
   deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
 
-instance IsIpld tm => IsIpld (Spine tm)
+type Spine = Spine' TmI
 
-pattern TermSpine :: [Tm uid] -> Spine (Tm uid)
+instance IsIpld tm => IsIpld (Spine' tm)
+
+pattern TermSpine :: [Tm uid] -> Spine' (Tm uid)
 pattern TermSpine tms = MixedSpine tms []
 
-pattern NormalSpine :: [Tm uid] -> Spine (Tm uid)
+pattern NormalSpine :: [Tm uid] -> Spine' (Tm uid)
 pattern NormalSpine vals = MixedSpine [] vals
 
 type Tm uid = Fix (TmF uid)
@@ -388,10 +407,10 @@ type TmI                 = Tm Cid
 -- $ Judgements
 
 isValue :: Tm a -> Bool
-isValue BoundVariable{}      = True
 isValue FreeVariable{}       = True
+isValue BoundVariable{}      = True
 isValue InstantiatePolyVar{} = True
--- isValue Command{}            = True
+isValue Command{}            = True
 isValue Annotation{}         = True
 isValue DataConstructor{}    = True
 isValue ForeignValue{}       = True
@@ -399,22 +418,29 @@ isValue Lambda{}             = True
 isValue _                    = False
 
 isComputation :: Tm a -> Bool
-isComputation Command{}            = True
-isComputation Letrec{}             = True
-isComputation _                    = False
+isComputation Application{} = True
+isComputation Case{}        = True
+isComputation Handle{}      = True
+isComputation Let{}         = True
+isComputation Letrec{}      = True
+isComputation _             = False
 
 isUse :: Tm a -> Bool
-isUse BoundVariable{}         = True
-isUse FreeVariable{}          = True
-isUse InstantiatePolyVar{}    = True
-isUse Command{}               = True
-isUse Annotation{}            = True
-isUse _                       = False
+isUse FreeVariable{}       = True
+isUse BoundVariable{}      = True
+isUse InstantiatePolyVar{} = True
+isUse Command{}            = True
+isUse Annotation{}         = True
+isUse Application{}        = True
+isUse _                    = False
 
 isConstruction :: Tm a -> Bool
 isConstruction DataConstructor{} = True
 isConstruction ForeignValue{}    = True
 isConstruction Lambda{}          = True
+isConstruction Case{}            = True
+isConstruction Handle{}          = True
+isConstruction Let{}             = True
 isConstruction Letrec{}          = True
 isConstruction _                 = False
 
@@ -426,6 +452,10 @@ isConstruction _                 = False
 -- the callback upon finding either a free or bound variable. @close@ is
 -- implemented by converting @FreeVariable@ to @BoundVariable@ while @open@ is
 -- implemented by converting @BoundVariable@ to @FreeVariable@.
+--
+-- TODO: Also specify a traverseExp a la
+-- https://twanvl.nl/blog/haskell/traversing-syntax-trees
+-- Is it more general?
 shiftTraverse :: (Int -> Tm uid -> Tm uid) -> Tm uid -> Tm uid
 shiftTraverse f = go 0 where
 
@@ -448,7 +478,6 @@ shiftTraverse f = go 0 where
     let handlers' =  (_3 %~ go (succ ix)) <$$> handlers
     in Handle (go ix tm) adj peg handlers' (vName, go (succ ix) vHandler)
   go ix (Let body pty name rhs) = Let (go ix body) pty name (go (succ ix) rhs)
-  go _ix Hole = Hole
   go _ _ = error "impossible: shiftTraverse"
 
 -- | Exit a scope, binding some free variables.
@@ -538,12 +567,12 @@ instance IsUid uid => IsIpld (TyFix uid) where
 pattern CommandIpld uid row             = T2 "Command" uid row
 pattern DataConstructorIpld uid row tms = T3 "DataConstructor" uid row tms
 pattern ForeignValueIpld uid1 tys uid2  = T3 "ForeignValue" uid1 tys uid2
-pattern LambdaIpld body                 = T1 "Lambda" body
+pattern LambdaIpld names body           = T2 "Lambda" names body
 pattern ApplicationIpld tm spine        = T2 "Application" tm spine
 pattern CaseIpld tm branches            = T2 "Case" tm branches
 pattern HandleIpld tm adj peg handlers valHandler
   = T5 "Handle" tm adj peg handlers valHandler
-pattern LetIpld body pty scope          = T3 "LetIpld" body pty scope
+pattern LetIpld body pty name scope     = T4 "LetIpld" body pty name scope
 pattern BoundVariableIpld depth column  = T2 "BoundVariable" depth column
 pattern FreeVariableIpld name           = T1 "FreeVariable" name
 pattern InstantiatePolyVarIpld b args   = T2 "InstantiatePolyVar" b args
@@ -551,41 +580,43 @@ pattern AnnotationIpld tm ty            = T2 "Annotation" tm ty
 -- pattern ValueIpld tm                    = T1 "Value" tm
 pattern CutIpld cont scrutinee          = T2 "Cut" cont scrutinee
 pattern LetrecIpld names defns body     = T3 "Letrec" names defns body
+pattern ClosureIpld env tm              = T2 "Closure" env tm
 
 instance IsUid uid => IsIpld (Tm uid) where
   toIpld = \case
     DataConstructor uid row tms           -> DataConstructorIpld uid row tms
     ForeignValue uid1 tys uid2            -> ForeignValueIpld uid1 tys uid2
-    Lambda _names body                    -> LambdaIpld body
+    Lambda names body                     -> LambdaIpld (names :: Vector Text) body
     Application tm spine                  -> ApplicationIpld tm spine
     Case tm branches                      -> CaseIpld tm branches
     Handle tm adj peg handlers valHandler
       -> HandleIpld tm adj peg handlers valHandler
-    Let body pty _name scope              -> LetIpld body pty scope
+    Let body pty name scope               -> LetIpld body pty name scope
     BoundVariable depth column            -> BoundVariableIpld depth column
     FreeVariable name                     -> FreeVariableIpld name
     InstantiatePolyVar b args             -> InstantiatePolyVarIpld b args
     Command uid row                       -> CommandIpld uid row
     Annotation tm ty                      -> AnnotationIpld tm ty
     Letrec names defns body               -> LetrecIpld names defns body
+    Closure env tm                        -> ClosureIpld env tm
     _                                     -> error "impossible: toIpld Tm"
 
   fromIpld = \case
-    DataConstructorIpld uid row tms           -> Just $ DataConstructor uid row tms
-    ForeignValueIpld uid1 tys uid2            -> Just $ ForeignValue uid1 tys uid2
-    LambdaIpld body                           -> Just $ Lambda [] body
-    ApplicationIpld tm spine                  -> Just $ Application tm spine
-    CaseIpld tm branches                      -> Just $ Case tm branches
-    HandleIpld tm adj peg handlers valHandler -> Just $
-      Handle tm adj peg handlers valHandler
-    LetIpld body pty scope                    -> Just $ Let body pty "" scope
-    BoundVariableIpld depth column            -> Just $ BoundVariable depth column
-    FreeVariableIpld name                     -> Just $ FreeVariable name
-    InstantiatePolyVarIpld b args             -> Just $ InstantiatePolyVar b args
-    CommandIpld uid row                       -> Just $ Command uid row
-    AnnotationIpld tm ty                      -> Just $ Annotation tm ty
-    LetrecIpld names defns body               -> Just $ Letrec names defns body
-    _                                         -> Nothing
+    DataConstructorIpld uid row tms -> Just $ DataConstructor uid row tms
+    ForeignValueIpld uid1 tys uid2  -> Just $ ForeignValue uid1 tys uid2
+    LambdaIpld names body           -> Just $ Lambda names body
+    ApplicationIpld tm spine        -> Just $ Application tm spine
+    CaseIpld tm branches            -> Just $ Case tm branches
+    HandleIpld a b c d e            -> Just $ Handle a b c d e
+    LetIpld body pty name scope     -> Just $ Let body pty name scope
+    BoundVariableIpld depth column  -> Just $ BoundVariable depth column
+    FreeVariableIpld name           -> Just $ FreeVariable name
+    InstantiatePolyVarIpld b args   -> Just $ InstantiatePolyVar b args
+    CommandIpld uid row             -> Just $ Command uid row
+    AnnotationIpld tm ty            -> Just $ Annotation tm ty
+    LetrecIpld names defns body     -> Just $ Letrec names defns body
+    ClosureIpld env tm              -> Just $ Closure env tm
+    _                               -> Nothing
 
 instance IsUid uid => IsIpld (Polytype uid)
 instance IsUid uid => IsIpld (Adjustment uid)
