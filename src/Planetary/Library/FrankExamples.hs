@@ -30,8 +30,9 @@ import Planetary.Util
 
 lookupArgs :: EvalState -> Maybe (Vector TmI)
 lookupArgs st = do
-  (_, addrs) <- st ^? evalEnv . _head
-  let store = st ^. evalStore
+  let addrs = undefined
+  -- (_, addrs) <- st ^? evalEnv . _head
+  let store  = st ^. evalStore
   for addrs $ \addr -> do
     ipld <- store ^? ix addr
     fromIpld ipld
@@ -42,7 +43,7 @@ eraseCharLit = mkForeignTm @Text textId [] "\b \b"
 -- TODO: we actually map with a data constructor
 textMap :: Handler
 textMap st
-  | Just [Closure _binderNames body, ForeignValue _ _ uid] <- lookupArgs st
+  | Just [Closure _binderNames _env body, ForeignValue _ _ uid] <- lookupArgs st
   = do
   fText <- lookupForeign uid
   let str = T.unpack fText
@@ -60,7 +61,7 @@ textMap _ = throwError FailedForeignFun
 -- charHandler1 :: TmI -> TmI -> Char -> TmI
 charHandler1 :: Handler
 charHandler1 st
-  | Just [Closure env1 b1, Closure env2 b2, ForeignValue _ _ uid]
+  | Just [Closure _ env1 b1, Closure _ env2 b2, ForeignValue _ _ uid]
     <- lookupArgs st
   = do
   char <- lookupForeign uid
@@ -75,7 +76,7 @@ charHandler2 st
   | Just [b1@Closure{}, b2@Closure{}, b3@Closure{}, ForeignValue _ _ uid]
     <- lookupArgs st
   = do
-    Closure env focus <- (<$> lookupForeign uid) $ \case
+    Closure _names env focus <- (<$> lookupForeign uid) $ \case
       '0' -> b1
       ' ' -> b2
       _   -> b3

@@ -9,8 +9,7 @@
 {-# language TypeSynonymInstances #-}
 {-# language TupleSections #-}
 module Planetary.Support.NameResolution
-  ( closeTm
-  , resolveDecls
+  ( resolveDecls
   , resolveTm
   , ResolutionErr(..)
   ) where
@@ -127,54 +126,9 @@ lookupTmVar name = asks (^? ix name) >>= ifNotJust (TmVarLookup name)
 
 --
 
-closeTm :: Show a => Tm a -> Either ClosureErr (Tm a)
-closeTm = runCloseM . closeTm'
-
-closeTm' :: Show a => Tm a -> CloseM (Tm a)
-closeTm' = \case
-  -- bind free variables
-  FreeVariable name ->
-    (uncurry BoundVariable <$!> lookupTmVar name) `catchError`
-    (\_ -> pure $! FreeVariable name)
-
-  -- binding terms
-  Lambda names tm -> withTmVars names $! Lambda names <$!> closeTm' tm
-  Handle tm adj peg handlers (vName, vHandler) -> do
-    tm' <- closeTm' tm
-    handlers' <- handlers & (traverse . traverse)
-      (\(names, kName, tm) ->
-        (names, kName,) <$!> withTmVars (kName : names) (closeTm' tm))
-    vHandler' <- withTmVars [vName] (closeTm' vHandler)
-    pure $! Handle tm' adj peg handlers' (vName, vHandler')
-  Case tm branches -> Case
-    <$!> closeTm' tm
-    <*> traverse
-      (\(names, branch) -> (names,) <$!> withTmVars names (closeTm' branch))
-      branches
-
-  Let body pty name rhs -> do
-    body' <- closeTm' body
-    rhs' <- withTmVars [name] (closeTm' rhs)
-    pure $! Let body' pty name rhs'
-
-  Letrec names defns rhs -> withTmVars names $! Letrec names
-    <$!> (traverse . _2) closeTm' defns
-    <*> closeTm' rhs
-
-  -- non-binding terms. just handle the recursive ones
-  Annotation tm ty -> Annotation <$!> closeTm' tm <*> pure ty
-  Application f spine -> Application <$!> closeTm' f <*> mapM closeTm' spine
-  DataConstructor uid row tms
-    -> DataConstructor uid row <$!> traverse closeTm' tms
-  InstantiatePolyVar tm tyArgs
-    -> InstantiatePolyVar <$!> closeTm' tm <*> pure tyArgs
-
-  other -> pure other
-
 convertTm :: Tm Text -> ResolutionM (Tm Cid)
 convertTm = \case
-  FreeVariable name -> pure $ FreeVariable name
-  BoundVariable depth column -> pure $ BoundVariable depth column
+  Variable name -> pure $ Variable name
   DataConstructor uid row tms -> DataConstructor
     <$> lookupUid uid <*> pure row <*> traverse convertTm tms
   ForeignValue uid1 tys uid2 -> ForeignValue
@@ -217,11 +171,9 @@ convertTy :: TyFix Text -> ResolutionM (TyFix Cid)
 convertTy = cataM $ \case
   DataTy_ uid tys        -> pure $ DataTy uid tys
   SuspendedTy_ ty        -> pure $ SuspendedTy ty
-  BoundVariableTy_ i     -> pure $ BoundVariableTy i
-  FreeVariableTy_ name   ->
+  VariableTy_ name   ->
     (UidTy <$> lookupUid name) `catchError`
-    (\_ -> BoundVariableTy <$> lookupTyVar name) `catchError`
-    (\_ -> pure $ FreeVariableTy name)
+    (\_ -> pure $ VariableTy name)
   UidTy_ uid             -> UidTy <$> lookupUid uid
   CompTy_ dom codom      -> pure $ CompTy dom codom
   Peg_ ab ty             -> pure $ Peg ab ty

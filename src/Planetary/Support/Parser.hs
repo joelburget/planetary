@@ -112,7 +112,7 @@ parseValTy = choice
   [ parseDataTy
   , parens parseValTy
   , SuspendedTy <$> braces parseCompTy
-  , FreeVariableTy  <$> identifier
+  , VariableTy  <$> identifier
   ] <?> "Val Ty"
 
 parseTyArg :: MonadicParsing m => m TyArg'
@@ -130,7 +130,7 @@ parseConstructor tyArgs = angles (ConstructorDecl
 
 parseDataTy :: MonadicParsing m => m ValTy'
 parseDataTy = angles $ DataTy
-  <$> (FreeVariableTy <$> parseUid)
+  <$> (VariableTy <$> parseUid)
   <*> many parseTyArg
   -- <*> localIndentation Gt (many parseTyArg)
   <?> "Data Ty"
@@ -191,7 +191,7 @@ parseDataDecl = do
   _ <- assign
 
   -- this is the result type each constructor will saturate to
-  let tyArgs' = map (\(name', _) -> (TyArgVal (FreeVariableTy name'))) tyArgs
+  let tyArgs' = map (\(name', _) -> (TyArgVal (VariableTy name'))) tyArgs
 
   -- put bindingState
   ctrs <- indentedBlock
@@ -306,7 +306,7 @@ parseCase =
           rhs <- parseTm
           let _uncheckedName:vars = idents
           pure (vars, rhs)
-        pure $ CaseP m branches
+        pure $ Case m branches
   in parser <?> "case"
 
 parseHandle :: MonadicParsing m => m Tm'
@@ -349,8 +349,7 @@ parseHandle = (do
 
     pure (handlers, adjustment, valueHandler)
 
-  -- XXX use Handle
-  pure $ handle scrutinee adjustment peg effectHandlers valueHandler
+  pure $ Handle scrutinee adjustment peg effectHandlers valueHandler
   ) <?> "handle"
 
 parseTm :: MonadicParsing m => m Tm'
@@ -401,12 +400,12 @@ parseCommandOrIdent = do
 
   -- TODO: named commands
   pure $ case dotRow of
-    Nothing -> FV name
+    Nothing -> Variable name
     -- TODO application of terms
     Just row -> AppT (Command name (fromIntegral row)) []
 
 parseLambda :: MonadicParsing m => m Tm'
-parseLambda = Lam
+parseLambda = Lambda
   <$> (textSymbol "\\" *> many identifier) <*> (arr *> parseTm)
   <?> "Lambda"
 

@@ -109,27 +109,23 @@ Right resolvedDecls = resolveDecls
 tyId :: Cid
 Just (tyId, _) = namedData "Ty" resolvedDecls
 
-pattern VarTyVal :: Int -> TyArg uid
-pattern VarTyVal a = TyArgVal (BoundVariableTy a)
+pattern VarTyVal :: Text -> TyArg uid
+pattern VarTyVal a = TyArgVal (VariableTy a)
 
 -- TODO: typecheck using this table
 syntaxInterfaceTable :: InterfaceTableI
 syntaxInterfaceTable =
-  let -- poor man's variables
-      uid = 0
-      a = 1
-
-      fixTy = DataTy (UidTy lfixId)
+  let fixTy = DataTy (UidTy lfixId)
         [ TyArgVal
            (DataTy (UidTy tyId)
-             [ VarTyVal uid
-             , VarTyVal a
+             [ VarTyVal "uid"
+             , VarTyVal "a"
              ]
            )
         ]
       tyTy = DataTy (UidTy tyId)
-        [ VarTyVal uid
-        , VarTyVal a
+        [ VarTyVal "uid"
+        , VarTyVal "a"
         , TyArgVal fixTy
         ]
 

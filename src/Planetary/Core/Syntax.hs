@@ -31,6 +31,7 @@ import Data.Functor.Fixedpoint
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.List (find)
+import Data.Map (Map)
 import Data.Semigroup ((<>))
 import Data.Text (Text)
 import GHC.Generics
@@ -61,8 +62,7 @@ data Ty uid ty
   -- ValTy
   = DataTy_ !ty !(Vector ty)
   | SuspendedTy_ !ty
-  | BoundVariableTy_ !Int
-  | FreeVariableTy_ !Text
+  | VariableTy_ !Text
   | UidTy_ !uid
 
   -- CompTy
@@ -88,11 +88,8 @@ instance IsUid uid => Unifiable (Ty uid) where
   zipMatch (SuspendedTy_ cty1) (SuspendedTy_ cty2)
     = Just (SuspendedTy_ (Right (cty1, cty2)))
 
-  zipMatch (BoundVariableTy_ a) (BoundVariableTy_ b)
-    = if a == b then Just (BoundVariableTy_ a) else Nothing
-
-  zipMatch (FreeVariableTy_ a) (FreeVariableTy_ b)
-    = if a == b then Just (FreeVariableTy_ a) else Nothing
+  zipMatch (VariableTy_ a) (VariableTy_ b)
+    = if a == b then Just (VariableTy_ a) else Nothing
 
   zipMatch (UidTy_ a) (UidTy_ b)
     = if a == b then Just (UidTy_ a) else Nothing
@@ -147,10 +144,8 @@ pattern PegU dom codom     = UTerm (Peg_ dom codom)
 pattern TyArgValU ty       = UTerm (TyArgVal_ ty)
 pattern TyArgAbilityU ab   = UTerm (TyArgAbility_ ab)
 pattern AbilityU init args = UTerm (Ability_ init args)
-pattern BoundVariableTyU v = UTerm (BoundVariableTy_ v)
-pattern FreeVariableTyU v  = UTerm (FreeVariableTy_ v)
+pattern VariableTyU v      = UTerm (VariableTy_ v)
 pattern UidTyU uid         = UTerm (UidTy_ uid)
-pattern VariableTyU v      = UVar v
 
 type TyFix uid = Fix (Ty uid)
 type TyFix' = TyFix Cid
@@ -170,8 +165,7 @@ pattern Peg dom codom     = Fix (Peg_ dom codom)
 pattern TyArgVal ty       = Fix (TyArgVal_ ty)
 pattern TyArgAbility ab   = Fix (TyArgAbility_ ab)
 pattern Ability init args = Fix (Ability_ init args)
-pattern BoundVariableTy v = Fix (BoundVariableTy_ v)
-pattern FreeVariableTy v  = Fix (FreeVariableTy_ v)
+pattern VariableTy v      = Fix (VariableTy_ v)
 pattern UidTy v           = Fix (UidTy_ v)
 
 data Polytype uid = Polytype
@@ -245,7 +239,7 @@ newtype Adjustment uid = Adjustment
 data TmF uid tm
   -- The first section is the values (or rather, terms which can be values):
   -- . uses (inferred)
-  = BoundVariable_      !Int           !Int
+  = Variable_ !Text
   | InstantiatePolyVar_ !tm            !(Vector (TyArg uid))
   | Command_            !uid           !Row
   | Annotation_         !tm            !(ValTy uid)
@@ -283,9 +277,9 @@ data TmF uid tm
   -- only used in the focus of the machine to mark it as a term.
   -- | Value_ !tm
   -- associate var to address
-  | Closure_ !(Stack (Bool, Vector uid)) !tm
-  -- used in parsing before closing terms
-  | FreeVariable_ !Text
+  -- TODO: Map gives us Ord, whereas HashMap doesn't...
+  -- TODO: maybe rename to DeferredSubst
+  | Closure_ !(Vector Text) !(Map Text uid) !tm
   deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
 
 pattern DataConstructor uid row tms
@@ -302,10 +296,8 @@ pattern Handle tm adj peg handlers valHandler
   = Fix (Handle_ tm adj peg handlers valHandler)
 pattern Let body pty name rhs
   = Fix (Let_ body pty name rhs)
-pattern FreeVariable name
-  = Fix (FreeVariable_ name)
-pattern BoundVariable lvl ix
-  = Fix (BoundVariable_ lvl ix)
+pattern Variable name
+  = Fix (Variable_ name)
 pattern InstantiatePolyVar tm tyargs
   = Fix (InstantiatePolyVar_ tm tyargs)
 pattern Command uid row
@@ -316,8 +308,8 @@ pattern Letrec names lambdas body
   = Fix (Letrec_ names lambdas body)
 -- pattern Value val
 --   = Fix (Value_ val)
-pattern Closure env tm
-  = Fix (Closure_ env tm)
+pattern Closure names env tm
+  = Fix (Closure_ names env tm)
 
 data Spine' tm = MixedSpine
   ![tm] -- ^ non-normalized terms
@@ -407,8 +399,7 @@ type TmI                 = Tm Cid
 -- $ Judgements
 
 isValue :: Tm a -> Bool
-isValue FreeVariable{}       = True
-isValue BoundVariable{}      = True
+isValue Variable{}           = True
 isValue InstantiatePolyVar{} = True
 isValue Command{}            = True
 isValue Annotation{}         = True
@@ -426,8 +417,7 @@ isComputation Letrec{}      = True
 isComputation _             = False
 
 isUse :: Tm a -> Bool
-isUse FreeVariable{}       = True
-isUse BoundVariable{}      = True
+isUse Variable{}           = True
 isUse InstantiatePolyVar{} = True
 isUse Command{}            = True
 isUse Annotation{}         = True
@@ -446,77 +436,20 @@ isConstruction _                 = False
 
 -- $ Binding
 
--- | shiftTraverse is the primitive used to implement @open@ and @close@.
---
--- We traverse the AST counting the the number of binders crossed, then call
--- the callback upon finding either a free or bound variable. @close@ is
--- implemented by converting @FreeVariable@ to @BoundVariable@ while @open@ is
--- implemented by converting @BoundVariable@ to @FreeVariable@.
---
--- TODO: Also specify a traverseExp a la
--- https://twanvl.nl/blog/haskell/traversing-syntax-trees
+-- TODO: specify a traverseExp a la
+-- https://twanvl.nl/blog/haskell/traversing-syntax-trees ?
 -- Is it more general?
-shiftTraverse :: (Int -> Tm uid -> Tm uid) -> Tm uid -> Tm uid
-shiftTraverse f = go 0 where
-
-  -- This might be better expressed as a reader
-  go ix v@FreeVariable{} = f ix v
-  go ix v@BoundVariable{} = f ix v
-  go ix (DataConstructor uid row tms) = DataConstructor uid row (go ix <$> tms)
-  go _ix fv@ForeignValue{} = fv
-  go ix (Lambda names scope) = Lambda names (go (succ ix) scope)
-  go ix (InstantiatePolyVar tm tys) = InstantiatePolyVar (go ix tm) tys
-  go _ix cmd@Command{} = cmd
-  go ix (Annotation tm ty) = Annotation (go ix tm) ty
-  go ix (Letrec names defns body) =
-    let ix' = succ ix
-    in Letrec names (defns & traverse . _2 %~ go ix') (go ix' body)
-  go ix (Application tm spine) = Application (go ix tm) (go ix <$> spine)
-  go ix (Case tm rows) =
-    Case (go ix tm) (rows & traverse . _2 %~ go (succ ix))
-  go ix (Handle tm adj peg handlers (vName, vHandler)) =
-    let handlers' =  (_3 %~ go (succ ix)) <$$> handlers
-    in Handle (go ix tm) adj peg handlers' (vName, go (succ ix) vHandler)
-  go ix (Let body pty name rhs) = Let (go ix body) pty name (go (succ ix) rhs)
-  go _ _ = error "impossible: shiftTraverse"
-
--- | Exit a scope, binding some free variables.
-close :: (Text -> Maybe Int) -> Tm uid -> Tm uid
-close f =
-  let binder depth var = case var of
-        FreeVariable name -> case f name of
-          Nothing -> FreeVariable name
-          Just ix -> BoundVariable depth ix
-        _bv -> var
-  in shiftTraverse binder
-
--- | Exit a scope, binding one free variable.
-close1 :: Text -> Tm uid -> Tm uid
-close1 name = close
-  (\free -> if name == free then Just 0 else Nothing)
-
--- | Enter a scope, instantiating all bound variables
-open :: (Int -> Tm uid) -> Tm uid -> Tm uid
-open f =
-  let unbinder depth var = case var of
-        BoundVariable level ix -> if depth == level then f ix else var
-        _fv -> var
-  in shiftTraverse unbinder
-
--- | Enter a scope that binds one variable, instantiating it
-open1 :: Tm uid -> Tm uid -> Tm uid
-open1 it = open (const it)
 
 substitute :: Text -> Tm uid -> Tm uid -> Tm uid
 substitute freev insert body = flip ycata body $ \case
-  tm@(FreeVariable v)
+  tm@(Variable v)
     | v == freev -> insert
     | otherwise -> tm
   tm -> tm
 
 substituteAll :: HashMap Text (Tm uid) -> Tm uid -> Tm uid
 substituteAll vals body = flip ycata body $ \case
-  tm@(FreeVariable v)
+  tm@(Variable v)
     | Just insert <- HashMap.lookup v vals -> insert
     | otherwise -> tm
   tm -> tm
@@ -527,8 +460,7 @@ substituteAll vals body = flip ycata body $ \case
 
 pattern DataTyIpld uid args     = T2 "DataTy" uid args
 pattern SuspendedTyIpld cty     = T1 "SuspendedTy" cty
-pattern BoundVariableTyIpld var = T1 "BoundVariableTy" var
-pattern FreeVariableTyIpld var  = T1 "FreeVariableTy" var
+pattern VariableTyIpld var      = T1 "VariableTy" var
 pattern UidTyIpld uid           = T1 "UidTy" uid
 pattern CompTyIpld dom codom    = T2 "CompTy" dom codom
 pattern PegIpld ab ty           = T2 "Peg" ab ty
@@ -540,8 +472,7 @@ instance IsUid uid => IsIpld (TyFix uid) where
   toIpld = \case
     DataTy uid args     -> DataTyIpld uid args
     SuspendedTy cty     -> SuspendedTyIpld cty
-    BoundVariableTy var -> BoundVariableTyIpld var
-    FreeVariableTy var  -> FreeVariableTyIpld var
+    VariableTy var      -> VariableTyIpld var
     UidTy uid           -> UidTyIpld uid
     CompTy dom codom    -> CompTyIpld dom codom
     Peg ab ty           -> PegIpld ab ty
@@ -554,8 +485,7 @@ instance IsUid uid => IsIpld (TyFix uid) where
   fromIpld = \case
     DataTyIpld uid args     -> Just $ DataTy uid args
     SuspendedTyIpld cty     -> Just $ SuspendedTy cty
-    BoundVariableTyIpld var -> Just $ SuspendedTy var
-    FreeVariableTyIpld var  -> Just $ SuspendedTy var
+    VariableTyIpld var      -> Just $ VariableTy var
     UidTyIpld uid           -> Just $ UidTy uid
     CompTyIpld dom codom    -> Just $ CompTy dom codom
     PegIpld ab ty           -> Just $ Peg ab ty
@@ -573,14 +503,13 @@ pattern CaseIpld tm branches            = T2 "Case" tm branches
 pattern HandleIpld tm adj peg handlers valHandler
   = T5 "Handle" tm adj peg handlers valHandler
 pattern LetIpld body pty name scope     = T4 "LetIpld" body pty name scope
-pattern BoundVariableIpld depth column  = T2 "BoundVariable" depth column
-pattern FreeVariableIpld name           = T1 "FreeVariable" name
+pattern VariableIpld name               = T1 "Variable" name
 pattern InstantiatePolyVarIpld b args   = T2 "InstantiatePolyVar" b args
 pattern AnnotationIpld tm ty            = T2 "Annotation" tm ty
 -- pattern ValueIpld tm                    = T1 "Value" tm
 pattern CutIpld cont scrutinee          = T2 "Cut" cont scrutinee
 pattern LetrecIpld names defns body     = T3 "Letrec" names defns body
-pattern ClosureIpld env tm              = T2 "Closure" env tm
+pattern ClosureIpld names env tm        = T3 "Closure" names env tm
 
 instance IsUid uid => IsIpld (Tm uid) where
   toIpld = \case
@@ -592,13 +521,12 @@ instance IsUid uid => IsIpld (Tm uid) where
     Handle tm adj peg handlers valHandler
       -> HandleIpld tm adj peg handlers valHandler
     Let body pty name scope               -> LetIpld body pty name scope
-    BoundVariable depth column            -> BoundVariableIpld depth column
-    FreeVariable name                     -> FreeVariableIpld name
+    Variable name                         -> VariableIpld name
     InstantiatePolyVar b args             -> InstantiatePolyVarIpld b args
     Command uid row                       -> CommandIpld uid row
     Annotation tm ty                      -> AnnotationIpld tm ty
     Letrec names defns body               -> LetrecIpld names defns body
-    Closure env tm                        -> ClosureIpld env tm
+    Closure names env tm                  -> ClosureIpld names env tm
     _                                     -> error "impossible: toIpld Tm"
 
   fromIpld = \case
@@ -609,13 +537,12 @@ instance IsUid uid => IsIpld (Tm uid) where
     CaseIpld tm branches            -> Just $ Case tm branches
     HandleIpld a b c d e            -> Just $ Handle a b c d e
     LetIpld body pty name scope     -> Just $ Let body pty name scope
-    BoundVariableIpld depth column  -> Just $ BoundVariable depth column
-    FreeVariableIpld name           -> Just $ FreeVariable name
+    VariableIpld name               -> Just $ Variable name
     InstantiatePolyVarIpld b args   -> Just $ InstantiatePolyVar b args
     CommandIpld uid row             -> Just $ Command uid row
     AnnotationIpld tm ty            -> Just $ Annotation tm ty
     LetrecIpld names defns body     -> Just $ Letrec names defns body
-    ClosureIpld env tm              -> Just $ Closure env tm
+    ClosureIpld names env tm        -> Just $ Closure names env tm
     _                               -> Nothing
 
 instance IsUid uid => IsIpld (Polytype uid)
@@ -629,4 +556,5 @@ instance IsIpld (EffectInterface Cid)
 
 makeLenses ''EffectInterface
 makeLenses ''ResolvedDecls
+makeLenses ''ConstructorDecl
 makeLenses ''DataTypeInterface

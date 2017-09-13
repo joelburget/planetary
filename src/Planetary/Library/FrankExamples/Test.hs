@@ -143,19 +143,18 @@ unitTests = do
                  [("Int", intId)]
 
               Right test' <- pure $ resolveTm resolutionState test
-              Right test'' <- pure $ closeTm $
-                substituteAll
-                  [ ("add", add)
-                  , ("abc", abc)
-                  , ("zero", zero)
-                  , ("one", one)
-                  , ("two", two)
-                  , ("a", a)
-                  , ("b", b)
-                  , ("c", c)
-                  , ("checkEqual", checkEqual)
-                  ]
-                  test'
+              let test'' = substituteAll
+                    [ ("add", add)
+                    , ("abc", abc)
+                    , ("zero", zero)
+                    , ("one", one)
+                    , ("two", two)
+                    , ("a", a)
+                    , ("b", b)
+                    , ("c", c)
+                    , ("checkEqual", checkEqual)
+                    ]
+                    test'
               io $ print $ vsep
                 [ ""
                 , prettyTmPrec 11 test

@@ -43,8 +43,9 @@ inferTest
   -> TmI
   -> Either TcErr (UTy IntVar)
   -> Test ()
-inferTest name tables tm expected = scope name $ expect $
-  (freeze <$> runTcM tables (infer tm)) == (freeze <$> expected)
+inferTest name tables tm expected = scope name $ expectEq
+  (freeze <$> runTcM tables (infer tm))
+  (freeze <$> expected)
 
 exampleInterfaces :: InterfaceTableI
 exampleInterfaces = mempty
@@ -64,10 +65,10 @@ mockCid = mkCid
 unitTests :: Test ()
 unitTests = scope "typechecking" $ tests
   [ scope "infer variable" $ tests
-    [ let ty = FreeVariableTyU "hippo"
-          env = emptyTypingEnv & varTypes .~ [[Left ty]]
-      in inferTest "VAR 1" env (BV 0 0) (Right ty)
-    , inferTest "VAR 2" emptyTypingEnv (BV 0 0) (Left (LookupVarTy 0 0))
+    [ let ty = VariableTyU "hippo"
+          env = emptyTypingEnv & varTypes .~ [("x", Left ty)]
+      in inferTest "VAR 1" env (V"x") (Right ty)
+    , inferTest "VAR 2" emptyTypingEnv (V"x") (Left (LookupVarTy "x"))
     ]
 
   , scope "TODO: infer polyvar" $ tests
@@ -108,14 +109,15 @@ unitTests = scope "typechecking" $ tests
         v2Id = mockCid "v2"
         tm1 = DataConstructor v1Id 0 []
         tm2 = DataConstructor v2Id 0 []
+        ty1, ty2 :: TyFix'
         ty1 = DataTy (UidTy v1Id) []
         ty2 = DataTy (UidTy v2Id) []
         ty1ty2vals = [TyArgVal ty1, TyArgVal ty2]
         constr1 = ConstructorDecl "constr1" [ty1, ty2]
         constr2 = ConstructorDecl "constr2" []
 
-        app f = AppT f [tm1, tm2]
-        f = Lam ["x", "y"] $ DataConstructor dataUid 0 [FV"x", FV"y"]
+        app fun = AppT fun [tm1, tm2]
+        f = Lambda ["x", "y"] $ DataConstructor dataUid 0 [V"x", V"y"]
         resultTy = DataTy (UidTy dataUid) ty1ty2vals
 
         goodAnnF = Annotation f $ SuspendedTy $
@@ -124,7 +126,10 @@ unitTests = scope "typechecking" $ tests
 
         baddAnnF = Annotation f $ SuspendedTy $
           CompTy [ty1, ty1] (Peg emptyAbility resultTy)
-        expectedBad = Left (MismatchFailure undefined undefined)
+
+        ty1Thawed = DataTy_ (unfreeze (UidTy v1Id)) []
+        ty2Thawed = DataTy_ (unfreeze (UidTy v2Id)) []
+        expectedBad = Left (MismatchFailure ty1Thawed ty2Thawed)
 
         tables = emptyTypingEnv & typingData .~
           [ (dataUid, DataTypeInterface [] [constr1 ty1ty2vals])
@@ -132,7 +137,7 @@ unitTests = scope "typechecking" $ tests
           , (v2Id, DataTypeInterface [] [constr2 []])
           ]
 
-    in scope "(sharing data defns)" $ tests
+    in scope "sharing data defns" $ tests
          [ scope "infer app" $ tests
            [ inferTest "APP (1)" tables (app goodAnnF) expected
            , inferTest "APP (2)" tables (app baddAnnF) expectedBad
@@ -162,49 +167,49 @@ unitTests = scope "typechecking" $ tests
   , scope "TODO: check lambda" $ tests []
 
     , scope "case" $ tests
-      [ let abcdUid = mockCid "abcd"
-            defgUid = mockCid "123424321432"
-            abcdTy = DataTy (UidTy abcdUid) []
-            abcdVal = DataConstructor abcdUid 0 []
-            val = Annotation
-              (DataConstructor defgUid 1 [abcdVal, abcdVal])
-              (DataTy (UidTy defgUid) [])
-            resolutionState =
-              [ ("abcd", abcdUid)
-              , ("defg", defgUid)
-              ]
-            Right tm = resolveTm resolutionState $ forceTm [text|
+      [ do let abcdUid = mockCid "abcd"
+               defgUid = mockCid "123424321432"
+               abcdTy = DataTy (UidTy abcdUid) []
+               abcdVal = DataConstructor abcdUid 0 []
+               val = Annotation
+                 (DataConstructor defgUid 1 [abcdVal, abcdVal])
+                 (DataTy (UidTy defgUid) [])
+               resolutionState =
+                 [ ("abcd", abcdUid)
+                 , ("defg", defgUid)
+                 ]
+           Right tm <- pure $ resolveTm resolutionState $ forceTm [text|
               case val of
                 | <_ x y z> -> x
                 | <_ y z> -> z
             |]
-            tm' = substitute "val" val tm
-            -- decls = forceDeclarations [text|
-            --     data abcd =
-            --       | <abcd>
-            --     data defg =
-            --       | <defg1 abcd abcd abcd>
-            --       | <defg2 abcd abcd>
-            --   |]
-            env = emptyTypingEnv & typingData .~
-              [ (abcdUid, DataTypeInterface []
-                [ ConstructorDecl "abcd" [] []
-                ])
-              , (defgUid, DataTypeInterface []
-                [ ConstructorDecl "defg1" [abcdTy, abcdTy, abcdTy] []
-                , ConstructorDecl "defg2" [abcdTy, abcdTy]         []
-                ])
-              ]
-            expectedTy = unfreeze abcdTy
-        in checkTest "CASE" env tm' expectedTy
+           let tm' = substitute "val" val tm
+               -- decls = forceDeclarations [text|
+               --     data abcd =
+               --       | <abcd>
+               --     data defg =
+               --       | <defg1 abcd abcd abcd>
+               --       | <defg2 abcd abcd>
+               --   |]
+               env = emptyTypingEnv & typingData .~
+                 [ (abcdUid, DataTypeInterface []
+                   [ ConstructorDecl "abcd" [] []
+                   ])
+                 , (defgUid, DataTypeInterface []
+                   [ ConstructorDecl "defg1" [abcdTy, abcdTy, abcdTy] []
+                   , ConstructorDecl "defg2" [abcdTy, abcdTy]         []
+                   ])
+                 ]
+               expectedTy = unfreeze abcdTy
+           checkTest "CASE" env tm' expectedTy
       ]
 
     , scope "check switch" $ tests
-      [ let tm = BV 0 0
+      [ let tm = V"x"
             dataUid = mockCid "dataUid"
             dataTy = unfreeze $ DataTy (UidTy dataUid) []
             expectedTy = dataTy
-            env = emptyTypingEnv & varTypes .~ [[Left dataTy]]
+            env = emptyTypingEnv & varTypes .~ [("x", Left dataTy)]
         in checkTest "SWITCH" env tm expectedTy
       ]
 
@@ -217,35 +222,33 @@ unitTests = scope "typechecking" $ tests
       in scope "check handle" $ tests
 
         -- both branches should give us a bool
-        [ let Right tm = resolveTm resolutionState $
-                close closer $
-                  forceTm [text|
-                    handle abort! : [e , <Abort>]Int with
-                      Abort:
-                        | <aborting -> k> -> x1
-                      | v -> x2
-                  |]
-              closer = \case
-                "abort" -> Just 0
-                "x1"    -> Just 1
-                "x2"    -> Just 2
-                _       -> Nothing
-              Just abortId = Frank.resolvedDecls
+        [ do Right tm <- pure $ resolveTm resolutionState $
+                forceTm [text|
+                  handle abort! : [e , <Abort>]Int with
+                    Abort:
+                      | <aborting -> k> -> x1
+                    | v -> x2
+                |]
+             Just abortId <- pure $ Frank.resolvedDecls
                 ^? globalCids
                  . to HashMap.fromList
                  . ix "Abort"
-              abortAbility = Ability OpenAbility [(abortId, [])]
-              abortTy = SuspendedTy
-                (CompTy []
-                  (Peg abortAbility intTy)) -- XXX generalize
-              env = emptyTypingEnv
-                & typingInterfaces .~ (Frank.resolvedDecls ^. interfaces)
-                & varTypes .~ [Left . unfreeze <$> [abortTy, boolTy, boolTy]]
-              expectedTy = unfreeze boolTy
-          in checkTest "HANDLE (abort)" env tm expectedTy
+             let abortAbility = Ability OpenAbility [(abortId, [])]
+                 abortTy = SuspendedTy
+                   (CompTy []
+                     (Peg abortAbility intTy)) -- XXX generalize
+                 env = emptyTypingEnv
+                   & typingInterfaces .~ (Frank.resolvedDecls ^. interfaces)
+                   & varTypes .~ (Left . unfreeze <$>
+                     [ ("abort", abortTy)
+                     , ("x1", boolTy)
+                     , ("x2", boolTy)
+                     ])
+                   -- & varTypes .~ [Left . unfreeze <$> [abortTy, boolTy, boolTy]]
+                 expectedTy = unfreeze boolTy
+             checkTest "HANDLE (abort)" env tm expectedTy
 
-        , let Right tm = resolveTm resolutionState $
-                close closer $
+        , do Right tm <- pure $ resolveTm resolutionState $
                   forceTm [text|
                     handle val : [e, <Send Bool>, <Receive Bool>]Int with
                       Send Bool:
@@ -254,17 +257,17 @@ unitTests = scope "typechecking" $ tests
                         | <receive -> r> -> x2
                       | v -> x3
                   |]
-              closer = \case
-                "val" -> Just 0
-                "x1"  -> Just 1
-                "x2"  -> Just 2
-                "x3"  -> Just 3
-                _     -> Nothing
-              env = emptyTypingEnv
-                & typingInterfaces .~ (Frank.resolvedDecls ^. interfaces)
-                & varTypes .~ [Left . unfreeze <$> [intTy, boolTy, boolTy, boolTy]]
-              expectedTy = unfreeze boolTy
-          in checkTest "HANDLE (multi)" env tm expectedTy
+             let env = emptyTypingEnv
+                   & typingInterfaces .~ (Frank.resolvedDecls ^. interfaces)
+                   & varTypes .~ (Left . unfreeze <$>
+                     [ ("val", intTy)
+                     , ("x1", boolTy)
+                     , ("x2", boolTy)
+                     , ("x3", boolTy)
+                     ])
+                   -- & varTypes .~ [Left . unfreeze <$> [intTy, boolTy, boolTy, boolTy]]
+                 expectedTy = unfreeze boolTy
+             checkTest "HANDLE (multi)" env tm expectedTy
         ]
 
     , let

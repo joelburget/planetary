@@ -34,11 +34,12 @@ import Control.Unification.IntVar
 import qualified Data.Foldable as Foldable
 import Data.Functor.Fixedpoint
 import Data.HashMap.Strict (intersectionWith)
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Text (Text)
 import Network.IPLD hiding (Row)
 
 import Planetary.Core.Syntax
-import Planetary.Core.Syntax.Patterns
 import Planetary.Core.UIdMap
 import Planetary.Util
 
@@ -48,25 +49,25 @@ import Planetary.Util
 type UTy' = UTy IntVar
 
 data TcErr
-  = DataUIdMismatch Cid Cid
+  = DataUIdMismatch !Cid !Cid
   | UIdMismatch
-  | ApplicationSpineMismatch [TmI] [UTy IntVar]
-  | DataSaturationMismatch [UTy IntVar] [UTy IntVar]
-  | ConstructorArgMismatch [TmI] [UTy IntVar]
-  | CaseMismatch [Vector (UTy IntVar)] [(Vector Text, Tm Cid)]
+  | ApplicationSpineMismatch ![TmI] ![UTy IntVar]
+  | DataSaturationMismatch ![UTy IntVar] ![UTy IntVar]
+  | ConstructorArgMismatch ![TmI] ![UTy IntVar]
+  | CaseMismatch ![Vector (UTy IntVar)] ![(Vector Text, Tm Cid)]
   | FailedDataTypeLookup
-  | FailedConstructorLookup Cid Row
-  | LookupCommands Cid
+  | FailedConstructorLookup !Cid !Row
+  | LookupCommands !Cid
   | LookupCommandTy
-  | LookupVarTy Int Int
-  | LookupPolyVarTy Int Int
-  | CantInfer TmI
+  | LookupVarTy !Text
+  | LookupPolyVarTy !Text
+  | CantInfer !TmI
   | NotClosed
-  | OccursFailure IntVar (UTerm (Ty Cid) IntVar)
-  | MismatchFailure (Ty Cid UTy') (Ty Cid UTy')
-  | CheckFailure String
+  | OccursFailure !IntVar !(UTerm (Ty Cid) IntVar)
+  | MismatchFailure !(Ty Cid UTy') !(Ty Cid UTy')
+  | CheckFailure !String
   | LfixShape
-  | NotAbility (UTy IntVar)
+  | NotAbility !(UTy IntVar)
   deriving Show
 
 instance Eq TcErr where
@@ -77,8 +78,8 @@ instance Eq TcErr where
     = c1 == c2 && r1 == r2
   LookupCommands c1 == LookupCommands c2 = c1 == c2
   LookupCommandTy == LookupCommandTy = True
-  LookupVarTy a1 b1 == LookupVarTy a2 b2 = a1 == a2 && b1 == b2
-  LookupPolyVarTy a1 b1 == LookupPolyVarTy a2 b2 = a1 == a2 && b1 == b2
+  LookupVarTy a == LookupVarTy b = a == b
+  LookupPolyVarTy a == LookupPolyVarTy b = a == b
   NotClosed == NotClosed = True
   CheckFailure a == CheckFailure b = a == b
   CantInfer a == CantInfer b = a == b
@@ -103,7 +104,7 @@ data TypingEnv uid = TypingEnv
   { _typingData       :: DataTypeTable  uid
   , _typingInterfaces :: InterfaceTable uid
   , _typingAbilities  :: UTy IntVar -- :: Ability
-  , _varTypes         :: [Vector (Either (UTy IntVar) PolytypeI)]
+  , _varTypes         :: Map Text (Either (UTy IntVar) PolytypeI)
   } deriving Show
 
 makeLenses ''TypingEnv
@@ -151,13 +152,13 @@ lfixId = mkCid "lfix"
 infer :: TmI -> TcM' (UTy IntVar)
 infer = \case
   -- VAR
-  BoundVariable depth pos -> lookupVarTy depth pos
-  FreeVariable v -> todo ("lookup free var ty: " ++ show v)
+  Variable name -> lookupVarTy name
   -- POLYVAR
-  InstantiatePolyVar (BoundVariable depth pos) tys -> do
-    Polytype binders ty' <- lookupPolyVarTy depth pos
+  InstantiatePolyVar (Variable name) tys -> do
+    Polytype binders ty' <- lookupPolyVarTy name
     boundVars <- replicateM (length binders) freeVar
-    pure (modTm boundVars ty')
+    let boundVars' = Map.fromList $ zip (fst <$> binders) (boundVars)
+    pure (modTm boundVars' ty')
   -- COMMAND
   Command uid row -> do
     CommandDeclaration _name from to <- lookupCommandTy uid row
@@ -172,7 +173,8 @@ infer = \case
     let SuspendedTyU (CompTyU dom (PegU ability retTy)) = f'
     ambient <- getAmbient
     _ <- unify' ability ambient
-    _ <- mapM_ (uncurry check) =<< strictZip ApplicationSpineMismatch (Foldable.toList spine) dom
+    _ <- mapM_ (uncurry check)
+      =<< strictZip ApplicationSpineMismatch (Foldable.toList spine) dom
     pure retTy
   -- COERCE
   Annotation n a -> do
@@ -180,16 +182,19 @@ infer = \case
     check n a'
     pure a'
 
-  ForeignValue uid sat _ -> pure (DataTyU (UidTyU uid) (TyArgValU <$> (unfreeze <$> sat)))
+  ForeignValue uid sat _ ->
+    pure (DataTyU (UidTyU uid) (TyArgValU <$> (unfreeze <$> sat)))
   x -> throwError (CantInfer x)
 
 check :: TmI -> UTy IntVar -> TcM' ()
 -- FUN
-check (Lambda _binders body)
+check (Lambda binders body)
       (SuspendedTyU (CompTyU dom (PegU ability codom))) =
-  withValTypes' dom body $ \body' ->
-    withAbility ability $
-      check body' codom
+  -- TODO: strictZip
+  let varTypes = Map.fromList $ zip binders dom
+  in withValTypes' varTypes body $ \body' ->
+       withAbility ability $
+         check body' codom
 -- DATA
 check (DataConstructor uid1 row tms) (DataTyU uid2 valTysExp)
   -- Lfix extension to vanilla core frank
@@ -216,7 +221,7 @@ check (DataConstructor uid1 row tms) (DataTyU uid2 valTysExp)
   (argTys, valTysAct) <- lookupConstructorTy uid1 row
 
   mapM_ (uncurry unify') =<< strictZip DataSaturationMismatch valTysAct valTysExp
-  mapM_ (uncurry check) =<< strictZip ConstructorArgMismatch tms argTys
+  mapM_ (uncurry check)  =<< strictZip ConstructorArgMismatch tms argTys
 
 check (DataConstructor uid row tms) (UVar i) = do
   -- Make a variable for each subterm and solve for all of them.
@@ -233,34 +238,39 @@ check (Case m rows) ty = do
   -- args :: (Vector (TyArg a))
   DataTyU (UidTyU uid) _args <- infer m
 
-  dataIface <- dataInterface <$> lookupDataType uid
-  let dataRows = fst <$> dataIface -- :: Vector (Vector ValTyI)
-      dataRows' = unfreeze <$$> dataRows
+  -- extract name, args
+  DataTypeInterface _binders ctrs <- lookupDataType uid
+  let
+      dataRows  = _constructorArgs <$> ctrs :: Vector (Vector ValTyI)
+      dataRows' = unfreeze <$$> dataRows :: Vector (Vector UTy')
   zipped <- strictZip CaseMismatch dataRows' rows
-  forM_ zipped $ \(dataConTys, (_, rhs)) ->
-    withValTypes' dataConTys rhs (`check` ty)
+  forM_ zipped $ \(dataConTys, (names, rhs)) ->
+    -- TODO: strictZip
+    let dataConTys' = Map.fromList $ zip names dataConTys
+    in withValTypes' dataConTys' rhs (`check` ty)
 -- HANDLE
-check (Handle val adj peg handlers (_, vHandler)) ty = do
+check (Handle val adj peg handlers (valName, vHandler)) ty = do
   -- TODO why isn't peg checked?
   ambient <- getAmbient
   let adj' = unfreeze <$$> unAdjustment adj
   Just adjustedAmbient <- pure $ extendAbility' ambient adj'
-  Just adjustedEmpty <- pure $ extendAbility' (unfreeze emptyAbility) adj'
+  Just adjustedEmpty   <- pure $ extendAbility' (unfreeze emptyAbility) adj'
   valTy <- withAbility adjustedAmbient (infer val)
-  cmds <- instantiateAbility adjustedEmpty
+  cmds  <- instantiateAbility adjustedEmpty
   pairs <- uidZip handlers cmds
   forMOf_ (traverse . traverse) pairs $
-    \((_, _, handler), CommandDeclaration _name as b) ->
+    \((varNames, kName, handler), CommandDeclaration _name as b) ->
     let cTy = CompTyU [unfreeze b] (PegU ambient valTy)
-        as' = unfreeze <$> as
-    in openAdjustmentHandler handler as' cTy $ \tm ->
+        -- TODO: strictZip
+        as' = zip varNames (unfreeze <$> as)
+    in openAdjustmentHandler handler as' (kName, cTy) $ \tm ->
          check tm ty
-  withValTypes [valTy] $ check vHandler ty
+  withValTypes (Map.fromList [(valName, valTy)]) $ check vHandler ty
 -- LET
-check (Let val pty _name body) ty = do
+check (Let val pty name body) ty = do
   valTy <- instantiateWithEnv pty
   check val valTy
-  withPolyty pty $ check body ty
+  withPolyty name pty $ check body ty
 -- SWITCH
 check m b = do
   a <- infer m
@@ -273,13 +283,6 @@ extendAbility' ab adj = do
   ab' <- freeze ab
   adj' <- (traverse.traverse) freeze adj
   pure $ unfreeze $ extendAbility ab' (Adjustment adj')
-
-dataInterface
-  :: DataTypeInterface uid
-  -> Vector (Vector (ValTy uid), Vector (TyArg uid))
-dataInterface (DataTypeInterface _ ctors) =
-  let f (ConstructorDecl _name args resultArgs) = (args, resultArgs)
-  in f <$> ctors
 
 instantiateAbility :: UTy IntVar -> TcM' (UIdMap Cid [CommandDeclarationI])
 instantiateAbility (AbilityU _ uidmap) =
@@ -297,39 +300,36 @@ uidZip
 uidZip (UIdMap as) (UIdMap bs) = UIdMap <$>
   sequence (intersectionWith (strictZip (\_ _ -> UIdMismatch)) as bs)
 
-withValTypes :: [UTy IntVar] -> TcM' a -> TcM' a
-withValTypes tys = local (& varTypes %~ ((Left <$> tys):))
+withValTypes :: Map Text (UTy IntVar) -> TcM' a -> TcM' a
+withValTypes tys =
+  let tys' = Left <$> tys
+  in local (& varTypes %~ Map.union tys')
 
 withValTypes'
-  :: [UTy IntVar]
+  :: Map Text (UTy IntVar)
   -> Tm Cid
   -> (TmI -> TcM' a)
   -> TcM' a
-withValTypes' tys scope cb =
-  let body = open (BV 0) scope
-  in withValTypes tys (cb body)
+withValTypes' tys scope cb = withValTypes tys (cb scope)
 
 openAdjustmentHandler
   :: Tm Cid
-  -> [UTy IntVar]
-  -> UTy IntVar
+  -> [(Text, UTy IntVar)]
+  -> (Text, UTy IntVar)
   -> (TmI -> TcM' a)
   -> TcM' a
-openAdjustmentHandler handler argTys handlerTy cb = do
-  let bindingTys = Left <$> (SuspendedTyU handlerTy:argTys)
+openAdjustmentHandler handler argTys (handlerName, handlerTy) cb = do
+  let bindingTys  = Map.fromList $ Left <$$> argTys
+      bindingTys' = Map.insert handlerName (Left handlerTy) bindingTys
 
-      instantiator = todo "openAdjustmentHandler instantiator"
-      -- instantiator Nothing  = BV 0
-      -- instantiator (Just i) = BV (length argTys + 1)
-
-  local (& varTypes %~ (bindingTys:)) (cb (open instantiator handler))
+  local (& varTypes %~ Map.union bindingTys') (cb handler)
   -- withState' envAdj (cb (open instantiator handler))
 
 instantiateWithEnv :: PolytypeI -> TcM' (UTy IntVar)
 instantiateWithEnv = todo "instantiateWithEnv"
 
-withPolyty :: PolytypeI -> TcM' a -> TcM' a
-withPolyty pty = local (& varTypes %~ ([Right pty]:))
+withPolyty :: Text -> PolytypeI -> TcM' a -> TcM' a
+withPolyty name pty = local (& varTypes . at name ?~ Right pty)
 
 -- | Get the types each data constructor holds for this data type.
 --
@@ -347,12 +347,14 @@ lookupConstructorTy uid row = do
   ConstructorDecl _name argTys valTys
     <- (ctrs ^? ix row) ?? FailedConstructorLookup uid row
   -- bind all the names in valTys
+  -- boundVars <- sequence $ Map.fromList $ zip (fst <$> binders) freeVar
   boundVars <- replicateM (length binders) freeVar
-  pure (modTm boundVars <$> argTys, modTm boundVars <$> valTys)
+  let boundVars' = Map.fromList $ zip (fst <$> binders) (boundVars)
+  pure (modTm boundVars' <$> argTys, modTm boundVars' <$> valTys)
 
-modTm :: [IntVar] -> TyFix' -> UTy IntVar
+modTm :: Map Text IntVar -> TyFix' -> UTy IntVar
 modTm vars = cata $ \case
-  BoundVariableTy_ i -> UVar (vars !! i)
+  VariableTy_ name -> UVar (vars ^?! ix name)
   other -> UTerm other
 
 lookupCommands :: Cid -> TcM' [CommandDeclarationI]
@@ -371,12 +373,10 @@ withAbility ability = local (& typingAbilities .~ ability)
 getAmbient :: TcM' (UTy IntVar) -- AbilityI
 getAmbient = asks (^?! typingAbilities)
 
-lookupPolyVarTy :: Int -> Int -> TcM' PolytypeI
-lookupPolyVarTy depth pos =
-  asks (^? varTypes . ix depth . ix pos . _Right)
-    >>= (?? LookupPolyVarTy depth pos)
+lookupPolyVarTy :: Text -> TcM' PolytypeI
+lookupPolyVarTy name =
+  asks (^? varTypes . ix name . _Right) >>= ifNotJust (LookupPolyVarTy name)
 
-lookupVarTy :: Int -> Int -> TcM' (UTy IntVar)
-lookupVarTy depth pos =
-  asks (^? varTypes . ix depth . ix pos . _Left)
-    >>= (?? LookupVarTy depth pos)
+lookupVarTy :: Text -> TcM' (UTy IntVar)
+lookupVarTy name =
+  asks (^? varTypes . ix name . _Left) >>= ifNotJust (LookupVarTy name)

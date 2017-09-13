@@ -71,7 +71,7 @@ unitTests = scope "parsing" $ tests
   , parserTest "123" parseUid "123"
 
   , parserTest "<1 X>" parseDataTy $
-    DataTy (FreeVariableTy "1") [TyArgVal (VTy"X")]
+    DataTy (VariableTy "1") [TyArgVal (VTy"X")]
 
   -- also test with args
   -- Bool
@@ -82,7 +82,7 @@ unitTests = scope "parsing" $ tests
       ])
 
   -- TODO: also test with effect parameter
-  , let ctrResult = [TyArgVal (FreeVariableTy "X"), TyArgVal (FreeVariableTy "Y")]
+  , let ctrResult = [TyArgVal (VariableTy "X"), TyArgVal (VariableTy "Y")]
     in parserTest "data Either X Y =\n  | <left X>\n  | <right Y>" parseDataDecl
          (DataDecl "Either" $
            DataTypeInterface [("X", ValTyK), ("Y", ValTyK)]
@@ -120,7 +120,7 @@ unitTests = scope "parsing" $ tests
   , parserTest "[] X" parsePeg $ Peg emptyAbility (VTy"X")
   , parserTest "[]X" parsePeg $ Peg emptyAbility (VTy"X")
   , parserTest "[] <1 X>" parsePeg $
-    Peg emptyAbility (DataTy (FreeVariableTy "1") [TyArgVal (VTy"X")])
+    Peg emptyAbility (DataTy (VariableTy "1") [TyArgVal (VTy"X")])
 
   , parserTest "X" parseCompTy $ CompTy [] (Peg emptyAbility (VTy"X"))
   , parserTest "X -> X" parseCompTy $
@@ -151,13 +151,13 @@ unitTests = scope "parsing" $ tests
             ])
     in parserTest decl parseInterfaceDecl expected
 
-  , parserTest "Z!" parseTm $ AppT (FV"Z") []
+  , parserTest "Z!" parseTm $ AppT (V"Z") []
   , parserTest "Z Z Z" parseTm $
-      AppT (FV"Z") [FV"Z", FV"Z"]
+      AppT (V"Z") [V"Z", V"Z"]
 
   , parserTest "let Z: forall. X = W in Z" parseLet $
-    Let (FV"W") (Polytype [] (VTy"X")) "Z" (FV"Z")
-    -- let_ "Z" (Polytype [] (VTy"X")) (FV"W") (FV"Z")
+    Let (V"W") (Polytype [] (VTy"X")) "Z" (V"Z")
+    -- let_ "Z" (Polytype [] (VTy"X")) (V"W") (V"Z")
 
   , let defn = T.unlines
           [ "let on : forall X Y. {X -> {X -> []Y} -> []Y} ="
@@ -169,18 +169,18 @@ unitTests = scope "parsing" $ tests
         polyBinders = [("X", ValTyK), ("Y", ValTyK)]
         pty = Polytype polyBinders polyVal
         expected = Let
-          (Lam ["x", "f"] (AppT (FV"f") [FV"x"]))
+          (Lambda ["x", "f"] (AppT (V"f") [V"x"]))
           pty "on"
-          (AppT (FV"on") [FV"n", Lam ["x"] (FV"body")])
+          (AppT (V"on") [V"n", Lambda ["x"] (V"body")])
     in parserTest defn parseLet expected
 
   , let defn = "on n (\\x -> body)"
-        expected = AppT (FV"on") [FV"n", Lam ["x"] (FV"body")]
+        expected = AppT (V"on") [V"n", Lambda ["x"] (V"body")]
 
     in parserTest defn parseTm expected
 
   , let defn = "\\x f -> f x"
-        expected = Lam ["x", "f"] (AppT (FV"f") [FV"x"])
+        expected = Lambda ["x", "f"] (AppT (V"f") [V"x"])
     in parserTest defn parseTm expected
 
   , let defn = T.unlines
@@ -188,9 +188,9 @@ unitTests = scope "parsing" $ tests
           , "  | <_> -> y"
           , "  | <_ a b c> -> z"
           ]
-        expected = CaseP (FV "x")
-          [ ([], FV "y")
-          , (["a", "b", "c"], FV "z")
+        expected = Case (V "x")
+          [ ([], V "y")
+          , (["a", "b", "c"], V "z")
           ]
     in scope "case" $ tests
          [ parserTest defn parseTm expected
@@ -201,17 +201,17 @@ unitTests = scope "parsing" $ tests
   , let defn = "data Maybe x =\n  | <just x>\n  | <nothing>"
 
 
-        ctrResult = [TyArgVal (FreeVariableTy "x")]
+        ctrResult = [TyArgVal (VariableTy "x")]
         expected = DataDecl "Maybe" (DataTypeInterface [("x", ValTyK)]
-          [ ConstructorDecl "just" [FreeVariableTy "x"] ctrResult
+          [ ConstructorDecl "just" [VariableTy "x"] ctrResult
           , ConstructorDecl "nothing" [] ctrResult
           ])
     in parserTest defn parseDataDecl expected
 
   , let defn = "interface IFace =\n  | _ : foo -> bar\n  | _ : baz"
         expected = InterfaceDecl "IFace" (EffectInterface []
-          [ CommandDeclaration "_" [FreeVariableTy "foo"] (FreeVariableTy "bar")
-          , CommandDeclaration "_" [] (FreeVariableTy "baz")
+          [ CommandDeclaration "_" [VariableTy "foo"] (VariableTy "bar")
+          , CommandDeclaration "_" [] (VariableTy "baz")
           ])
     in parserTest defn parseInterfaceDecl expected
 
@@ -221,25 +221,25 @@ unitTests = scope "parsing" $ tests
           , "    | <receive -> r> -> abort!"
           , "  | y -> y"
           ]
-        scrutinee = AppT (FV"y") []
+        scrutinee = AppT (V"y") []
         adj = Adjustment
-          [ ("Receive", [TyArgVal (FreeVariableTy"X")])
+          [ ("Receive", [TyArgVal (VariableTy"X")])
           ]
         peg = Peg (Ability OpenAbility [("Abort", [])])
-                  (FreeVariableTy "Y")
+                  (VariableTy "Y")
         handlers =
-          [ ("Receive", [([], "r", AppT (FV"abort") [])])
+          [ ("Receive", [([], "r", AppT (V"abort") [])])
           ]
-        fallthrough = ("y", FV"y")
-        expected = handle scrutinee adj peg (fromList handlers) fallthrough
+        fallthrough = ("y", V"y")
+        expected = Handle scrutinee adj peg (fromList handlers) fallthrough
     in parserTest defn parseHandle expected
 
   , parserTest "X" parseTyVar ("X", ValTyK)
   , parserTest "[e]" parseTyVar ("e", EffTyK)
 
-  , parserTest "\\xs -> xs" parseLambda (Lam ["xs"] (FV"xs"))
-  , parserTest "\\ -> xs"   parseLambda (Lam [] (FV"xs"))
-  , parserTest "\\-> xs"    parseLambda (Lam [] (FV"xs"))
+  , parserTest "\\xs -> xs" parseLambda (Lambda ["xs"] (V"xs"))
+  , parserTest "\\ -> xs"   parseLambda (Lambda [] (V"xs"))
+  , parserTest "\\-> xs"    parseLambda (Lambda [] (V"xs"))
 
   -- , let defn = T.unlines
   --         [

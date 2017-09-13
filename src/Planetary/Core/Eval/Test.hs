@@ -19,7 +19,7 @@ import EasyTest hiding (bool, run)
 
 import Planetary.Core hiding (logIncomplete, logReturnState, logValue)
 import Planetary.Support.Ids hiding (boolId) -- XXX fix this
-import Planetary.Support.NameResolution (resolveTm, closeTm)
+import Planetary.Support.NameResolution (resolveTm)
 import Planetary.Support.Parser (forceTm)
 import Planetary.Support.Pretty
 import qualified Planetary.Library.FrankExamples as Frank
@@ -44,7 +44,7 @@ noteFailureState initState result expected = do
   fail "failure: see above"
 
 putLogs :: Bool
-putLogs = True
+putLogs = False
 
 mkLogger :: (Text -> IO ()) -> Logger
 mkLogger mkNote = Logger
@@ -83,7 +83,7 @@ unitTests  =
       false = bool 0
       true = bool 1
 
-      not tm = CaseP tm
+      not tm = Case tm
         [ ([], true)
         , ([], false)
         ]
@@ -95,9 +95,9 @@ unitTests  =
       evalEnvRunTest desc = runTest desc noAmbientHandlers emptyStore
 
   in scope "evaluation" $ tests
-       [ let x = BV 0 0
+       [ let x = V"x"
              -- tm = forceTm "(\y -> y) x"
-             lam = Lam ["X"] x
+             lam = Lambda ["x"] x
          in scope "functions" $ tests
             -- [ evalEnvRunTest "application 1" (AppN lam [true])
             --   (Right true)
@@ -128,7 +128,7 @@ unitTests  =
        , let ty :: Polytype Cid
              ty = Polytype [] (DataTy (UidTy boolId) [])
 
-             tm = close1 "x" $ let_ "x" ty false (FV"x")
+             tm = Let false ty "x" (V"x")
          in scope "let" $ evalEnvRunTest "let x = false in x" tm (Right false)
 
        , scope "handle" $ do
@@ -218,11 +218,9 @@ unitTests  =
              let mkNat 0 = DataConstructor natfId 0 []
                  mkNat k = DataConstructor natfId 1 [mkNat (k - 1)]
 
-                 Right tm = closeTm $
-                   -- substitute "unFix" unFix $
-                     substitute "body"
-                       (AppT (FV fnName) [mkNat n])
-                       evenodd'
+                 tm = substitute "body"
+                   (AppT (V fnName) [mkNat n])
+                   evenodd'
              in tm
 
            handlers = AmbientHandlers haskellOracles

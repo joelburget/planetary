@@ -3,9 +3,7 @@
 module Planetary.Support.Pretty where
 
 import Control.Lens
-import Control.Monad.State.Strict
-import Data.HashMap.Strict (HashMap)
-import qualified Data.HashMap.Strict as HashMap
+import qualified Data.Map.Strict as Map
 import Data.List (intersperse)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -71,37 +69,25 @@ prettyCont name (Continuation stk) =
        , indent 2 (lineVsep "line" lines)
        ]
 
+prettyBinding :: Text -> BindingType -> Doc Ann
+prettyBinding name = \case
+  RecursiveBinding tms -> prettyTmPrec 0 (tms ^?! ix name)
+  NonrecursiveBinding tm -> prettyTmPrec 0 tm
+  ContBinding cont -> prettyCont (pretty name) cont
+
 prettyEnv :: ValueStore -> Env -> Doc Ann
 prettyEnv store env =
-  let prettyCidLookup :: Cid -> Doc Ann
-      prettyCidLookup cid = fromMaybe ("(cid failed lookup: " <> pretty cid) $ do
-        ipld <- store ^? ix cid
-        val  <- fromIpld ipld :: Maybe TmI
-        pure $ prettyTmPrec 11 val
-      prettyLine :: Int -> (Bool, [Cid]) -> State (HashMap Cid Int) (Doc Ann)
-      prettyLine lineNum (rec, cids) = if rec
-        -- trick for more concise pretty-printing: store a mapping of letrec
-        -- bindings in a state monad while printing the env. If we've already
-        -- printed a row of letrec bindings, don't print it again -- just point
-        -- to its original occurrence.
-        then do
-          let entryIx = cidOf $ toIpld cids
-          maybeEntry <- gets (^? ix entryIx)
-          lineInfo <- case maybeEntry of
-            Just i' -> pure $ "(same as line " <> pretty i' <> ")"
-            Nothing -> do
-              at entryIx ?= lineNum
-              pure $ indent 2 $ sep $ prettyCidLookup <$> cids
-          pure $ sep
-            [ "line" <+> pretty lineNum <+> "(recursive)"
-            , lineInfo
-            ]
-        else
-          pure $ sep
-            [ "line" <+> pretty lineNum
-            , indent 2 $ sep $ prettyCidLookup <$> cids
-            ]
-  in vsep $ evalState (imapM prettyLine env) HashMap.empty
+  let prettyCidLookup :: Text -> Cid -> Doc Ann
+      prettyCidLookup name cid = fromMaybe ("(cid failed lookup: " <> pretty cid) $ do
+        ipld    <- store ^? ix cid
+        binding <- fromIpld ipld :: Maybe BindingType
+        pure $ prettyBinding name binding
+      prettyLine :: Text -> Cid -> Doc Ann
+      prettyLine name cid = sep
+        [ pretty name <> ":"
+        , indent 2 $ prettyCidLookup name cid
+        ]
+  in vsep $ fmap snd $ Map.toList $ imap prettyLine env
 
 prettyEvalState :: EvalState -> Doc Ann
 prettyEvalState (EvalState focus env store cont fwdCont isReturning done)
@@ -130,8 +116,7 @@ prettyTyPrec :: (IsUid uid, Pretty uid) => Int -> TyFix uid -> Doc ann
 prettyTyPrec d = \case
   DataTy ty tys -> angles $ fillSep $ prettyTyPrec 0 <$> ty : tys
   SuspendedTy ty -> braces $ prettyTyPrec 0 ty
-  BoundVariableTy i -> showParens d $ "BV" <+> pretty i
-  FreeVariableTy t -> pretty t
+  VariableTy t -> pretty t
   UidTy uid -> pretty uid
   CompTy args peg -> fillSep $ intersperse "->" $
     prettyTyPrec 0 <$> args ++ [peg]
@@ -163,9 +148,7 @@ showParens i = if i > 10 then parens else id
 
 prettyTmPrec :: (IsUid uid, Pretty uid) => Int -> Tm uid -> Doc Ann
 prettyTmPrec d = \case
-  FreeVariable t -> pretty t
-  BoundVariable depth col -> showParens d $
-    "BV" <+> pretty depth <+> pretty col
+  Variable t -> pretty t
   DataConstructor uid row args -> angles $ fillSep $
     let d' = if length args > 1 then 11 else 0
     in (pretty uid <> "." <> pretty row) : (prettyTmPrec d' <$> args)
@@ -173,8 +156,7 @@ prettyTmPrec d = \case
     let d' = if length args > 1 then 11 else 0
     in "Foreign @" <> pretty ty : (prettyTyPrec d' <$> args) ++ [pretty locator]
   Lambda names body -> showParens d $
-    "\\" <> fillSep (pretty <$> names) <+> "->" <+>
-      prettyTmPrec 0 (open (FreeVariable . (names !!)) body)
+    "\\" <> fillSep (pretty <$> names) <+> "->" <+> prettyTmPrec 0 body
   Command uid row -> pretty uid <> "." <> pretty row
   Annotation tm ty -> parens $ fillSep [prettyTmPrec 0 tm, ":", prettyTyPrec 0 ty]
   -- TODO: show the division between normalized / non-normalized
@@ -193,7 +175,7 @@ prettyTmPrec d = \case
       [ "|"
       , angles $ fillSep $ "_" : fmap pretty names
       , "->"
-      , prettyTmPrec 0 $ open (FreeVariable . (names !!)) body
+      , prettyTmPrec 0 body
       ]
     ]
 
@@ -203,7 +185,7 @@ prettyTmPrec d = \case
           ["|"
           , angles $ fillSep ("_" : fmap pretty names ++ ["->", pretty kName])
           , "->"
-          , prettyTmPrec 0 $ open (FreeVariable . ((kName : names) !!)) rhs
+          , prettyTmPrec 0 rhs
           ]
         prettyHandler (uid, uidHandler) = vsep
           [ pretty uid <+> colon
@@ -217,7 +199,7 @@ prettyTmPrec d = \case
            [ "|"
            , pretty vName
            , "->"
-           , prettyTmPrec 0 (open1 (FreeVariable vName) vRhs)
+           , prettyTmPrec 0 vRhs
            ]
          ]
 
@@ -229,23 +211,22 @@ prettyTmPrec d = \case
     , "="
     , prettyTmPrec 0 body
     , "in"
-    , prettyTmPrec 0 (open1 (FreeVariable name) rhs)
+    , prettyTmPrec 0 rhs
     ]
 
   Letrec names lambdas body ->
     let rowInfo = zip names lambdas
-        opener = open (FreeVariable . (names !!))
         rows = flip fmap rowInfo $ \(name, (ty, lam)) -> vsep
           [ pretty name <+> colon <+> prettyPolytype 0 ty
-          , indent 2 $ "=" <+> prettyTmPrec 0 (opener lam)
+          , indent 2 $ "=" <+> prettyTmPrec 0 lam
           ]
     in vsep
          [ "letrec"
          , indent 2 $ vsep rows
-         , "in" <+> prettyTmPrec 0 (opener body)
+         , "in" <+> prettyTmPrec 0 body
          ]
 
-  Closure _env tm -> showParens d $ "Closure" <+> prettyTmPrec 11 tm
+  Closure _names _env tm -> showParens d $ "Closure" <+> prettyTmPrec 11 tm
 
 instance Pretty Cid where
   pretty = pretty . Text.cons '…' . Text.takeEnd 5 . decodeUtf8 . compact

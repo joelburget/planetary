@@ -19,6 +19,8 @@ import Control.Lens hiding ((??))
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import Data.Semigroup
 import Data.Text (Text)
 import Data.Text.Prettyprint.Doc
@@ -51,13 +53,13 @@ instance Pretty Err where
 
 data Logger = Logger
   { _logReturnState :: Text -> EvalState -> IO ()
-  , _logIncomplete :: EvalState -> IO ()
-  , _logValue :: TmI -> IO ()
+  , _logIncomplete  :: EvalState -> IO ()
+  , _logValue       :: TmI -> IO ()
   }
 
-type Handler    = EvalState -> ForeignM EvalState
-type Handlers   = UIdMap Cid [Handler]
-type ValueStore = UIdMap Cid IPLD.Value
+type Handler            = EvalState -> ForeignM EvalState
+type Handlers           = UIdMap Cid [Handler]
+type ValueStore         = UIdMap Cid IPLD.Value
 newtype AmbientHandlers = AmbientHandlers { _ambientHandlers :: Handlers }
   deriving Monoid
 
@@ -80,11 +82,16 @@ type EvalM =
 
 -- We use an either because each variable can point to either a heap value or a
 -- continuation.
-type Env = Stack (Bool, Vector Cid)
+type Env = Map Text Cid -- Stack (Bool, Vector Cid)
+
+data BindingType
+  = RecursiveBinding (Map Text TmI)
+  | NonrecursiveBinding TmI
+  | ContBinding Continuation
+  deriving (Show, Generic, IsIpld)
 
 data PureFrameType
-  = LetFrame
-  | CaseFrame
+  = LetFrame !(Vector Text)
   | AppFrame
   deriving (Show, Generic, IsIpld)
 
@@ -104,7 +111,12 @@ pattern PureFrame frameType body tms vals env
 
 data ContHandler
   = K0
-  | Handler !(UIdMap Cid (Vector TmI)) !TmI !Env
+  | Handler -- !(UIdMap Cid (Vector TmI)) !TmI !Env
+    -- effect handlers
+    !(UIdMap Cid (Vector (Vector Text, Text, TmI)))
+    -- value handler
+    !(Text, TmI)
+    !Env
   deriving (Show, Generic, IsIpld)
 
 data ContinuationFrame = ContinuationFrame
@@ -224,15 +236,15 @@ runForeignM store action = do
     Right a -> pure (store', a)
 
 initEvalState :: ValueStore -> TmI -> EvalState
-initEvalState store tm
-  = EvalState tm [] store (Continuation [ContinuationFrame [] K0]) Nothing False False
+initEvalState store tm = EvalState tm Map.empty store
+  (Continuation [ContinuationFrame [] K0]) Nothing False False
 
-lookupContinuation :: Env -> ValueStore -> Int -> Int -> Maybe Continuation
-lookupContinuation env store row col = do
-  (False, addrs)   <- env ^? ix row
-  addr             <- addrs ^? ix col
-  ipld             <- store ^? ix addr
-  fromIpld ipld
+lookupContinuation :: Env -> ValueStore -> Text -> Maybe Continuation
+lookupContinuation env store name = do
+  addr              <- env   ^? ix name
+  ipld              <- store ^? ix addr
+  ContBinding cont  <- fromIpld ipld
+  pure cont
 
 valueInterpretation :: Env -> ValueStore -> TmI -> Maybe TmI
 valueInterpretation env store = \case
@@ -240,30 +252,30 @@ valueInterpretation env store = \case
     <$> traverse (valueInterpretation env store) args
   v@ForeignValue{} -> Just v
   -- Lambda _names scope -> Just $ Closure env scope
-  BoundVariable row col -> do
-    (isRec, addrs) <- env   ^? ix row
-    addr           <- addrs ^? ix col
-    ipld           <- store ^? ix addr
-    val            <- fromIpld ipld
-    -- Use this to add an extra row of binders only in the letrec case
-    let addRec someEnv = if isRec then (True, addrs) : someEnv else someEnv
+  Variable name -> do
+    addr <- env   ^? ix name
+    ipld <- store ^? ix addr
+    val  <- fromIpld ipld
     case val of
-      Closure env' body  -> valueInterpretation (addRec env') store body
-      Lambda _names body -> Just $ Closure (addRec env) body
-      _                  -> Just val
-  Lambda _names scope -> Just $ Closure env scope
+      ContBinding cont          -> todo "handle cont binding case"
+      RecursiveBinding tms      -> tms ^? ix name
+      NonrecursiveBinding val'  -> case val' of
+        Closure names env' body -> valueInterpretation env' store body
+        Lambda names body       -> Just $ Closure names env body
+        _                       -> Just val'
+  Lambda names scope -> Just $ Closure names env scope
+  c@Command{} -> Just c
 
   -- Value v -> Just v
 
   -- TODO: should these be translated to values?
   -- InstantiatePolyVar tm ty -> flip InstantiatePolyVar ty
   --   <$> valueInterpretation env tm
-  -- Command{} -> Just tm
   -- Annotation tm ty -> flip Annotation ty <$> valueInterpretation env tm
 
   _ -> Nothing
 
-setVal :: IsIpld a => a -> State ValueStore Cid
+setVal :: BindingType -> State ValueStore Cid
 setVal val = do
   let ipld = toIpld val
       cid = valueCid ipld
@@ -271,7 +283,7 @@ setVal val = do
   pure cid
 
 setVals :: ValueStore -> [TmI] -> ([Cid], ValueStore)
-setVals store vals = runState (for vals setVal) store
+setVals store vals = runState (for vals (setVal . NonrecursiveBinding)) store
 
 step :: EvalState -> EvalM EvalState
 step st@(EvalState focus env store cont mFwdCont returning done)
@@ -286,19 +298,21 @@ step st@(EvalState focus env store cont mFwdCont returning done)
       & evalCont  . _head . pureContinuation
         %~ cons (PureFrame AppFrame f tms vals env)
 
-  -- TODO: awkward: we treat this special case differently
-  Application f (MixedSpine [] vals) -> do
-    f' <- valueInterpretation env store f ?? NoValue "Application!"
-    let (addrs, store') = setVals store vals
-    logReturnState "M-Arg (empty)" $ st
-      & evalFocus .~ f'
-      & evalEnv   %~ cons (False, addrs)
-      & evalStore .~ store'
+--   -- TODO: awkward: we treat this special case differently
+--   Application f (MixedSpine [] vals) -> do
+--     f' <- valueInterpretation env store f ?? NoValue "Application!"
+--     traceShowM ("application interpretation", f')
+--     let (addrs, store') = setVals store vals
+--     logReturnState "M-Arg (empty)" $ st
+--       & evalFocus .~ f'
+--       -- TODO
+--       -- & evalEnv   %~ cons (False, addrs)
+--       & evalStore .~ store'
 
   AppN f spine
     -- applying some handler continuation k
-    | BoundVariable row col <- f
-    , Just k <- lookupContinuation env store row col ->
+    | Variable name <- f
+    , Just k <- lookupContinuation env store name ->
       logReturnState "M-AppCont" $ st
         & evalFocus .~ head spine -- XXX way wrong
         & evalCont  .~ k <> cont
@@ -314,13 +328,16 @@ step st@(EvalState focus env store cont mFwdCont returning done)
         spine' <- traverse (valueInterpretation env store) spine
           ?? NoValue "M-Op-Handle"
         let (addrs, store') = flip runState store $ do
-              kAddr      <- setVal fwdCont
-              spineAddrs <- traverse setVal spine'
+              kAddr      <- setVal (ContBinding fwdCont)
+              spineAddrs <- traverse (setVal . NonrecursiveBinding) spine'
               pure $ kAddr : spineAddrs
+            bindVars = Map.fromList $
+              zip (handleCmd ^. _2 : handleCmd ^. _1) addrs
+        traceM "executing M-Op-Handle"
         logReturnState "M-Op-Handle" $ st
-          & evalFocus .~ handleCmd
+          & evalFocus   .~ (handleCmd ^. _3)
           -- XXX what's gamma'
-          & evalEnv     .~ (False, {- XXX bind k -} addrs) : env
+          & evalEnv     %~ Map.union bindVars
           & evalStore   .~ store'
           & evalCont    .~ Continuation k
           & evalFwdCont .~ Nothing
@@ -348,40 +365,42 @@ step st@(EvalState focus env store cont mFwdCont returning done)
     val <- valueInterpretation env store v ?? NoValue "M-Case"
     DataConstructor _uid rowNum args <- pure val
     let (addrs, store') = setVals store args
-    row <- rows ^? ix rowNum . _2 ?? IndexErr
+    (varNames, rowTm) <- rows ^? ix rowNum ?? IndexErr
     logReturnState "M-Case" $ st
-      & evalFocus .~ row
+      & evalFocus .~ rowTm
       & evalStore .~ store'
-      & evalEnv   %~ cons (False, addrs)
+      -- TODO strictZip
+      & evalEnv   %~ Map.union (Map.fromList (zip varNames addrs))
 
-  Let body _polyty _name rhs ->
+  Let body _polyty name rhs ->
     -- let Frame pureCont handler : k = cont
     --     cont' = Frame (Bindings IsntLetrec [body] : pureCont) handler : k
     logReturnState "M-Let" $ st
       & evalFocus .~ body
       & evalCont  . _head . pureContinuation
-        %~ cons (PureFrame LetFrame rhs [] [] env)
+        %~ cons (PureFrame (LetFrame [name]) rhs [] [] env)
 
   -- Tail-call the letrec
-  Letrec _names lambdas body -> do
-    let (addrs, store') = setVals store (snd <$> lambdas)
+  Letrec names lambdas body -> do
+    -- let (addrs, store') = setVals store (snd <$> lambdas)
+    let recBinding = RecursiveBinding $ Map.fromList $ zip names $ snd <$> lambdas
+        (addr, store') = runState (setVal recBinding) store
     logReturnState "M-Letrec" $ st
       & evalFocus .~ body
       & evalStore .~ store'
-      & evalEnv   %~ cons (True, addrs)
+      & evalEnv   %~ Map.union (Map.fromList (zip names (repeat addr)))
 
-  Handle tm _adj _peg handlers valHandler -> do
-    let handlers'   = handlers   & traverse . traverse %~ view _3
-        valHandler' = valHandler ^. _2
+  Handle tm _adj _peg handlers valHandler ->
+    -- let handlers'   = handlers   & traverse . traverse %~ view _3
+    --     valHandler' = valHandler ^. _2
     logReturnState "M-Handle" $ st
       & evalFocus .~ tm
-      & evalCont  %~ cons (Frame [] (Handler handlers' valHandler' env))
+      & evalCont  %~ cons (Frame [] (Handler handlers valHandler env))
 
-  Closure env' tm -> logReturnState "M-Closure" $ st
+  Closure names env' tm -> logReturnState "M-Closure" $ st
     & evalFocus .~ tm
     & evalEnv   .~ env'
 
-  -- We replace all uses of `return V` with an `isValue` check
   val | returning -> case cont of
     -- M-RetCont
     Continuation (Frame (PureFrame frameType rhs [] frameVals env' : pureCont) handler' : k)
@@ -392,12 +411,21 @@ step st@(EvalState focus env store cont mFwdCont returning done)
       let (addrs, store') = setVals store vals'
 
       let (bodyEnv, focus') = case frameType of
-            LetFrame  -> ((False, addrs) : env', rhs)
-            CaseFrame -> error "CaseFrame"
-            AppFrame  -> case valueInterpretation env' store' rhs of
-              Just (Lambda _ scope)      -> ((False, addrs) : env', scope)
-              Just (Closure clEnv scope) -> ((False, addrs) : clEnv, scope)
-              _other                     -> ((False, addrs) : env', rhs)
+            LetFrame names ->
+              -- TODO: strictZip
+              let newNames = Map.fromList $ zip names addrs
+              in (Map.union newNames env', rhs)
+            AppFrame -> case valueInterpretation env' store' rhs of
+              Just (Lambda names scope)      ->
+                -- TODO: strictZip
+                let newNames = Map.fromList $ zip names addrs
+                in (Map.union newNames env', scope)
+              Just (Closure names clEnv scope) ->
+                -- TODO: strictZip
+                let newNames = Map.fromList (zip names addrs)
+                in (Map.union newNames clEnv, scope)
+              _other                     -> todo "RetCont other"
+                -- ((False, addrs) : env', rhs)
 
       logReturnState "M-RetCont" $ st
         & evalFocus .~ focus'
@@ -413,13 +441,13 @@ step st@(EvalState focus env store cont mFwdCont returning done)
 
     -- M-RetHandler
     -- XXX what of k0?
-    Continuation (Frame [] (Handler _handlers valHandler env') : k) -> do
+    Continuation (Frame [] (Handler _handlers (name, valHandler) env') : k) -> do
       val' <- valueInterpretation env store val ?? NoValue "M-RetHandler"
-      let (addrs, store') = setVals store [val']
+      let (addr, store') = runState (setVal (NonrecursiveBinding val')) store
       logReturnState "M-RetHandler" $ st
         & evalFocus .~ valHandler
         & evalStore .~ store'
-        & evalEnv   .~ (False, addrs) : env'
+        & evalEnv   %~ Map.insert name addr
         & evalCont  .~ Continuation k
 
     Continuation (Frame [] K0 : _k) -> do
@@ -430,6 +458,7 @@ step st@(EvalState focus env store cont mFwdCont returning done)
 
     _ -> error "invalid continuation"
 
+  -- We replace all uses of `return V` with an `isValue` check
   -- HACK: handle things which are already values
   -- TODO: remove this
   val | isValue val -> do
