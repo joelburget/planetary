@@ -27,12 +27,10 @@ annToAnsi = \case
   Term        -> color Magenta
 
 prettyPureContFrame :: PureContinuationFrame -> Doc Ann
-prettyPureContFrame (PureFrame ty body tms vals _env) = vsep
+prettyPureContFrame (PureFrame ty tms vals _env) = vsep
   [ annotate Highlighted "* PureFrame" <+> parens (pretty (show ty))
   , indent 2 $ vsep
-    [ annotate Highlighted "body: "
-      <+> prettyTmPrec 11 body
-    , annotate Highlighted "tms: "
+    [ annotate Highlighted "tms: "
       <+> annotate Term (vsep (prettyTmPrec 11 <$> tms))
     , annotate Highlighted "vals: "
       <+> annotate Val (vsep (prettyTmPrec 11 <$> vals))

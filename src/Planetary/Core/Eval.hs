@@ -1,6 +1,5 @@
 {-# language BangPatterns #-}
 {-# language DataKinds #-}
-{-# language DeriveAnyClass #-}
 {-# language DeriveGeneric #-}
 {-# language FlexibleContexts #-}
 {-# language GeneralizedNewtypeDeriving #-}
@@ -25,9 +24,9 @@ import Data.Semigroup
 import Data.Text (Text)
 import Data.Text.Prettyprint.Doc
 import Data.Traversable (for)
-import GHC.Exts (IsList)
+import GHC.Exts (IsList(..))
 import GHC.Generics
-import Network.IPLD hiding ((.=))
+import Network.IPLD hiding ((.=), Row)
 import qualified Network.IPLD as IPLD
 
 import Planetary.Core.Syntax
@@ -88,26 +87,30 @@ data BindingType
   = RecursiveBinding (Map Text TmI)
   | NonrecursiveBinding TmI
   | ContBinding Continuation
-  deriving (Show, Generic, IsIpld)
+  deriving (Show, Generic)
+instance IsIpld BindingType
 
 data PureFrameType
-  = LetFrame !(Vector Text)
-  | AppFrame
-  deriving (Show, Generic, IsIpld)
+  = LetFrame  !TmI !(Vector Text)
+  | AppFrame  !TmI
+  | DataFrame !Cid !Row
+  deriving (Show, Generic)
+instance IsIpld PureFrameType
 
 data PureContinuationFrame = PureContinuationFrame
   { _pcType  :: !PureFrameType
-  , _pcTm    :: !TmI
+  -- , _pcTm    :: !TmI
   , _pcTerms :: !(Vector TmI)
   , _pcVals  :: !(Vector TmI)
   , _pcEnv   :: !Env
-  } deriving (Show, Generic, IsIpld)
+  } deriving (Show, Generic)
+instance IsIpld PureContinuationFrame
 
 -- We only use the spine for applications, no? Could also use for multi-lets.
 pattern PureFrame
-  :: PureFrameType -> TmI -> [TmI] -> [TmI] -> Env -> PureContinuationFrame
-pattern PureFrame frameType body tms vals env
-  = PureContinuationFrame frameType body tms vals env
+  :: PureFrameType -> [TmI] -> [TmI] -> Env -> PureContinuationFrame
+pattern PureFrame frameType tms vals env
+  = PureContinuationFrame frameType tms vals env
 
 data ContHandler
   = K0
@@ -117,15 +120,22 @@ data ContHandler
     -- value handler
     !(Text, TmI)
     !Env
-  deriving (Show, Generic, IsIpld)
+  deriving (Show, Generic)
+instance IsIpld ContHandler
 
 data ContinuationFrame = ContinuationFrame
   { _pureContinuation :: !(Stack PureContinuationFrame)
   , _handler          :: !ContHandler
-  } deriving (Show, Generic, IsIpld)
+  } deriving (Show, Generic)
+instance IsIpld ContinuationFrame
 
 newtype Continuation = Continuation { unCont :: Stack ContinuationFrame }
-  deriving (Show, Generic, IsIpld, Monoid, Semigroup, IsList)
+  deriving (Show, Generic, Monoid, Semigroup)
+instance IsList Continuation where
+  type Item Continuation = ContinuationFrame
+  toList   = unCont
+  fromList = Continuation
+instance IsIpld Continuation
 
 type instance Index Continuation = Int
 type instance IxValue Continuation = ContinuationFrame
@@ -241,30 +251,36 @@ initEvalState store tm = EvalState tm Map.empty store
 
 lookupContinuation :: Env -> ValueStore -> Text -> Maybe Continuation
 lookupContinuation env store name = do
-  addr              <- env   ^? ix name
-  ipld              <- store ^? ix addr
-  ContBinding cont  <- fromIpld ipld
+  addr             <- env   ^? ix name
+  ipld             <- store ^? ix addr
+  ContBinding cont <- fromIpld ipld
   pure cont
 
 valueInterpretation :: Env -> ValueStore -> TmI -> Maybe TmI
 valueInterpretation env store = \case
-  DataConstructor uid row args -> DataConstructor uid row
-    <$> traverse (valueInterpretation env store) args
-  v@ForeignValue{} -> Just v
+  DataConstructor uid row args -> do
+    traceM "interpreting data constructor"
+    traceShowM args
+    DataConstructor uid row <$> traverse (valueInterpretation env store) args
   -- Lambda _names scope -> Just $ Closure env scope
   Variable name -> do
     addr <- env   ^? ix name
+    traceShowM addr
     ipld <- store ^? ix addr
+    traceShowM ipld
     val  <- fromIpld ipld
+    traceShowM val
     case val of
-      ContBinding cont          -> todo "handle cont binding case"
-      RecursiveBinding tms      -> tms ^? ix name
-      NonrecursiveBinding val'  -> case val' of
-        Closure names env' body -> valueInterpretation env' store body
-        Lambda names body       -> Just $ Closure names env body
-        _                       -> Just val'
+      ContBinding cont           -> todo "handle cont binding case"
+      RecursiveBinding tms       -> tms ^? ix name
+      NonrecursiveBinding val'   -> case val' of
+        Closure _names env' body -> valueInterpretation env' store body
+        Lambda names body        -> Just $ Closure names env body
+        _                        -> Just val'
   Lambda names scope -> Just $ Closure names env scope
-  c@Command{} -> Just c
+
+  c@Command{}      -> Just c
+  v@ForeignValue{} -> Just v
 
   -- Value v -> Just v
 
@@ -293,21 +309,10 @@ step st@(EvalState focus env store cont mFwdCont returning done)
 
   -- M-Arg
   Application f (MixedSpine (tm:tms) vals) ->
-    logReturnState "M-Arg" $ st
+    logReturnState "M-Arg (1)" $ st
       & evalFocus .~ tm
       & evalCont  . _head . pureContinuation
-        %~ cons (PureFrame AppFrame f tms vals env)
-
---   -- TODO: awkward: we treat this special case differently
---   Application f (MixedSpine [] vals) -> do
---     f' <- valueInterpretation env store f ?? NoValue "Application!"
---     traceShowM ("application interpretation", f')
---     let (addrs, store') = setVals store vals
---     logReturnState "M-Arg (empty)" $ st
---       & evalFocus .~ f'
---       -- TODO
---       -- & evalEnv   %~ cons (False, addrs)
---       & evalStore .~ store'
+        %~ cons (PureFrame (AppFrame f) tms vals env)
 
   AppN f spine
     -- applying some handler continuation k
@@ -319,10 +324,12 @@ step st@(EvalState focus env store cont mFwdCont returning done)
 
   -- M-Op / M-Op-Handle
   AppN (Command uid row) spine -> case mFwdCont of
-    Nothing -> logReturnState "M-Op" $ st & evalFwdCont .~ Just (Continuation [])
+    Nothing -> logReturnState "M-Op" $
+      st & evalFwdCont .~ Just (Continuation [])
 
     Just fwdCont
-      | Continuation (Frame _pureCont (Handler handlers _valHandler handlerEnv) : k) <- cont
+      | Continuation
+        (Frame _pureCont (Handler handlers _valHandler handlerEnv) : k) <- cont
       , Just handleCmd <- handlers ^? ix uid . ix row
       -> do
         spine' <- traverse (valueInterpretation env store) spine
@@ -333,7 +340,6 @@ step st@(EvalState focus env store cont mFwdCont returning done)
               pure $ kAddr : spineAddrs
             bindVars = Map.fromList $
               zip (handleCmd ^. _2 : handleCmd ^. _1) addrs
-        traceM "executing M-Op-Handle"
         logReturnState "M-Op-Handle" $ st
           & evalFocus   .~ (handleCmd ^. _3)
           -- XXX what's gamma'
@@ -360,8 +366,21 @@ step st@(EvalState focus env store cont mFwdCont returning done)
       & evalCont    %~ Continuation . tail . unCont
       & evalFwdCont <>~ Just (Continuation (fwdCont <> [cont ^?! _head]))
 
+  -- -- TODO: awkward: we treat this special case differently
+  Application f (MixedSpine [] vals) -> do
+    f' <- valueInterpretation env store f ?? NoValue "Application!"
+    traceShowM ("application interpretation", f')
+    let (addrs, store') = setVals store vals
+    logReturnState "M-Arg (empty)" $ st
+      & evalFocus .~ f'
+      -- TODO
+      -- & evalEnv   %~ cons (False, addrs)
+      & evalStore .~ store'
+
   -- M-Case
   Case v rows -> do
+    traceM "in M-Case"
+    traceShowM v
     val <- valueInterpretation env store v ?? NoValue "M-Case"
     DataConstructor _uid rowNum args <- pure val
     let (addrs, store') = setVals store args
@@ -372,13 +391,22 @@ step st@(EvalState focus env store cont mFwdCont returning done)
       -- TODO strictZip
       & evalEnv   %~ Map.union (Map.fromList (zip varNames addrs))
 
+  DataConstructor cid row tms | not returning -> case tms of
+    [] -> logReturnState "M-Data (immediate)" $ st & isReturning .~ True
+    tm:tms -> do
+      traceM "in M-Data"
+      logReturnState "M-Data" $ st
+        & evalFocus .~ tm
+        & evalCont ._head . pureContinuation %~
+          cons (PureFrame (DataFrame cid row) tms [] env)
+
   Let body _polyty name rhs ->
     -- let Frame pureCont handler : k = cont
     --     cont' = Frame (Bindings IsntLetrec [body] : pureCont) handler : k
     logReturnState "M-Let" $ st
       & evalFocus .~ body
       & evalCont  . _head . pureContinuation
-        %~ cons (PureFrame (LetFrame [name]) rhs [] [] env)
+        %~ cons (PureFrame (LetFrame rhs [name]) [] [] env)
 
   -- Tail-call the letrec
   Letrec names lambdas body -> do
@@ -403,7 +431,7 @@ step st@(EvalState focus env store cont mFwdCont returning done)
 
   val | returning -> case cont of
     -- M-RetCont
-    Continuation (Frame (PureFrame frameType rhs [] frameVals env' : pureCont) handler' : k)
+    Continuation (Frame (PureFrame frameType [] frameVals env' : pureCont) handler' : k)
       -> do
       let vals = val:frameVals
       vals' <- traverse (valueInterpretation env store) vals
@@ -411,11 +439,11 @@ step st@(EvalState focus env store cont mFwdCont returning done)
       let (addrs, store') = setVals store vals'
 
       let (bodyEnv, focus') = case frameType of
-            LetFrame names ->
+            LetFrame rhs names ->
               -- TODO: strictZip
               let newNames = Map.fromList $ zip names addrs
               in (Map.union newNames env', rhs)
-            AppFrame -> case valueInterpretation env' store' rhs of
+            AppFrame rhs -> case valueInterpretation env' store' rhs of
               Just (Lambda names scope)      ->
                 -- TODO: strictZip
                 let newNames = Map.fromList $ zip names addrs
@@ -426,6 +454,7 @@ step st@(EvalState focus env store cont mFwdCont returning done)
                 in (Map.union newNames clEnv, scope)
               _other                     -> todo "RetCont other"
                 -- ((False, addrs) : env', rhs)
+            DataFrame cid row -> (bodyEnv, DataConstructor cid row vals')
 
       logReturnState "M-RetCont" $ st
         & evalFocus .~ focus'
@@ -433,11 +462,11 @@ step st@(EvalState focus env store cont mFwdCont returning done)
         & evalEnv   .~ bodyEnv
         & evalCont  .~ Continuation (Frame pureCont handler' : k)
 
-    Continuation (Frame (PureFrame ty rhs (tm:tms) vals env' : pureCont) handler' : k) ->
+    Continuation (Frame (PureFrame ty (tm:tms) vals env' : pureCont) handler' : k) ->
       logReturnState "M-ArgCont" $ st
         & evalFocus .~ tm
         & evalCont  .~
-          Continuation (Frame (PureFrame ty rhs tms (val:vals) env' : pureCont) handler' : k)
+          Continuation (Frame (PureFrame ty tms (val:vals) env' : pureCont) handler' : k)
 
     -- M-RetHandler
     -- XXX what of k0?
@@ -467,7 +496,7 @@ step st@(EvalState focus env store cont mFwdCont returning done)
       & evalFocus   .~ val'
       & isReturning .~ True
 
-  _other -> logIncomplete st
+  other -> traceM "incomplete>" >> traceShowM other >> traceM "<incomplete" >> logIncomplete st
 
 run :: AmbientHandlers -> Logger -> EvalState -> IO (Either Err TmI)
 run ambient logger st@(EvalState tm _ _ _ _ _ done)
