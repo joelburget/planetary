@@ -181,15 +181,20 @@ writeForeign a = do
   pure cid
 
 -- XXX
-liftBinaryOp :: IsIpld s => (s -> s -> s) -> Handler
+liftBinaryOp :: (Show s, IsIpld s) => (s -> s -> s) -> Handler
 liftBinaryOp op st
-  | AppN _ [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2]
-    <- st ^. evalFocus = do
-    i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
+  -- | AppN _ [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2]
+  --   <- st ^. evalFocus = do
+  | Just (AppN _ [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2])
+    <- st ^? evalCont . _head . pureContinuation . _head . pcCtx = do
+    -- i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
+    x <- lookupForeign uid1
+    y <- lookupForeign uid2
+    let i = op x y
     i' <- writeForeign i
     pure $ st
-      & evalFocus   .~ ForeignValue tyUid tySat i'
-      & isReturning .~ True
+      & evalFocus .~ Value (ForeignValue tyUid tySat i')
+      & evalCont . _head . pureContinuation %~ tail
 liftBinaryOp _ st = traceTextM (layout (prettyEvalState st)) >> throwError FailedForeignFun
 
 -- XXX
@@ -198,9 +203,7 @@ liftUnaryOp op st
   | AppN _ [ForeignValue tyUid tySat uid] <- st ^. evalFocus = do
   i <- op <$> lookupForeign uid
   i' <- writeForeign i
-  pure $ st
-    & evalFocus   .~ ForeignValue tyUid tySat i'
-    & isReturning .~ True
+  pure $ st & evalFocus .~ Value (ForeignValue tyUid tySat i')
 liftUnaryOp _ _ = throwError FailedForeignFun
 
 mkFix :: Handler
@@ -209,9 +212,7 @@ mkFix st
   traceM $ "running mkfix on: " ++ show a
   a' <- writeForeign a
   traceM $ "mkfix returning: " ++ show a'
-  pure $ st
-    & evalFocus   .~ ForeignValue lfixId [{- XXX -}] a'
-    & isReturning .~ True
+  pure $ st & evalFocus .~ Value (ForeignValue lfixId [{- XXX -}] a')
 mkFix _ = throwError FailedForeignFun
 
 unFix :: Handler
@@ -222,13 +223,13 @@ unFix st
     traceM "running unfix"
     val <- lookupForeign valUid
     traceM $ "unfix returning: " ++ show val
-    pure $ st
-      & evalFocus   .~ val
-      & isReturning .~ True
+    pure $ st & evalFocus .~ Value val
 unFix x = traceShowM x >> throwError FailedForeignFun
 
 mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
 mkForeign val = let val' = toIpld val in (valueCid val', val')
 
-mkForeignTm :: IsIpld a => Cid -> Vector ValTyI -> a -> TmI
-mkForeignTm tyId tySat = ForeignValue tyId tySat . fst . mkForeign
+mkForeignTm :: IsIpld a => Cid -> Vector ValTyI -> a -> (TmI, IPLD.Value)
+mkForeignTm tyId tySat a =
+  let (cid, val) = mkForeign a
+  in (ForeignValue tyId tySat cid, val)

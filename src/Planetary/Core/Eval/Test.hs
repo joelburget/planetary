@@ -2,6 +2,7 @@
 {-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}
+{-# language Rank2Types #-}
 {-# language TypeApplications #-}
 {-# language TypeFamilies #-}
 module Planetary.Core.Eval.Test (unitTests, runTest, mkLogger) where
@@ -13,7 +14,7 @@ import qualified Data.HashMap.Strict as HashMap
 import Data.Maybe (fromJust)
 import Data.Text (Text)
 import NeatInterpolation
-import Network.IPLD (Cid)
+import Network.IPLD (Cid, toIpld)
 import Prelude hiding (not)
 import EasyTest hiding (bool, run)
 
@@ -23,7 +24,7 @@ import Planetary.Support.NameResolution (resolveTm)
 import Planetary.Support.Parser (forceTm)
 import Planetary.Support.Pretty
 import qualified Planetary.Library.FrankExamples as Frank
-import Planetary.Library.HaskellForeign (mkForeignTm, haskellOracles)
+import Planetary.Library.HaskellForeign (mkForeignTm, haskellOracles, intOpsId)
 
 import Data.Text.Prettyprint.Doc
 
@@ -44,13 +45,13 @@ noteFailureState initState result expected = do
   fail "failure: see above"
 
 putLogs :: Bool
-putLogs = False
+putLogs = True
 
 mkLogger :: (Text -> IO ()) -> Logger
-mkLogger mkNote = Logger
-  (\t -> if putLogs then mkNote  . logReturnState t else const (pure ()))
-  (if putLogs then mkNote . logIncomplete else const (pure ()))
-  (if putLogs then mkNote . logValue      else const (pure ()))
+mkLogger mkNote =
+  let helper :: forall a. (a -> Text) -> a -> IO ()
+      helper f = if putLogs then mkNote . f else const (pure ())
+  in Logger (helper . logReturnState) (helper logIncomplete) (helper logValue)
 
 runTest
   :: Text
@@ -76,9 +77,6 @@ bool i = DataConstructor boolId i []
 unitTests :: Test ()
 unitTests  =
   let
-      -- noHandlers :: AmbientHandlers
-      -- noHandlers = mempty
-
       -- true, false :: forall a b. Tm Cid a b
       false = bool 0
       true = bool 1
@@ -87,10 +85,6 @@ unitTests  =
         [ ([], true)
         , ([], false)
         ]
-      -- boolOfInt = Case boolId
-      --   [ ([], one)
-      --   , ([], zero)
-      --   ]
 
       evalEnvRunTest desc = runTest desc noAmbientHandlers emptyStore
 
@@ -101,10 +95,13 @@ unitTests  =
          in scope "functions" $ tests
             -- [ evalEnvRunTest "application 1" (AppN lam [true])
             --   (Right true)
-            [ evalEnvRunTest "application 2"
+            [ evalEnvRunTest "application"
               (AppT lam [true])
               (Right true)
             -- TODO: test further steps with bound variables
+            , evalEnvRunTest "nullary function call"
+              (AppT (Lambda [] true) [])
+              (Right true)
             ]
 
        , scope "case" $ tests
@@ -114,15 +111,6 @@ unitTests  =
          , evalEnvRunTest "case True of { False -> True; True -> False } (1)"
              (not true)
              (Right false)
-
-         -- commenting these out because I don't think they're well formed
-         -- terms
-         -- , evalEnvRunTest "case False of { False -> True; True -> False } (2)"
-         --     (not false)
-         --     (Right true)
-         -- , evalEnvRunTest "case True of { False -> True; True -> False } (2)"
-         --     (not true)
-         --     (Right false)
          ]
 
        , let ty :: Polytype Cid
@@ -132,61 +120,131 @@ unitTests  =
          in scope "let" $ evalEnvRunTest "let x = false in x" tm (Right false)
 
        , scope "handle" $ do
-       let handlerTm = forceTm [text|
+       let abortHandlerTm = forceTm [text|
                handle x : [e , <Abort>]Int with
                  Abort:
                    | <aborting -> k> -> one
                  | v -> two
              |]
 
-           zero = mkForeignTm @Int intId [] 0
-           one  = mkForeignTm @Int intId [] 1
-           two  = mkForeignTm @Int intId [] 2
+           sendHandlerTm = forceTm [text|
+               handle x : [e, <Send Int>]Int with
+                 Send:
+                   | <send n -> k> -> n
+                 | v -> v
+             |]
+
+           -- TODO: this is duplicated in FrankExamples.Test
+           stateHandlerTm = forceTm [text|
+               letrec
+                 state : forall S X. {S -> {X} -> X}
+                       = \s x -> handle x! : X with
+                         State:
+                           | <get -> k>   -> state s (\-> k s)
+                           | <put s -> k> -> state s (\-> k <Unit.0>)
+                         | y -> y
+
+                 fst : forall X Y. {X -> Y -> X}
+                     = \x y -> x
+
+                 -- increment, return original value
+                 next : forall. {[<State Int>]Int}
+                      -- fst get! (put (get! + 1))
+                      = \-> fst get! (put (add get! one))
+
+                 statefulTm
+                   : forall. {[<State Int>] Int}
+                   = \-> let x : forall. Int = next! in
+                           let y : forall. Int = next! in
+                             let z : forall. Int = next! in z
+
+               in state zero statefulTm
+             |]
+
+           (zero, zeroVal) = mkForeignTm @Int intId [] 0
+           (one,  oneVal)  = mkForeignTm @Int intId [] 1
+           (two,  twoVal)  = mkForeignTm @Int intId [] 2
 
            resolutionState = fromList $
-             -- Provides Abort
+             -- Provides Abort, Send, State
              (Frank.resolvedDecls ^. globalCids) ++
              [("Int", intId)]
 
-       Right handler' <- pure $ resolveTm resolutionState handlerTm
+       Right abortHandler <- pure $ resolveTm resolutionState abortHandlerTm
+       Right sendHandler  <- pure $ resolveTm resolutionState sendHandlerTm
+       Right stateHandler <- pure $ resolveTm resolutionState stateHandlerTm
 
-       let handler'' = substitute "one" one $
+       Just abortCid <- pure $
+         Frank.resolvedDecls ^?  globalCids . to HashMap.fromList . ix "Abort"
+       Just sendCid <- pure $
+         Frank.resolvedDecls ^?  globalCids . to HashMap.fromList . ix "Send"
+       Just stateCid <- pure $
+         Frank.resolvedDecls ^?  globalCids . to HashMap.fromList . ix "State"
+
+       let abortHandler' = substitute "one" one $
              substitute "two" two
-               handler'
+               abortHandler
 
-           handleVal = substitute "x" zero handler''
+           handleVal = substitute "x" zero abortHandler'
 
-           abortCid = Frank.resolvedDecls ^?!
-             globalCids . to HashMap.fromList . ix "Abort"
            abort = AppN (Command abortCid 0) []
-           handleAbort = substitute "x" abort handler''
+           handleAbort = substitute "x" abort abortHandler'
+
+           handleSend = substitute "x"
+             (AppN (Command sendCid 0) [one])
+             sendHandler
+
+           get = Command stateCid 0
+           put = Command stateCid 1
+           add = Command intOpsId 0
+
+           handleNext = substituteAll
+             [ ("zero", zero)
+             , ("one", one)
+             , ("get", get)
+             , ("put", put)
+             , ("add", add)
+             ]
+             stateHandler
+
+           numberStore = storeOf $ toIpld <$> [zeroVal, oneVal, twoVal]
+
        tests
-         [ runTest "handle val" noAmbientHandlers emptyStore handleVal
+         [ runTest "val" noAmbientHandlers emptyStore handleVal
            (Right two)
-         , runTest "handle abort" noAmbientHandlers emptyStore
+         , runTest "abort" noAmbientHandlers emptyStore
            handleAbort (Right one)
-         -- XXX test continuing from handler
+         , runTest "send" noAmbientHandlers emptyStore handleSend
+           (Right one)
+         , let handlers = AmbientHandlers haskellOracles
+           in runTest "handle state" handlers numberStore handleNext (Right two)
          ]
 
---        , let
---              ty = Polytype [] (DataTy (UidTy boolId) [])
---              tm = close1 "x" $
---                   let_ "x" ty false $
---                     let_ "y" ty (not (FV"x")) $
---                       not (FV"y")
+       , scope "let x = false in let y = not x in not y" $ do
+         let
+             ty = Polytype [] (DataTy (UidTy boolId) [])
+             tm = Let false ty "x" $
+                    Let (not (V"x")) ty "y" $
+                      not (V"y")
 
---              -- both versions of tm should be equivalent
---              resolutionState = todo "resolutionState"
---              Right tm2 = resolveTm resolutionState $ forceTm [text|
---                let x: forall. Bool = false in
---                  let y: forall. Bool = not x in
---                    not y
---              |]
+             -- both versions of tm should be equivalent
+             resolutionState = fromList (Frank.resolvedDecls ^. globalCids)
+         Right tm2 <- pure $ resolveTm resolutionState $ forceTm [text|
+             let not: forall. {Bool -> Bool}
+                    = \x -> case x of
+                      | <False> -> <Bool.0>
+                      | <True>  -> <Bool.1>
+             in
+             let x: forall. Bool = false in
+             let y: forall. Bool = not x in
+             not y
+           |]
+         let tm2' = substituteAll [ ("false", false) ] tm2
 
---          in scope "let x = false in let y = not x in not y" $ tests
---               [ evalEnvRunTest "tm"  tm  (Right false)
---               -- , evalEnvRunTest "tm2" tm2 (Right false)
---               ]
+         tests
+           [ evalEnvRunTest "tm"  tm   (Right false)
+           , evalEnvRunTest "tm2" tm2' (Right false)
+           ]
 
        , scope "letrec" $ do
        let evenodd = forceTm [text|
@@ -210,7 +268,7 @@ unitTests  =
           [("Fix", lfixId)])
          evenodd
 
-       Just (natfId, _)  <- pure $ namedData      "NatF"   Frank.resolvedDecls
+       Just (natfId, _)  <- pure $ namedData "NatF" Frank.resolvedDecls
 
        let -- mkTm n = [| evenOdd n |]
            mkTm :: Text -> Int -> TmI

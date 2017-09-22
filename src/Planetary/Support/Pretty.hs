@@ -27,15 +27,7 @@ annToAnsi = \case
   Term        -> color Magenta
 
 prettyPureContFrame :: PureContinuationFrame -> Doc Ann
-prettyPureContFrame (PureFrame ty tms vals _env) = vsep
-  [ annotate Highlighted "* PureFrame" <+> parens (pretty (show ty))
-  , indent 2 $ vsep
-    [ annotate Highlighted "tms: "
-      <+> annotate Term (vsep (prettyTmPrec 11 <$> tms))
-    , annotate Highlighted "vals: "
-      <+> annotate Val (vsep (prettyTmPrec 11 <$> vals))
-    ]
-  ]
+prettyPureContFrame (PureFrame tm _env) = "*" <+> prettyTmPrec 0 tm
 
 prettyPureCont :: Doc Ann -> Stack PureContinuationFrame -> Doc Ann
 prettyPureCont name stk = vsep
@@ -51,10 +43,19 @@ lineVsep head =
         ]
   in vsep . intersperse "" . imap lineFormatter
 
-prettyCont :: Doc Ann -> Continuation -> Doc Ann
-prettyCont name (Continuation stk) =
-  let prettyContFrame (ContinuationFrame pureCont (Handler _handlers _valHandler _env)) = vsep
-        [ "handler: TODO" -- <> prettyTmPrec 0 handler
+prettyContHandler :: ContHandler -> Doc Ann
+prettyContHandler K0 = "K0"
+prettyContHandler (Handler handlers (vName, vRhs) env) =
+  let
+      prettyHandler (uid, uidHandler) = pretty uid
+        -- , indent 2 (align $ vsep $ fmap prettyRow uidHandler)
+      handlers' = prettyHandler <$> toList handlers
+  in "handle" <+> list handlers'
+
+prettyCont :: Continuation -> Doc Ann
+prettyCont (Continuation stk) =
+  let prettyContFrame (ContinuationFrame pureCont h@(Handler _handlers _valHandler _env)) = vsep
+        [ "handler: " <> prettyContHandler h
         , prettyPureCont "pure cont:" pureCont
         ]
       prettyContFrame (ContinuationFrame pureCont K0) = vsep
@@ -62,16 +63,13 @@ prettyCont name (Continuation stk) =
         , prettyPureCont "pure cont:" pureCont
         ]
       lines = prettyContFrame <$> stk
-  in vsep
-       [ annotate Highlighted name
-       , indent 2 (lineVsep "line" lines)
-       ]
+  in lineVsep "line" lines
 
 prettyBinding :: Text -> BindingType -> Doc Ann
 prettyBinding name = \case
-  RecursiveBinding tms -> prettyTmPrec 0 (tms ^?! ix name)
+  RecursiveBinding tms   -> prettyTmPrec 0 (tms ^?! ix name)
   NonrecursiveBinding tm -> prettyTmPrec 0 tm
-  ContBinding cont -> prettyCont (pretty name) cont
+  ContBinding cont       -> prettyCont cont
 
 prettyEnv :: ValueStore -> Env -> Doc Ann
 prettyEnv store env =
@@ -88,20 +86,22 @@ prettyEnv store env =
   in vsep $ fmap snd $ Map.toList $ imap prettyLine env
 
 prettyEvalState :: EvalState -> Doc Ann
-prettyEvalState (EvalState focus env store cont fwdCont isReturning done)
-  | done = "EvalState (done)" <+> prettyTmPrec 0 focus
-  | otherwise = vsep
-    [ "EvalState"
-    , indent 2 $ vsep
-      [ annotate Highlighted "focus:" <+> prettyTmPrec 0 focus
-      , annotate Highlighted "env:"
-      , indent 2 (prettyEnv store env)
-      , prettyCont "cont:" cont
-      , case fwdCont of
-          Nothing       -> mempty
-          Just fwdCont' -> prettyCont "fwd cont:" fwdCont'
-      ]
+prettyEvalState (EvalState focus env store cont fwdCont) = vsep
+  [ "EvalState"
+  , indent 2 $ vsep
+    [ annotate Highlighted "focus:" <+> prettyTmPrec 0 focus
+    , annotate Highlighted "env:"
+    , indent 2 (prettyEnv store env)
+    , "cont:"
+    , indent 2 (prettyCont cont)
+    , case fwdCont of
+        Nothing       -> mempty
+        Just fwdCont' -> vsep
+          [ "fwd cont:"
+          , indent 2 (prettyCont fwdCont')
+          ]
     ]
+  ]
 
 -- prettySequence :: [Doc ann] -> Doc ann
 -- prettySequence xs =
@@ -138,8 +138,10 @@ prettyPolytype d (Polytype binders val) =
   let prettyBinder (name, kind) = case kind of
         ValTyK -> pretty name
         EffTyK -> brackets (pretty name)
-      prettyBinders binders = fillSep (prettyBinder <$> binders)
-  in "forall" <+> prettyBinders binders <> "." <+> prettyTyPrec d val
+      prettyBinders = case binders of
+        [] -> ""
+        _ -> " " <> fillSep (prettyBinder <$> binders)
+  in "forall" <> prettyBinders <> "." <+> prettyTyPrec d val
 
 showParens :: Int -> Doc ann -> Doc ann
 showParens i = if i > 10 then parens else id
@@ -186,12 +188,12 @@ prettyTmPrec d = \case
           , prettyTmPrec 0 rhs
           ]
         prettyHandler (uid, uidHandler) = vsep
-          [ pretty uid <+> colon
+          [ pretty uid <> colon
           , indent 2 (align $ vsep $ fmap prettyRow uidHandler)
           ]
         handlers' = prettyHandler <$> toList handlers
     in vsep
-         [ "Handle" <+> prettyTmPrec 0 tm <+> colon <+> prettyTyPrec 0 peg <+> "with"
+         [ "handle" <+> prettyTmPrec 0 tm <+> colon <+> prettyTyPrec 0 peg <+> "with"
          , indent 2 (align $ vsep handlers')
          , indent 2 $ fillSep
            [ "|"
@@ -224,7 +226,17 @@ prettyTmPrec d = \case
          , "in" <+> prettyTmPrec 0 body
          ]
 
-  Closure _names _env tm -> showParens d $ "Closure" <+> prettyTmPrec 11 tm
+  Closure names env tm ->
+    let lamNames = pretty <$> names
+        capturedNames = pretty <$> Map.keys env
+    in showParens d $ sep
+         [ "Closure"
+         , list capturedNames
+         , "\\" <> sep lamNames <+> "->"
+         , prettyTmPrec 11 tm
+         ]
+  Hole -> "_Hole_"
+  Value v -> annotate Val (prettyTmPrec d v)
 
 instance Pretty Cid where
   pretty = pretty . Text.cons '…' . Text.takeEnd 5 . decodeUtf8 . compact

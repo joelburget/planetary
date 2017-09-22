@@ -20,14 +20,14 @@ import Planetary.Support.Parser
 -- "unit : Unit"
 
 parserTest
-  :: Eq a
+  :: (Eq a, Show a)
   => Text
   -> CoreParser Token Parser a
   -> a
   -> Test ()
 parserTest input parser expected = scope input $
   case runTokenParse parser testLocation input of
-    Right actual -> expect $ expected == actual
+    Right actual -> expectEq expected actual
     Left errMsg -> fail errMsg
 
 data NestedList = NamedList Text [NestedList]
@@ -240,6 +240,12 @@ unitTests = scope "parsing" $ tests
   , parserTest "\\xs -> xs" parseLambda (Lambda ["xs"] (V"xs"))
   , parserTest "\\ -> xs"   parseLambda (Lambda [] (V"xs"))
   , parserTest "\\-> xs"    parseLambda (Lambda [] (V"xs"))
+
+  , parserTest "<A.0 x! y!>" parseTm
+    (DataConstructor "A" 0 [AppT (V"x") [], AppT (V"y") []])
+
+  , parserTest "<A.1 x <A.0>>" parseTm
+    (DataConstructor "A" 1 [V"x", DataConstructor "A" 0 []])
 
   -- , let defn = T.unlines
   --         [

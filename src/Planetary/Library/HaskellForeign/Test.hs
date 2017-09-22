@@ -34,13 +34,13 @@ store =
 unitTests :: Test ()
 unitTests =
   let -- zero = mkForeignTm @Int 0
-      one  = mkForeignTm @Int intId [] 1
-      two  = mkForeignTm @Int intId [] 2
-      four = mkForeignTm @Int intId [] 4
+      (one, _)  = mkForeignTm @Int intId [] 1
+      (two, _)  = mkForeignTm @Int intId [] 2
+      (four, _) = mkForeignTm @Int intId [] 4
 
-      hello = mkForeignTm @Text textId [] "hello "
-      world = mkForeignTm @Text textId [] "world"
-      helloWorld = mkForeignTm @Text textId [] "hello world"
+      (hello, _) = mkForeignTm @Text textId [] "hello "
+      (world, _) = mkForeignTm @Text textId [] "world"
+      (helloWorld, _) = mkForeignTm @Text textId [] "hello world"
 
       add = AppN (Command intOpsId 0)
       sub = AppN (Command intOpsId 1)

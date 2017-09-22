@@ -39,12 +39,15 @@ import Debug.Trace
 data Err
   -- = RowBound
   = IndexErr
-  | FailedHandlerLookup
+  | FailedHandlerLookup Cid Row
   | FailedIpldConversion
   | FailedForeignFun
-  | VariableLookup
-  | NoValue Text
+  | VariableLookup Text
   | Incomplete
+  | NoValue
+  | BadContSpine [TmI]
+  | ZipNames [Text] [Cid]
+  | LetrecZip [Text] [TmI]
   deriving (Eq, Show)
 
 instance Pretty Err where
@@ -61,6 +64,9 @@ type Handlers           = UIdMap Cid [Handler]
 type ValueStore         = UIdMap Cid IPLD.Value
 newtype AmbientHandlers = AmbientHandlers { _ambientHandlers :: Handlers }
   deriving Monoid
+
+storeOf :: [IPLD.Value] -> ValueStore
+storeOf = fromList . fmap (\val -> (cidOf val, val))
 
 -- This is the monad you write FFI operations in.
 type ForeignM =
@@ -90,27 +96,17 @@ data BindingType
   deriving (Show, Generic)
 instance IsIpld BindingType
 
-data PureFrameType
-  = LetFrame  !TmI !(Vector Text)
-  | AppFrame  !TmI
-  | DataFrame !Cid !Row
-  deriving (Show, Generic)
-instance IsIpld PureFrameType
-
 data PureContinuationFrame = PureContinuationFrame
-  { _pcType  :: !PureFrameType
+  { _pcCtx   :: !TmI -- !PureFrameType
   -- , _pcTm    :: !TmI
-  , _pcTerms :: !(Vector TmI)
-  , _pcVals  :: !(Vector TmI)
+  -- , _pcTerms :: !(Vector TmI)
+  -- , _pcVals  :: !(Vector TmI)
   , _pcEnv   :: !Env
   } deriving (Show, Generic)
 instance IsIpld PureContinuationFrame
 
--- We only use the spine for applications, no? Could also use for multi-lets.
-pattern PureFrame
-  :: PureFrameType -> [TmI] -> [TmI] -> Env -> PureContinuationFrame
-pattern PureFrame frameType tms vals env
-  = PureContinuationFrame frameType tms vals env
+pattern PureFrame :: TmI -> Env -> PureContinuationFrame
+pattern PureFrame ctx env = PureContinuationFrame ctx env
 
 data ContHandler
   = K0
@@ -188,11 +184,6 @@ data EvalState = EvalState
   -- * Nothing: an operation is not being handled
   -- * Just stk: this stack of continuations didn't handle the operation
   , _evalFwdCont :: !(Maybe Continuation)
-
-  , _isReturning :: !Bool
-
-  -- TODO: setting finished to the final value is a gross hack
-  , _finished    :: !Bool
   } deriving Show
 
 makeLenses ''AmbientHandlers
@@ -247,7 +238,7 @@ runForeignM store action = do
 
 initEvalState :: ValueStore -> TmI -> EvalState
 initEvalState store tm = EvalState tm Map.empty store
-  (Continuation [ContinuationFrame [] K0]) Nothing False False
+  (Continuation [ContinuationFrame [] K0]) Nothing
 
 lookupContinuation :: Env -> ValueStore -> Text -> Maybe Continuation
 lookupContinuation env store name = do
@@ -255,41 +246,6 @@ lookupContinuation env store name = do
   ipld             <- store ^? ix addr
   ContBinding cont <- fromIpld ipld
   pure cont
-
-valueInterpretation :: Env -> ValueStore -> TmI -> Maybe TmI
-valueInterpretation env store = \case
-  DataConstructor uid row args -> do
-    traceM "interpreting data constructor"
-    traceShowM args
-    DataConstructor uid row <$> traverse (valueInterpretation env store) args
-  -- Lambda _names scope -> Just $ Closure env scope
-  Variable name -> do
-    addr <- env   ^? ix name
-    traceShowM addr
-    ipld <- store ^? ix addr
-    traceShowM ipld
-    val  <- fromIpld ipld
-    traceShowM val
-    case val of
-      ContBinding cont           -> todo "handle cont binding case"
-      RecursiveBinding tms       -> tms ^? ix name
-      NonrecursiveBinding val'   -> case val' of
-        Closure _names env' body -> valueInterpretation env' store body
-        Lambda names body        -> Just $ Closure names env body
-        _                        -> Just val'
-  Lambda names scope -> Just $ Closure names env scope
-
-  c@Command{}      -> Just c
-  v@ForeignValue{} -> Just v
-
-  -- Value v -> Just v
-
-  -- TODO: should these be translated to values?
-  -- InstantiatePolyVar tm ty -> flip InstantiatePolyVar ty
-  --   <$> valueInterpretation env tm
-  -- Annotation tm ty -> flip Annotation ty <$> valueInterpretation env tm
-
-  _ -> Nothing
 
 setVal :: BindingType -> State ValueStore Cid
 setVal val = do
@@ -301,117 +257,112 @@ setVal val = do
 setVals :: ValueStore -> [TmI] -> ([Cid], ValueStore)
 setVals store vals = runState (for vals (setVal . NonrecursiveBinding)) store
 
-step :: EvalState -> EvalM EvalState
-step st@(EvalState focus env store cont mFwdCont returning done)
-  = case focus of
-  -- TODO is this rule necessary?
-  _ | done -> error "stepping done eval state" -- pure st
+data FillContext a b = FillContext
+  { _fill    :: !a
+  , _context :: !b
+  }
 
-  -- M-Arg
-  Application f (MixedSpine (tm:tms) vals) ->
-    logReturnState "M-Arg (1)" $ st
-      & evalFocus .~ tm
-      & evalCont  . _head . pureContinuation
-        %~ cons (PureFrame (AppFrame f) tms vals env)
+type FillTmContext = FillContext TmI TmI
 
-  AppN f spine
-    -- applying some handler continuation k
-    | Variable name <- f
-    , Just k <- lookupContinuation env store name ->
-      logReturnState "M-AppCont" $ st
-        & evalFocus .~ head spine -- XXX way wrong
-        & evalCont  .~ k <> cont
+-- Helper for shiftContext. Invariant: list must contain a hole
+shiftList :: TmI -> [TmI] -> Either (FillContext TmI [TmI]) [TmI]
+shiftList val [Hole]        = Right [val]
+shiftList val (Hole:tm:tms) = Left $ FillContext tm (val:Hole:tms)
+shiftList val (tm:tms)      = case shiftList val tms of
+  Left (FillContext tm' tms') -> Left (FillContext tm' (tm:tms'))
+  Right vals -> Right (val:vals)
 
-  -- M-Op / M-Op-Handle
-  AppN (Command uid row) spine -> case mFwdCont of
-    Nothing -> logReturnState "M-Op" $
-      st & evalFwdCont .~ Just (Continuation [])
+-- shiftContext reinserts a value into a context and finds the next hole or
+-- returns the completed term
+shiftContext :: FillTmContext -> Either FillTmContext TmI
+shiftContext (FillContext val ctx) = case ctx of
+  DataConstructor uid row tms -> case shiftList val tms of
+    Left (FillContext val ctx)
+      -> Left $ FillContext val (DataConstructor uid row ctx)
+    Right vals -> Right $ DataConstructor uid row vals
+  AppN Hole spine -> Right $ AppN val spine
+  Application f spine -> case spine of
+    -- TODO: appending to the end of a list :(
+    NormalSpine vals -> Left $ FillContext f (AppN Hole (vals <> [val]))
+    MixedSpine (tm:tms) vals
+      -> Left (FillContext tm (Application f (MixedSpine tms (vals <> [val]))))
+  -- Application f spine -> case shiftList val spine of
+  --   Left val ctx -> FillContext val (Application f ctx)
+  --   Right vals   -> Application f vals
+  Case Hole rows -> Right $ Case val rows
+  -- Handle TODO?
+  Let Hole pty name rhs -> Right $ Let val pty name rhs
 
-    Just fwdCont
-      | Continuation
-        (Frame _pureCont (Handler handlers _valHandler handlerEnv) : k) <- cont
-      , Just handleCmd <- handlers ^? ix uid . ix row
-      -> do
-        spine' <- traverse (valueInterpretation env store) spine
-          ?? NoValue "M-Op-Handle"
-        let (addrs, store') = flip runState store $ do
-              kAddr      <- setVal (ContBinding fwdCont)
-              spineAddrs <- traverse (setVal . NonrecursiveBinding) spine'
-              pure $ kAddr : spineAddrs
-            bindVars = Map.fromList $
-              zip (handleCmd ^. _2 : handleCmd ^. _1) addrs
-        logReturnState "M-Op-Handle" $ st
-          & evalFocus   .~ (handleCmd ^. _3)
-          -- XXX what's gamma'
-          & evalEnv     %~ Map.union bindVars
-          & evalStore   .~ store'
-          & evalCont    .~ Continuation k
-          & evalFwdCont .~ Nothing
+findContext :: TmI -> Either FillTmContext TmI
+findContext tm = case tm of
+  DataConstructor _uid _row [] -> Right tm
+  DataConstructor uid row (tm:tms) -> Left $
+    FillContext tm (DataConstructor uid row (Hole:tms))
+  AppN f spine -> Left $ FillContext f (AppN Hole spine)
+  Application f (MixedSpine (tm:tms) vals) -> Left $
+    FillContext tm (Application f (MixedSpine tms vals))
+  Case scrutinee rows   -> Left $ FillContext scrutinee (Case Hole rows)
+  Let body pty name rhs -> Left $ FillContext body (Let Hole pty name rhs)
 
-    Just _fwdCont
-      | Continuation [_k0] <- cont
-      -> do
-       -- We've run out of possible handlers. In the links paper there's no
-       -- rule to cover this case -- the machine gets stuck. We have one
-       -- recourse -- check the ambient environment for a handler.
-       ambient       <- asks (^. _2 . ambientHandlers)
-       handler'      <- ambient ^? ix uid . ix row ?? FailedHandlerLookup
-       (store', ret) <- runForeignM (st ^. evalStore) (handler' st)
-       logReturnState "M-Op-Handle-Ambient" $ ret
-         & evalStore .~ store'
-         -- & evalEnv   %~ cons
-         & evalFwdCont .~ Nothing
+isContextual :: TmI -> Bool
+isContextual = \case
+  DataConstructor{} -> True
+  Application{}     -> True
+  Case{}            -> True
+  Let{}             -> True
+  _                 -> False
 
-    Just (Continuation fwdCont) -> logReturnState "M-Op-Forward" $ st
-      & evalCont    %~ Continuation . tail . unCont
-      & evalFwdCont <>~ Just (Continuation (fwdCont <> [cont ^?! _head]))
+enterContext :: EvalState -> EvalState
+enterContext st = case findContext (st ^. evalFocus) of
+  Left (FillContext tm ctx) -> st
+    & evalFocus .~ tm
+    & evalCont  . _head . pureContinuation
+      %~ cons (PureFrame ctx (st ^. evalEnv))
+  Right tm -> st & evalFocus .~ Value tm
 
-  -- -- TODO: awkward: we treat this special case differently
-  Application f (MixedSpine [] vals) -> do
-    f' <- valueInterpretation env store f ?? NoValue "Application!"
-    traceShowM ("application interpretation", f')
-    let (addrs, store') = setVals store vals
-    logReturnState "M-Arg (empty)" $ st
-      & evalFocus .~ f'
-      -- TODO
-      -- & evalEnv   %~ cons (False, addrs)
-      & evalStore .~ store'
+lookupVariable :: Text -> Env -> ValueStore -> Maybe TmI
+lookupVariable name env store = do
+  addr    <- env ^? ix name
+  ipld    <- store ^? ix addr
+  binding <- fromIpld ipld
+  case binding of
+    NonrecursiveBinding tm -> pure tm
+    RecursiveBinding tms   -> tms ^? ix name
+    ContBinding cont       -> Nothing
 
-  -- M-Case
-  Case v rows -> do
-    traceM "in M-Case"
-    traceShowM v
-    val <- valueInterpretation env store v ?? NoValue "M-Case"
-    DataConstructor _uid rowNum args <- pure val
-    let (addrs, store') = setVals store args
-    (varNames, rowTm) <- rows ^? ix rowNum ?? IndexErr
-    logReturnState "M-Case" $ st
-      & evalFocus .~ rowTm
-      & evalStore .~ store'
-      -- TODO strictZip
-      & evalEnv   %~ Map.union (Map.fromList (zip varNames addrs))
+step :: AmbientHandlers -> EvalState -> EvalM EvalState
+step ambient st@(EvalState focus env store cont mFwdCont) = case focus of
+  tm
+    | not (isValue tm)
+    , isContextual tm -> logReturnState "M-Enter" $ enterContext st
 
-  DataConstructor cid row tms | not returning -> case tms of
-    [] -> logReturnState "M-Data (immediate)" $ st & isReturning .~ True
-    tm:tms -> do
-      traceM "in M-Data"
-      logReturnState "M-Data" $ st
-        & evalFocus .~ tm
-        & evalCont ._head . pureContinuation %~
-          cons (PureFrame (DataFrame cid row) tms [] env)
+  Variable name
+    | Just newFocus <- lookupVariable name env store
+    -> logReturnState "variable lookup" $ st & evalFocus .~ newFocus
 
-  Let body _polyty name rhs ->
-    -- let Frame pureCont handler : k = cont
-    --     cont' = Frame (Bindings IsntLetrec [body] : pureCont) handler : k
-    logReturnState "M-Let" $ st
-      & evalFocus .~ body
-      & evalCont  . _head . pureContinuation
-        %~ cons (PureFrame (LetFrame rhs [name]) [] [] env)
+  Variable name
+    | Just k' <- lookupContinuation env store name -> do
+    let Continuation (Frame (PureFrame frameTm _ : pureCont) handler' : contK) = cont
+        AppN Hole spine = frameTm
+        k = Continuation (Frame pureCont handler' : contK)
+    newFocus <- case spine of
+      [arg] -> pure arg
+      _     -> throwError (BadContSpine spine)
+    logReturnState "M-AppCont" $ st
+      & evalFocus .~ newFocus
+      & evalCont  .~ k' <> k
+
+  Lambda{} -> logReturnState "Make value from lambda hack" $ st
+    & evalFocus %~ Value
+  Command{} -> logReturnState "Make value from command hack" $ st
+    & evalFocus %~ Value
+  ForeignValue{} -> logReturnState "Make value from foreign hack" $ st
+    & evalFocus %~ Value
 
   -- Tail-call the letrec
   Letrec names lambdas body -> do
-    -- let (addrs, store') = setVals store (snd <$> lambdas)
-    let recBinding = RecursiveBinding $ Map.fromList $ zip names $ snd <$> lambdas
+    bindingNames <- Map.fromList <$> strictZip LetrecZip names (snd <$> lambdas)
+    let recBinding = RecursiveBinding bindingNames
         (addr, store') = runState (setVal recBinding) store
     logReturnState "M-Letrec" $ st
       & evalFocus .~ body
@@ -419,90 +370,138 @@ step st@(EvalState focus env store cont mFwdCont returning done)
       & evalEnv   %~ Map.union (Map.fromList (zip names (repeat addr)))
 
   Handle tm _adj _peg handlers valHandler ->
-    -- let handlers'   = handlers   & traverse . traverse %~ view _3
-    --     valHandler' = valHandler ^. _2
     logReturnState "M-Handle" $ st
       & evalFocus .~ tm
       & evalCont  %~ cons (Frame [] (Handler handlers valHandler env))
 
-  Closure names env' tm -> logReturnState "M-Closure" $ st
-    & evalFocus .~ tm
-    & evalEnv   .~ env'
+  Value val -> case cont of
+    Continuation (delta@(Frame (PureFrame frameTm env' : pureCont) handler') : k)
+      -> case shiftContext (FillContext val frameTm) of
+        Left (FillContext focus' ctx) -> logReturnState "M-RetShift" $ st
+          & evalFocus .~ focus'
+          & evalCont  .~ Continuation
+            (Frame (PureFrame ctx env' : pureCont) handler' : k)
 
-  val | returning -> case cont of
-    -- M-RetCont
-    Continuation (Frame (PureFrame frameType [] frameVals env' : pureCont) handler' : k)
-      -> do
-      let vals = val:frameVals
-      vals' <- traverse (valueInterpretation env store) vals
-        ?? NoValue "M-RetCont args"
-      let (addrs, store') = setVals store vals'
+        Right val -> case val of
 
-      let (bodyEnv, focus') = case frameType of
-            LetFrame rhs names ->
-              -- TODO: strictZip
-              let newNames = Map.fromList $ zip names addrs
-              in (Map.union newNames env', rhs)
-            AppFrame rhs -> case valueInterpretation env' store' rhs of
-              Just (Lambda names scope)      ->
-                -- TODO: strictZip
-                let newNames = Map.fromList $ zip names addrs
-                in (Map.union newNames env', scope)
-              Just (Closure names clEnv scope) ->
-                -- TODO: strictZip
-                let newNames = Map.fromList (zip names addrs)
-                in (Map.union newNames clEnv, scope)
-              _other                     -> todo "RetCont other"
-                -- ((False, addrs) : env', rhs)
-            DataFrame cid row -> (bodyEnv, DataConstructor cid row vals')
+          DataConstructor{} -> logReturnState "M-Ret DataConstructor" $ st
+            & evalFocus   .~ Value val
+            & evalCont    .~ Continuation (Frame pureCont handler' : k)
 
-      logReturnState "M-RetCont" $ st
-        & evalFocus .~ focus'
-        & evalStore .~ store'
-        & evalEnv   .~ bodyEnv
-        & evalCont  .~ Continuation (Frame pureCont handler' : k)
+          AppN f spine -> do
+            let (addrs, store') = setVals store spine
+            case f of
+              Closure names clEnv scope -> do
+                newNames <- Map.fromList <$> strictZip ZipNames names addrs
+                logReturnState "M-Ret App (Closure)" $ st
+                  & evalFocus   .~ scope
+                  & evalStore   .~ store'
+                  & evalCont    .~ Continuation (Frame pureCont handler' : k)
+                  & evalEnv     .~ Map.union newNames clEnv
+              Lambda names scope -> do
+                newNames <- Map.fromList <$> strictZip ZipNames names addrs
+                logReturnState "M-Ret App (Lambda)" $ st
+                  & evalFocus   .~ scope
+                  & evalStore   .~ store'
+                  & evalCont    .~ Continuation (Frame pureCont handler' : k)
+                  -- & evalEnv     .~ Map.union newNames env'
+                  & evalEnv     %~ Map.union newNames
 
-    Continuation (Frame (PureFrame ty (tm:tms) vals env' : pureCont) handler' : k) ->
-      logReturnState "M-ArgCont" $ st
-        & evalFocus .~ tm
-        & evalCont  .~
-          Continuation (Frame (PureFrame ty tms (val:vals) env' : pureCont) handler' : k)
+              Command uid row
+                | Just handler' <- ambient ^? ambientHandlers . ix uid . ix row
+                  -> do
+                   -- We've run out of possible handlers. In the links paper there's no
+                   -- rule to cover this case -- the machine gets stuck. We have one
+                   -- recourse -- check the ambient environment for a handler.
+                   (store', ret) <- runForeignM (st ^. evalStore) (handler' st)
+                   logReturnState "M-Op-Handle-Ambient" $ ret
+                     & evalStore .~ store'
+
+              -- M-Op / M-Op-Handle
+              Command uid row -> case mFwdCont of
+                Nothing -> logReturnState "M-Op" $
+                  st & evalFwdCont .~ Just (Continuation [])
+
+                Just fwdCont
+                  | Handler handlers _ handlerEnv <- handler'
+                  , Just handleCmd <- handlers ^? ix uid . ix row
+                  -> do
+                    let (spineNames, kName, handlerBody) = handleCmd
+                        -- this looks slightly different fromt the rule in the
+                        -- paper because our first pure continuation frame is
+                        -- the command application
+                        delta' = Frame pureCont handler'
+                        boundCont = fwdCont <> Continuation [delta']
+                        (bindVars, store') = flip runState store $ do
+                          kAddr      <- setVal (ContBinding boundCont)
+                          spineAddrs <-
+                            traverse (setVal . NonrecursiveBinding) spine
+                          pure $ Map.fromList $
+                            (kName, kAddr) : zip spineNames spineAddrs
+                    logReturnState "M-Op-Handle" $ st
+                      & evalFocus   .~ handlerBody
+                      & evalEnv     .~ Map.union bindVars env -- XXX
+                      & evalStore   .~ store'
+                      & evalCont    .~ Continuation k
+                      & evalFwdCont .~ Nothing
+
+                Just (Continuation fwdCont) -> logReturnState "M-Op-Forward" $ st
+                  & evalCont    .~ Continuation k
+                  & evalFwdCont .~ Just (Continuation (fwdCont <> [delta]))
+
+              _ -> traceShowM f >> error "bad application"
+
+          Case (DataConstructor _uid rowNum args) rows -> do
+            let (addrs, store') = setVals store args
+            (varNames, rowTm) <- rows ^? ix rowNum ?? IndexErr
+            newNames <- Map.fromList <$> strictZip ZipNames varNames addrs
+            logReturnState "M-Ret Case" $ st
+              & evalFocus .~ rowTm
+              & evalStore .~ store'
+              & evalEnv   %~ Map.union newNames
+              & evalCont  .~ Continuation (Frame pureCont handler' : k)
+
+          Let body _pty name rhs -> do
+            let (addr, store') = runState (setVal (NonrecursiveBinding body)) store
+            logReturnState "M-Ret Let" $ st
+              & evalFocus   .~ rhs
+              & evalStore   .~ store'
+              & evalEnv     . at name ?~ addr
+              & evalCont    .~ Continuation (Frame pureCont handler' : k)
 
     -- M-RetHandler
     -- XXX what of k0?
     Continuation (Frame [] (Handler _handlers (name, valHandler) env') : k) -> do
-      val' <- valueInterpretation env store val ?? NoValue "M-RetHandler"
-      let (addr, store') = runState (setVal (NonrecursiveBinding val')) store
+      let (addr, store') = runState (setVal (NonrecursiveBinding val)) store
       logReturnState "M-RetHandler" $ st
         & evalFocus .~ valHandler
         & evalStore .~ store'
-        & evalEnv   %~ Map.insert name addr
+        & evalEnv   .~ Map.insert name addr env'
         & evalCont  .~ Continuation k
 
-    Continuation (Frame [] K0 : _k) -> do
-      val' <- valueInterpretation env store val ?? NoValue "M-RetTop"
-      logReturnState "M-RetTop" $ st
-        & evalFocus .~ val'
-        & finished  .~ True
+    _ -> do
+      traceM "invalid continuation>"
+      traceShowM cont
+      traceM "<invalid continuation"
+      error "invalid continuation"
 
-    _ -> error "invalid continuation"
+  other -> do
+    traceM "incomplete>"
+    traceShowM other
+    traceM "<incomplete"
+    logIncomplete st
 
-  -- We replace all uses of `return V` with an `isValue` check
-  -- HACK: handle things which are already values
-  -- TODO: remove this
-  val | isValue val -> do
-    val' <- valueInterpretation env store val ?? NoValue "M-Hack"
-    pure $ st
-      & evalFocus   .~ val'
-      & isReturning .~ True
-
-  other -> traceM "incomplete>" >> traceShowM other >> traceM "<incomplete" >> logIncomplete st
+isFinished :: EvalState -> Bool
+isFinished (EvalState Value{} _ _ (Continuation (Frame [] K0 : _k)) _) = True
+isFinished _ = False
 
 run :: AmbientHandlers -> Logger -> EvalState -> IO (Either Err TmI)
-run ambient logger st@(EvalState tm _ _ _ _ _ done)
-  | done = pure (Right tm)
+run ambient logger st@(EvalState tm _ _ _ _)
+  | isFinished st = pure $ case tm of
+      Value v -> Right v
+      _       -> Left NoValue
   | otherwise = do
-    eitherStack <- runEvalM ambient logger (step st)
+    eitherStack <- runEvalM ambient logger (step ambient st)
     case eitherStack of
       Left err     -> pure $ Left err
       Right stack' -> run ambient logger stack'

@@ -290,7 +290,7 @@ parseDataConstructor :: MonadicParsing m => m Tm'
 parseDataConstructor = angles (DataConstructor
   <$> parseUid <* dot
   <*> (fromIntegral <$> natural)
-  <*> many parseTm
+  <*> many parseTmNoApp
   ) <?> "Data constructor"
 
 parseCase :: MonadicParsing m => m Tm'
@@ -398,11 +398,18 @@ parseCommandOrIdent = do
     _ <- dot
     natural
 
+  hasBang <- optional $ try bang
+
+  let v = case dotRow of
+        Just row -> Command name (fromIntegral row)
+        Nothing -> Variable name
+  let v' = case hasBang of
+        Just _bang -> AppT v []
+        Nothing -> v
+  pure v'
+
   -- TODO: named commands
-  pure $ case dotRow of
-    Nothing -> Variable name
-    -- TODO application of terms
-    Just row -> AppT (Command name (fromIntegral row)) []
+  -- TODO application of terms
 
 parseLambda :: MonadicParsing m => m Tm'
 parseLambda = Lambda

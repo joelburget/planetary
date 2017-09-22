@@ -38,7 +38,7 @@ lookupArgs st = do
     fromIpld ipld
 
 eraseCharLit :: TmI
-eraseCharLit = mkForeignTm @Text textId [] "\b \b"
+eraseCharLit = todo "eraseCharLit" -- mkForeignTm @Text textId [] "\b \b"
 
 -- TODO: we actually map with a data constructor
 textMap :: Handler
@@ -67,7 +67,7 @@ charHandler1 st
   char <- lookupForeign uid
   pure $ st & evalFocus .~ case char of
     '\b' -> b1
-    c    -> AppN (mkForeignTm @Char charId [] c) [b2]
+    c    -> todo "AppN (mkForeignTm @Char charId [] c) [b2]"
 charHandler1 _ = throwError FailedForeignFun
 
 -- charHandler2 :: TmI -> TmI -> TmI -> Char -> TmI
@@ -181,6 +181,18 @@ data LogF [e] X Log =
 data Buffer =
   | <empty>
   | <hold char>
+
+interface Choose =
+  | choose : <Bool>
+
+data Toss =
+  | <heads>
+  | <tails>
+
+-- HACK: Writing this so name resolution will complete. The example uses the
+-- name List though technically it's ListF but we don't have type synonyms or
+-- whatever. This only works because we're not typechecking (though we should).
+data List =
 
 main = letrec
   input : forall X. {<LogF [<LookAhead>, <Abort>, <Console>] X>

@@ -1,3 +1,4 @@
+{-# language ApplicativeDo #-}
 {-# language DataKinds #-}
 {-# language DeriveDataTypeable #-}
 {-# language DeriveFoldable #-}
@@ -33,7 +34,10 @@ import qualified Data.HashMap.Strict as HashMap
 import Data.List (find)
 import Data.Map (Map)
 import Data.Semigroup ((<>))
+import Data.Set (Set)
+import qualified Data.Set as Set
 import Data.Text (Text)
+import Data.Traversable (for)
 import GHC.Generics
 import Network.IPLD hiding (Row)
 
@@ -274,12 +278,16 @@ data TmF uid tm
 
   -- Other:
   -- We syntactically distinguish terms from values in evaluation. This form is
-  -- only used in the focus of the machine to mark it as a term.
-  -- | Value_ !tm
+  -- only used in the focus of the machine to mark it as a value.
+  | Value_ !tm
+
   -- associate var to address
   -- TODO: Map gives us Ord, whereas HashMap doesn't...
   -- TODO: maybe rename to DeferredSubst
   | Closure_ !(Vector Text) !(Map Text uid) !tm
+
+  -- This form is only used in evaluation to create a one-hole context
+  | Hole_
   deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
 
 pattern DataConstructor uid row tms
@@ -306,10 +314,12 @@ pattern Annotation tm ty
   = Fix (Annotation_ tm ty)
 pattern Letrec names lambdas body
   = Fix (Letrec_ names lambdas body)
--- pattern Value val
---   = Fix (Value_ val)
+pattern Value val
+  = Fix (Value_ val)
 pattern Closure names env tm
   = Fix (Closure_ names env tm)
+pattern Hole
+  = Fix Hole_
 
 data Spine' tm = MixedSpine
   ![tm] -- ^ non-normalized terms
@@ -399,14 +409,8 @@ type TmI                 = Tm Cid
 -- $ Judgements
 
 isValue :: Tm a -> Bool
-isValue Variable{}           = True
-isValue InstantiatePolyVar{} = True
-isValue Command{}            = True
-isValue Annotation{}         = True
-isValue DataConstructor{}    = True
-isValue ForeignValue{}       = True
-isValue Lambda{}             = True
-isValue _                    = False
+isValue Value{} = True
+isValue _       = False
 
 isComputation :: Tm a -> Bool
 isComputation Application{} = True
@@ -436,10 +440,6 @@ isConstruction _                 = False
 
 -- $ Binding
 
--- TODO: specify a traverseExp a la
--- https://twanvl.nl/blog/haskell/traversing-syntax-trees ?
--- Is it more general?
-
 substitute :: Text -> Tm uid -> Tm uid -> Tm uid
 substitute freev insert body = flip ycata body $ \case
   tm@(Variable v)
@@ -453,6 +453,49 @@ substituteAll vals body = flip ycata body $ \case
     | Just insert <- HashMap.lookup v vals -> insert
     | otherwise -> tm
   tm -> tm
+
+-- WIP: something like traverseExp from
+-- https://twanvl.nl/blog/haskell/traversing-syntax-trees
+traverseTm
+  :: Applicative f
+  => (Set Text -> Tm uid -> f (Tm uid))
+  -> (Set Text -> Tm uid -> f (Tm uid))
+traverseTm f boundVars tm =
+  let f' = f boundVars
+      fWith names = f (boundVars <> Set.fromList names)
+  in case tm of
+       DataConstructor uid row tms -> DataConstructor uid row <$> traverse f' tms
+       ForeignValue{} -> pure tm
+       Lambda names body -> Lambda names <$> fWith names body
+       Application appl spine -> Application <$> f' appl <*> traverse f' spine
+       Case scrut branches -> do
+         scrut'    <- f' scrut
+         branches' <- for branches $ \(names, scope) ->
+           (names,) <$> fWith names scope
+         pure $ Case scrut' branches'
+       Handle scrut adj peg handlers valHandler -> do
+         scrut'    <- f' scrut
+         handlers' <- flip (traverse.traverse) handlers $
+           \(names, kName, scope) ->
+             (names, kName,) <$> fWith (kName:names) scope
+         vHandler' <- ($ valHandler) $ \(vName, scope) ->
+           (vName,) <$> fWith [vName] scope
+         pure $ Handle scrut' adj peg handlers' vHandler'
+       Let body pty name scope -> do
+         body'  <- f' body
+         scope' <- fWith [name] scope
+         pure $ Let body' pty name scope'
+       Variable{} -> pure tm
+       InstantiatePolyVar b args -> InstantiatePolyVar <$> f' b <*> pure args
+       Command{} -> pure tm
+       Annotation x ty -> Annotation <$> f' x <*> pure ty
+       Letrec names defns body -> do
+         defns' <- for defns $ \(pty, rhs) -> (pty,) <$> fWith names rhs
+         body'  <- fWith names body
+         pure $ Letrec names defns' body'
+       Value val -> Value <$> f' val
+       Closure names env scope -> Closure names env <$> fWith names scope
+       Hole -> pure tm
 
 -- Instance Hell:
 
@@ -509,13 +552,15 @@ pattern AnnotationIpld tm ty            = T2 "Annotation" tm ty
 -- pattern ValueIpld tm                    = T1 "Value" tm
 pattern CutIpld cont scrutinee          = T2 "Cut" cont scrutinee
 pattern LetrecIpld names defns body     = T3 "Letrec" names defns body
+pattern ValueIpld val                   = T1 "Value" val
 pattern ClosureIpld names env tm        = T3 "Closure" names env tm
+pattern HoleIpld                        = "_Hole_"
 
 instance IsUid uid => IsIpld (Tm uid) where
   toIpld = \case
     DataConstructor uid row tms           -> DataConstructorIpld uid row tms
     ForeignValue uid1 tys uid2            -> ForeignValueIpld uid1 tys uid2
-    Lambda names body                     -> LambdaIpld (names :: Vector Text) body
+    Lambda names body                     -> LambdaIpld names body
     Application tm spine                  -> ApplicationIpld tm spine
     Case tm branches                      -> CaseIpld tm branches
     Handle tm adj peg handlers valHandler
@@ -526,7 +571,9 @@ instance IsUid uid => IsIpld (Tm uid) where
     Command uid row                       -> CommandIpld uid row
     Annotation tm ty                      -> AnnotationIpld tm ty
     Letrec names defns body               -> LetrecIpld names defns body
+    Value val                             -> ValueIpld val
     Closure names env tm                  -> ClosureIpld names env tm
+    Hole                                  -> HoleIpld
     _                                     -> error "impossible: toIpld Tm"
 
   fromIpld = \case
@@ -542,7 +589,9 @@ instance IsUid uid => IsIpld (Tm uid) where
     CommandIpld uid row             -> Just $ Command uid row
     AnnotationIpld tm ty            -> Just $ Annotation tm ty
     LetrecIpld names defns body     -> Just $ Letrec names defns body
+    ValueIpld val                   -> Just $ Value val
     ClosureIpld names env tm        -> Just $ Closure names env tm
+    HoleIpld                        -> Just $ Hole
     _                               -> Nothing
 
 instance IsUid uid => IsIpld (Polytype uid)
