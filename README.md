@@ -41,6 +41,6 @@ We don't have an official syntax, however for testing we use a syntax similar to
 
 We add fixed points so we can typecheck inductive data.
 
-We add a foreign value constructor.
+We add a foreign value constructor representing terms that are not planetary data types.
 
-Case terms hold the cid they scrutinize. TODO: why? couldn't this be removed?
+Possible addition: allow letrec to define values in addition to lambdas
