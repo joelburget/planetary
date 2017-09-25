@@ -1,5 +1,4 @@
 {-# language FlexibleContexts #-}
-{-# language LambdaCase #-}
 {-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language QuasiQuotes #-}

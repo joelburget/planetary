@@ -183,19 +183,14 @@ writeForeign a = do
 -- XXX
 liftBinaryOp :: (Show s, IsIpld s) => (s -> s -> s) -> Handler
 liftBinaryOp op st
-  -- | AppN _ [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2]
-  --   <- st ^. evalFocus = do
-  | Just (AppN _ [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2])
-    <- st ^? evalCont . _head . pureContinuation . _head . pcCtx = do
-    -- i <- op <$> lookupForeign uid1 <*> lookupForeign uid2
+  | AppN _ [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2]
+    <- st ^. evalFocus = do
     x <- lookupForeign uid1
     y <- lookupForeign uid2
     let i = op x y
     i' <- writeForeign i
-    pure $ st
-      & evalFocus .~ Value (ForeignValue tyUid tySat i')
-      & evalCont . _head . pureContinuation %~ tail
-liftBinaryOp _ st = traceTextM (layout (prettyEvalState st)) >> throwError FailedForeignFun
+    pure $ st & evalFocus .~ Value (ForeignValue tyUid tySat i')
+liftBinaryOp _ st = throwError (FailedForeignFun "liftBinaryOp")
 
 -- XXX
 liftUnaryOp :: IsIpld s => (s -> s) -> Handler
@@ -204,7 +199,7 @@ liftUnaryOp op st
   i <- op <$> lookupForeign uid
   i' <- writeForeign i
   pure $ st & evalFocus .~ Value (ForeignValue tyUid tySat i')
-liftUnaryOp _ _ = throwError FailedForeignFun
+liftUnaryOp _ _ = throwError (FailedForeignFun "liftUnaryOp")
 
 mkFix :: Handler
 mkFix st
@@ -213,7 +208,7 @@ mkFix st
   a' <- writeForeign a
   traceM $ "mkfix returning: " ++ show a'
   pure $ st & evalFocus .~ Value (ForeignValue lfixId [{- XXX -}] a')
-mkFix _ = throwError FailedForeignFun
+mkFix _ = throwError (FailedForeignFun "mkFix")
 
 unFix :: Handler
 -- unFix [ForeignValue uid [val] tyUid]
@@ -224,7 +219,7 @@ unFix st
     val <- lookupForeign valUid
     traceM $ "unfix returning: " ++ show val
     pure $ st & evalFocus .~ Value val
-unFix x = traceShowM x >> throwError FailedForeignFun
+unFix x = traceShowM x >> throwError (FailedForeignFun "unFix")
 
 mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
 mkForeign val = let val' = toIpld val in (valueCid val', val')

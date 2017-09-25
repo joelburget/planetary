@@ -44,7 +44,7 @@ lineVsep head =
   in vsep . intersperse "" . imap lineFormatter
 
 prettyContHandler :: ContHandler -> Doc Ann
-prettyContHandler K0 = "K0"
+prettyContHandler EmptyHandler = "EmptyHandler"
 prettyContHandler (Handler handlers (vName, vRhs) env) =
   let
       prettyHandler (uid, uidHandler) = pretty uid
@@ -58,8 +58,8 @@ prettyCont (Continuation stk) =
         [ "handler: " <> prettyContHandler h
         , prettyPureCont "pure cont:" pureCont
         ]
-      prettyContFrame (ContinuationFrame pureCont K0) = vsep
-        [ "k0"
+      prettyContFrame (ContinuationFrame pureCont EmptyHandler) = vsep
+        [ "empty handler"
         , prettyPureCont "pure cont:" pureCont
         ]
       lines = prettyContFrame <$> stk

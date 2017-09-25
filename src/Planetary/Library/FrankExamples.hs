@@ -56,7 +56,7 @@ textMap st
   result <- T.pack <$> traverse fun str
   result' <- writeForeign result
   pure $ st & evalFocus .~ ForeignValue textId [] result'
-textMap _ = throwError FailedForeignFun
+textMap _ = throwError (FailedForeignFun "textMap")
 
 -- charHandler1 :: TmI -> TmI -> Char -> TmI
 charHandler1 :: Handler
@@ -68,7 +68,7 @@ charHandler1 st
   pure $ st & evalFocus .~ case char of
     '\b' -> b1
     c    -> todo "AppN (mkForeignTm @Char charId [] c) [b2]"
-charHandler1 _ = throwError FailedForeignFun
+charHandler1 _ = throwError (FailedForeignFun "charHandler1")
 
 -- charHandler2 :: TmI -> TmI -> TmI -> Char -> TmI
 charHandler2 :: Handler
@@ -85,7 +85,7 @@ charHandler2 st
       -- TODO: really not sure if this method of setting env is right. If so,
       -- duplicate in charHandler1
       & evalEnv   .~ env
-charHandler2 _ = throwError FailedForeignFun
+charHandler2 _ = throwError (FailedForeignFun "charHandler2")
 
 inch :: Handler
 inch st
@@ -95,7 +95,7 @@ inch st
     let c' = if c == '\DEL' then '\b' else c
     c'' <- writeForeign c'
     pure $ st & evalFocus .~ ForeignValue charId [] c''
-inch _ = throwError FailedForeignFun
+inch _ = throwError (FailedForeignFun "inch")
 
 ouch :: Handler
 ouch st
@@ -103,7 +103,7 @@ ouch st
     c <- lookupForeign uid
     liftIO $ putChar c >> hFlush stdout
     pure $ st & evalFocus .~ DataConstructor unitId 0 []
-ouch _ = throwError FailedForeignFun
+ouch _ = throwError (FailedForeignFun "ouch")
 
 externals :: Handlers
 externals =

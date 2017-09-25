@@ -46,15 +46,11 @@ unitTests = do
       -- with unit, otherwise it throws (to easytest).
       checkEqualImpl :: Handler
       checkEqualImpl st
-        -- | AppN _ [tm1, tm2] <- st ^. evalFocus = do
-        | Just (AppN _ [tm1, tm2])
-          <- st ^? evalCont . _head . pureContinuation . _head . pcCtx =
+        | AppN _ [tm1, tm2] <- st ^. evalFocus =
           if tm1 == tm2
-             then pure $ st
-               & evalFocus .~ Value unit
-               & evalCont  . _head . pureContinuation %~ tail
+             then pure $ st & evalFocus .~ Value unit
              else throw $ NotEqual tm1 tm2
-      checkEqualImpl _ = throwError FailedForeignFun
+      checkEqualImpl _ = throwError (FailedForeignFun "checkEqualImpl")
 
       testingHandlers :: AmbientHandlers
       testingHandlers = AmbientHandlers $
@@ -69,7 +65,7 @@ unitTests = do
        , scope "spacer" $ tests []
        , scope "state" $ tests []
        , scope "next" $ tests
-         [ do skip
+         [ do
               -- Just (listfId, _) <- pure $ namedData "ListF" Frank.resolvedDecls
               -- Just (pairId,  _) <- pure $ namedData "Pair"  Frank.resolvedDecls
               Just stateCid <- pure $
@@ -230,18 +226,18 @@ unitTests = do
            failure : forall A. {{[p, <Abort>] A} -> [p] <List <A>>}
                    = \a -> handle a! : A with
                      Abort:
-                       | <aborting -> k> -> emptyList
+                       | <aborting -> k> -> <List.0>
                      | x -> singletonList x
 
            -- should give []
            composition1
              : forall A. {{[<Choose <Bool>>, <Abort>] A} -> <List <List A>>}
-             = \a -> failure (allChoices a)
+             = \a -> failure (\-> allChoices a)
 
            -- should give [[Heads], [Tails], []]
            composition2
              : forall A. {{[<Choose <Bool>>, <Abort>] A} -> <List <List A>>}
-             = \a -> allChoices (failure a)
+             = \a -> allChoices (\-> failure a)
 
            actual1
              : forall. {<List <List <Toss>>>}

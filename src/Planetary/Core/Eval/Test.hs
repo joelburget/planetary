@@ -25,8 +25,12 @@ import Planetary.Support.Parser (forceTm)
 import Planetary.Support.Pretty
 import qualified Planetary.Library.FrankExamples as Frank
 import Planetary.Library.HaskellForeign (mkForeignTm, haskellOracles, intOpsId)
+import qualified Planetary.Library.HaskellForeign as HaskellForeign
 
 import Data.Text.Prettyprint.Doc
+
+-- Some more good examples here:
+-- https://github.com/dhil/links/blob/master/examples/handlers/shallow_state.links
 
 noteFailureState
   :: EvalState -> Either Err TmI -> Either Err TmI -> Test ()
@@ -45,7 +49,7 @@ noteFailureState initState result expected = do
   fail "failure: see above"
 
 putLogs :: Bool
-putLogs = True
+putLogs = False
 
 mkLogger :: (Text -> IO ()) -> Logger
 mkLogger mkNote =
@@ -105,12 +109,8 @@ unitTests  =
             ]
 
        , scope "case" $ tests
-         [ evalEnvRunTest "case False of { False -> True; True -> False } (1)"
-             (not false)
-             (Right true)
-         , evalEnvRunTest "case True of { False -> True; True -> False } (1)"
-             (not true)
-             (Right false)
+         [ evalEnvRunTest "not (1)" (not false) (Right true)
+         , evalEnvRunTest "not (2)" (not true)  (Right false)
          ]
 
        , let ty :: Polytype Cid
@@ -230,16 +230,16 @@ unitTests  =
              -- both versions of tm should be equivalent
              resolutionState = fromList (Frank.resolvedDecls ^. globalCids)
          Right tm2 <- pure $ resolveTm resolutionState $ forceTm [text|
-             let not: forall. {Bool -> Bool}
+             let not: forall. {<Bool> -> <Bool>}
                     = \x -> case x of
-                      | <False> -> <Bool.0>
-                      | <True>  -> <Bool.1>
+                      | <False> -> <Bool.1>
+                      | <True>  -> <Bool.0>
              in
              let x: forall. Bool = false in
              let y: forall. Bool = not x in
              not y
            |]
-         let tm2' = substituteAll [ ("false", false) ] tm2
+         let tm2' = substitute "false" false tm2
 
          tests
            [ evalEnvRunTest "tm"  tm   (Right false)
@@ -295,5 +295,82 @@ unitTests  =
          , runTest' "odd 10"    (mkTm "odd"  10)   (Right false)
          , runTest' "odd 20"    (mkTm "odd"  20)   (Right false)
          , runTest' "even 100"  (mkTm "even" 100)  (Right true)
+         ]
+
+       , scope "closures" $ do
+       let tm = forceTm [text|
+             letrec
+               const
+                 : forall. {<Text> -> {<Text> -> <Text>}}
+                 = \x -> \y -> x
+
+               -- capture x, then shadow
+               actual1
+                 : forall. {<Text>}
+                 = \->
+                   let foo' : forall. {<Text> -> <Text>} = const foo in
+                   let x : forall. <Text> = bar in
+                   foo' bar
+
+               expected1
+                 : forall. {<Text>}
+                 = \-> foo
+             in actual1!
+           |]
+
+       let tm2 = forceTm [text|
+             letrec
+               captureX
+                 : forall. {<Text> -> <Pair {<Text> -> <Text>} <Text>>}
+                 = \x -> <Pair.0 (\y -> x) x>
+
+               -- capture x, then shadow
+               actual1
+                 : forall. {<Text>}
+                 = \->
+                   let pair : forall. <Pair {<Text> -> <Text>} <Text>> = captureX foo in
+                   case pair of
+                     | <pair f x> -> f bar
+
+               expected1
+                 : forall. {<Text>}
+                 = \-> foo
+             in actual1!
+           |]
+
+       Right tm' <- pure $ resolveTm
+         -- Provides Text
+         (fromList (HaskellForeign.resolvedDecls ^. globalCids))
+         tm
+
+       Right tm2' <- pure $ resolveTm
+         -- Provides Text
+         (fromList (HaskellForeign.resolvedDecls ^. globalCids) <>
+         -- Provides Pair
+          fromList (Frank.resolvedDecls ^. globalCids))
+         tm2
+
+       let (foo, fooVal) = mkForeignTm @Text intId [] "foo"
+           (bar, barVal) = mkForeignTm @Text intId [] "bar"
+           (baz, bazVal) = mkForeignTm @Text intId [] "baz"
+
+       let tm'' = substituteAll
+             [ ("foo", foo)
+             , ("bar", bar)
+             , ("baz", baz)
+             ]
+             tm'
+           tm2'' = substituteAll
+             [ ("foo", foo)
+             , ("bar", bar)
+             , ("baz", baz)
+             ]
+             tm2'
+
+           store = storeOf $ toIpld <$> [fooVal, barVal, bazVal]
+
+       tests
+         [ runTest "const" noAmbientHandlers store tm'' (Right foo)
+         , runTest "pair"  noAmbientHandlers store tm2'' (Right foo)
          ]
        ]
