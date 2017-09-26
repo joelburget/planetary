@@ -395,16 +395,20 @@ step ambient st@(EvalState focus env store cont mFwdCont) = case focus of
     , Handler handlers _ handlerEnv <- handler
     , Just handleCmd <- handlers ^? ix uid . ix row
     -> do
+      let kBinding = case fwdCont of
+            Continuation (Frame fPure fHandler : fK)
+              -> Continuation (Frame (fPure <> pureCont) fHandler : fK)
+            Continuation [] -> Continuation [Frame pureCont EmptyHandler]
       let (spineNames, kName, handlerBody) = handleCmd
           (bindVars, store') = flip runState store $ do
-            kAddr      <- setVal (ContBinding fwdCont)
+            kAddr      <- setVal (ContBinding kBinding)
             spineAddrs <- traverse (setVal . NonrecursiveBinding) spine
             pure $ Map.fromList $ (kName, kAddr) : zip spineNames spineAddrs
       logReturnState "M-Op-Handle" $ st
         & evalFocus   .~ handlerBody
         & evalEnv     .~ Map.union bindVars handlerEnv
         & evalStore   .~ store'
-        & evalCont    .~ Continuation (Frame (pureCont <> pureCont') handler' : k)
+        & evalCont    .~ Continuation (Frame pureCont' handler' : k)
         & evalFwdCont .~ Nothing
 
   AppN Command{} spine
