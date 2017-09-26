@@ -91,7 +91,7 @@ type EvalM =
 type Env = Map Text Cid -- Stack (Bool, Vector Cid)
 
 data BindingType
-  = RecursiveBinding (Map Text TmI)
+  = RecursiveBinding Env (Map Text TmI)
   | NonrecursiveBinding TmI
   | ContBinding Continuation
   deriving (Show, Generic)
@@ -318,9 +318,11 @@ lookupVariable name env store = do
   ipld    <- store ^? ix addr
   binding <- fromIpld ipld
   case binding of
-    NonrecursiveBinding tm -> pure tm
-    RecursiveBinding tms   -> tms ^? ix name
-    ContBinding cont       -> Nothing
+    NonrecursiveBinding tm    -> pure tm
+    RecursiveBinding env' tms -> do
+      let tmCids = tms & each .~ addr
+      enclose (Map.union tmCids env') <$> (tms ^? ix name)
+    ContBinding cont          -> Nothing
 
 shouldEnter :: TmI -> Maybe Continuation -> Bool
 shouldEnter tm st = case tm of
@@ -366,7 +368,7 @@ step ambient st@(EvalState focus env store cont mFwdCont) = case focus of
   -- Tail-call the letrec
   Letrec names lambdas body -> do
     bindingNames <- Map.fromList <$> strictZip LetrecZip names (snd <$> lambdas)
-    let recBinding = RecursiveBinding bindingNames
+    let recBinding = RecursiveBinding env bindingNames
         (addr, store') = runState (setVal recBinding) store
     logReturnState "M-Letrec" $ st
       & evalFocus .~ body
@@ -429,27 +431,19 @@ step ambient st@(EvalState focus env store cont mFwdCont) = case focus of
         Right val -> case val of
 
           DataConstructor{} -> logReturnState "M-Ret DataConstructor" $ st
-            & evalFocus   .~ Value val
-            & evalCont    .~ Continuation (Frame pureCont handler' : k)
+            & evalFocus .~ Value val
+            & evalCont  .~ Continuation (Frame pureCont handler' : k)
 
           AppN f spine -> do
             let (addrs, store') = setVals store spine
             case f of
               Closure names clEnv scope -> do
                 newNames <- Map.fromList <$> strictZip ZipNames names addrs
-                logReturnState "M-App (Closure)" $ st
-                  & evalFocus   .~ scope
-                  & evalStore   .~ store'
-                  & evalCont    .~ Continuation (Frame pureCont handler' : k)
-                  & evalEnv     .~ Map.union newNames clEnv
-              Lambda names scope -> do
-                newNames <- Map.fromList <$> strictZip ZipNames names addrs
-                logReturnState "M-App (Lambda)" $ st
-                  & evalFocus   .~ scope
-                  & evalStore   .~ store'
-                  & evalCont    .~ Continuation (Frame pureCont handler' : k)
-                  -- & evalEnv     .~ Map.union newNames env'
-                  & evalEnv     %~ Map.union newNames
+                logReturnState "M-App" $ st
+                  & evalFocus .~ scope
+                  & evalStore .~ store'
+                  & evalCont  .~ Continuation (Frame pureCont handler' : k)
+                  & evalEnv   .~ Map.union newNames clEnv
 
                 -- invariant: mFwdCont must be Nothing
                 -- case mFwdCont of Nothing ->
@@ -497,11 +491,7 @@ step ambient st@(EvalState focus env store cont mFwdCont) = case focus of
       traceM "<invalid continuation"
       error "invalid continuation"
 
-  other -> do
-    traceM "incomplete>"
-    traceShowM st
-    traceM "<incomplete"
-    logIncomplete st
+  other -> logIncomplete st
 
 isFinished :: EvalState -> Bool
 isFinished (EvalState Value{} _ _ (Continuation (Frame [] EmptyHandler : _k)) _) = True

@@ -67,14 +67,14 @@ prettyCont (Continuation stk) =
 
 prettyBinding :: Text -> BindingType -> Doc Ann
 prettyBinding name = \case
-  RecursiveBinding tms   -> prettyTmPrec 0 (tms ^?! ix name)
-  NonrecursiveBinding tm -> prettyTmPrec 0 tm
-  ContBinding cont       -> prettyCont cont
+  RecursiveBinding _env tms -> prettyTmPrec 0 (tms ^?! ix name)
+  NonrecursiveBinding tm    -> prettyTmPrec 0 tm
+  ContBinding cont          -> prettyCont cont
 
 prettyEnv :: ValueStore -> Env -> Doc Ann
 prettyEnv store env =
   let prettyCidLookup :: Text -> Cid -> Doc Ann
-      prettyCidLookup name cid = fromMaybe ("(cid failed lookup: " <> pretty cid) $ do
+      prettyCidLookup name cid = fromMaybe (parens $ "cid failed lookup: " <> pretty cid) $ do
         ipld    <- store ^? ix cid
         binding <- fromIpld ipld :: Maybe BindingType
         pure $ prettyBinding name binding
