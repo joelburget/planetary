@@ -4,7 +4,7 @@
 {-# language QuasiQuotes #-}
 {-# language ScopedTypeVariables #-}
 {-# language TypeFamilies #-}
-module Planetary.Library.Syntax () where
+module Planetary.Library.Syntax (resolvedDecls) where
 
 import Data.Text (Text)
 import NeatInterpolation
@@ -66,14 +66,14 @@ data Adjustment uid a =
  <adjustment <uidMap uid <lfix <Ty uid a>>>>
 
 data TmFamily =
-  <value>
+  | <value>
   | <continuation>
   | <tm>
   | <adjustmentHandlers>
 
 data Tm uid tyvar tmvar tm =
   -- Value
-  <command uid row>
+  | <command uid row>
   | <dataConstructor uid row <vector tm>>
   | <foreignValue uid <vector <Ty uid tyvar>> uid>
   | <lambda <vector text> tm>

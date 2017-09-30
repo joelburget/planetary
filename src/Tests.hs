@@ -4,12 +4,13 @@ module Tests (runTests , runOnlyTests) where
 import Data.Text (Text)
 import EasyTest
 
-import qualified Planetary.Core.Eval.Test as Eval
-import qualified Planetary.Core.Syntax.Test as Syntax
-import qualified Planetary.Core.Typecheck.Test as Typecheck
-import qualified Planetary.Support.Parser.Test as Parser
+import qualified Planetary.Core.Eval.Test              as Eval
+import qualified Planetary.Core.Syntax.Test            as Syntax
+import qualified Planetary.Core.Typecheck.Test         as Typecheck
+import qualified Planetary.Support.Parser.Test         as Parser
 import qualified Planetary.Library.HaskellForeign.Test as HaskellForeign
-import qualified Planetary.Library.FrankExamples.Test as FrankExamples
+import qualified Planetary.Library.FrankExamples.Test  as FrankExamples
+import qualified Planetary.Library.Meta.Test           as Meta
 
 runTests :: IO ()
 runTests = run planetaryTests
@@ -25,6 +26,7 @@ planetaryTests = tests
   , Parser.unitTests
   , HaskellForeign.unitTests
   , FrankExamples.unitTests
+  , Meta.unitTests
   ]
 
 -- unitTests :: TestTree

@@ -1,7 +1,12 @@
 {-# language OverloadedLists #-}
 {-# language QuasiQuotes #-}
 {-# language TypeFamilies #-}
-module Planetary.Library.Meta () where
+module Planetary.Library.Meta (resolvedDecls) where
+
+import NeatInterpolation
+
+import Planetary.Core
+import Planetary.Support.Parser
 
 decls = forceDeclarations [text|
 data Colors =
@@ -47,3 +52,6 @@ reflection = letrec
       | <nil> -> <List.0>
       | <cons l ls> -> <List.1 (length l) ...>
 |]
+
+resolvedDecls :: ResolvedDecls
+resolvedDecls = mempty -- TODO

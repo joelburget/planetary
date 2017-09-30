@@ -64,19 +64,21 @@ nameResolutionM (DataDecl_ (DataDecl name ddecl):xs) = do
   (cid, ddeclI) <- resolveDti ddecl
   modify (& at name ?~ cid)
   xs' <- nameResolutionM xs
-  pure $ xs' & datatypes . at cid ?~ ddeclI
-             & globalCids %~ cons (name, cid)
+  pure $ xs' & datatypes  . at cid  ?~ ddeclI
+             & globalCids . at name ?~ cid
 nameResolutionM (InterfaceDecl_ (InterfaceDecl name iface):xs) = do
   (cid, ifaceI) <- resolveEi iface
   modify (& at name ?~ cid)
   xs' <- nameResolutionM xs
-  pure $ xs' & interfaces . at cid ?~ ifaceI
-             & globalCids %~ cons (name, cid)
+  pure $ xs' & interfaces . at cid  ?~ ifaceI
+             & globalCids . at name ?~ cid
 nameResolutionM (TermDecl_ (TermDecl name recTm):xs) = do
   xs'    <- nameResolutionM xs
   recTm' <- resolveTm' recTm
-  pure $ xs' & terms %~ cons (TermDecl name recTm')
-nameResolutionM [] = pure (ResolvedDecls mempty mempty [] [])
+  let cid = cidOf recTm'
+  pure $ xs' & terms      . at cid  ?~ recTm'
+             & globalCids . at name ?~ cid
+nameResolutionM [] = pure mempty
 
 lookupUid :: Text -> ResolutionM Cid
 lookupUid name = gets (^? ix name) >>= ifNotJust (UnresolvedUid name)

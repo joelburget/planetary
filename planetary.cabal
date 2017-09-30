@@ -27,25 +27,30 @@ library
     Planetary.Support.NameResolution
 
     -- library
-    Planetary.Library.FrankExamples
-    Planetary.Library.HaskellForeign
-    Planetary.Library.Syntax
+    Planetary.Library
 
     -- test (export both "run everything" and more specific tests)
     Tests
-    Planetary.Core.Eval.Test
-    Planetary.Core.Syntax.Test
-    Planetary.Core.Typecheck.Test
-    Planetary.Support.Parser.Test
-    Planetary.Library.FrankExamples.Test
-    Planetary.Library.HaskellForeign.Test
 
   other-modules:
     Planetary.Core.Eval
+    Planetary.Core.Eval.Test
     Planetary.Core.Syntax
+    Planetary.Core.Syntax.Test
     Planetary.Core.Syntax.Patterns
     Planetary.Core.Typecheck
+    Planetary.Core.Typecheck.Test
     Planetary.Core.UIdMap
+    Planetary.Library.FrankExamples
+    Planetary.Library.FrankExamples.Test
+    Planetary.Library.HaskellForeign
+    Planetary.Library.HaskellForeign.Test
+    Planetary.Library.Management
+    Planetary.Library.Meta
+    Planetary.Library.Meta.Test
+    Planetary.Library.StrNat
+    Planetary.Library.Syntax
+    Planetary.Support.Parser.Test
 
   -- other-extensions:
   build-depends:

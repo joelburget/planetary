@@ -8,7 +8,6 @@ module Planetary.Library.FrankExamples.Test (unitTests) where
 import Control.Exception (Exception, throw)
 import Control.Lens
 import Control.Monad.Except
-import qualified Data.HashMap.Strict as HashMap
 import Data.Text (Text)
 import Data.Text.Prettyprint.Doc
 import Data.Typeable (Typeable)
@@ -19,6 +18,7 @@ import EasyTest hiding (run)
 import Planetary.Core
 import qualified Planetary.Library.FrankExamples as Frank
 import Planetary.Core.Eval.Test (runTest)
+import Planetary.Library
 import Planetary.Library.HaskellForeign (mkForeignTm, intOpsId, haskellOracles)
 import Planetary.Support.Ids
 import Planetary.Support.NameResolution
@@ -32,10 +32,10 @@ instance Exception NotEqual
 unitTests :: Test ()
 unitTests = do
   Right testingDecls <- pure $ resolveDecls [ ("Unit", unitId) ] $
-    forceDeclarations [text|
-      interface TestingOps A B =
-        | checkEqual : A -> B -> <Unit>
-    |]
+        forceDeclarations [text|
+          interface TestingOps A B =
+            | checkEqual : A -> B -> <Unit>
+        |]
 
   Just (checkingOpsId, _) <- pure $ namedInterface "TestingOps" testingDecls
 
@@ -69,7 +69,7 @@ unitTests = do
               -- Just (listfId, _) <- pure $ namedData "ListF" Frank.resolvedDecls
               -- Just (pairId,  _) <- pure $ namedData "Pair"  Frank.resolvedDecls
               Just stateCid <- pure $
-                Frank.resolvedDecls ^?  globalCids . to HashMap.fromList . ix "State"
+                Frank.resolvedDecls ^?  globalCids . ix "State"
               let
                test = forceTm [text|
                  letrec
@@ -132,12 +132,6 @@ unitTests = do
                -- lcons x xs = lfixTm (DataConstructor listfId 1 [x, xs])
                -- lnil       = lfixTm (DataConstructor listfId 0 [])
 
-               resolutionState = fromList $
-                 -- Provides State, List, Pair
-                 Frank.resolvedDecls ^. globalCids <>
-                 testingDecls ^. globalCids <>
-                 [("Int", intId)]
-
               Just (listId, _) <- pure $ namedData "ListF" Frank.resolvedDecls
 
               let store = storeOf $ toIpld <$>
@@ -149,7 +143,7 @@ unitTests = do
                     , cVal
                     ]
 
-              Right test' <- pure $ resolveTm resolutionState test
+              Right test' <- pure $ resolve test
               let test'' = substituteAll
                     [ ("add", add)
                     , ("get", get)
@@ -266,14 +260,7 @@ unitTests = do
          in checkEqual actual1! expected1! -- TODO actual2! expected2!
          |]
 
-         -- TODO check if these are used
-       let resolutionState = fromList $
-             -- Provides State, List, Pair
-             Frank.resolvedDecls ^. globalCids <>
-             testingDecls ^. globalCids <>
-             [("Int", intId)]
-
-       Right tm' <- pure $ resolveTm resolutionState tm
+       Right tm' <- pure $ resolve tm
        let tm'' = substituteAll
              [ ("checkEqual", checkEqual)
              ]

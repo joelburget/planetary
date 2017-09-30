@@ -10,7 +10,6 @@ module Planetary.Core.Eval.Test (unitTests, runTest, mkLogger) where
 import Control.Lens
 import Control.Monad.Reader (asks)
 import Control.Monad.IO.Class
-import qualified Data.HashMap.Strict as HashMap
 import Data.Maybe (fromJust)
 import Data.Text (Text)
 import NeatInterpolation
@@ -20,12 +19,11 @@ import EasyTest hiding (bool, run)
 
 import Planetary.Core hiding (logIncomplete, logReturnState, logValue)
 import Planetary.Support.Ids hiding (boolId) -- XXX fix this
-import Planetary.Support.NameResolution (resolveTm)
 import Planetary.Support.Parser (forceTm)
 import Planetary.Support.Pretty
+import Planetary.Library
 import qualified Planetary.Library.FrankExamples as Frank
 import Planetary.Library.HaskellForeign (mkForeignTm, haskellOracles, intOpsId)
-import qualified Planetary.Library.HaskellForeign as HaskellForeign
 
 import Data.Text.Prettyprint.Doc
 
@@ -165,21 +163,13 @@ unitTests  =
            (one,  oneVal)  = mkForeignTm @Int intId [] 1
            (two,  twoVal)  = mkForeignTm @Int intId [] 2
 
-           resolutionState = fromList $
-             -- Provides Abort, Send, State
-             (Frank.resolvedDecls ^. globalCids) ++
-             [("Int", intId)]
+       Right abortHandler <- pure $ resolve abortHandlerTm
+       Right sendHandler  <- pure $ resolve sendHandlerTm
+       Right stateHandler <- pure $ resolve stateHandlerTm
 
-       Right abortHandler <- pure $ resolveTm resolutionState abortHandlerTm
-       Right sendHandler  <- pure $ resolveTm resolutionState sendHandlerTm
-       Right stateHandler <- pure $ resolveTm resolutionState stateHandlerTm
-
-       Just abortCid <- pure $
-         Frank.resolvedDecls ^?  globalCids . to HashMap.fromList . ix "Abort"
-       Just sendCid <- pure $
-         Frank.resolvedDecls ^?  globalCids . to HashMap.fromList . ix "Send"
-       Just stateCid <- pure $
-         Frank.resolvedDecls ^?  globalCids . to HashMap.fromList . ix "State"
+       Just abortCid <- pure $ Frank.resolvedDecls ^?  globalCids . ix "Abort"
+       Just sendCid <- pure  $ Frank.resolvedDecls ^?  globalCids . ix "Send"
+       Just stateCid <- pure $ Frank.resolvedDecls ^?  globalCids . ix "State"
 
        let abortHandler' = substitute "one" one $
              substitute "two" two
@@ -228,8 +218,7 @@ unitTests  =
                       not (V"y")
 
              -- both versions of tm should be equivalent
-             resolutionState = fromList (Frank.resolvedDecls ^. globalCids)
-         Right tm2 <- pure $ resolveTm resolutionState $ forceTm [text|
+         Right tm2 <- pure $ resolve $ forceTm [text|
              let not: forall. {<Bool> -> <Bool>}
                     = \x -> case x of
                       | <False> -> <Bool.1>
@@ -262,11 +251,7 @@ unitTests  =
            -- mkFix = Command fixOpsId 0
            -- unFix = Command fixOpsId 1
 
-       Right evenodd' <- pure $ resolveTm
-         -- Provides NatF, Bool
-         (fromList (Frank.resolvedDecls ^. globalCids) <>
-          [("Fix", lfixId)])
-         evenodd
+       Right evenodd' <- pure $ resolve evenodd
 
        Just (natfId, _)  <- pure $ namedData "NatF" Frank.resolvedDecls
 
@@ -338,34 +323,20 @@ unitTests  =
              in actual1!
            |]
 
-       Right tm' <- pure $ resolveTm
-         -- Provides Text
-         (fromList (HaskellForeign.resolvedDecls ^. globalCids))
-         tm
-
-       Right tm2' <- pure $ resolveTm
-         -- Provides Text
-         (fromList (HaskellForeign.resolvedDecls ^. globalCids) <>
-         -- Provides Pair
-          fromList (Frank.resolvedDecls ^. globalCids))
-         tm2
+       Right tm'  <- pure $ resolve tm
+       Right tm2' <- pure $ resolve tm2
 
        let (foo, fooVal) = mkForeignTm @Text intId [] "foo"
            (bar, barVal) = mkForeignTm @Text intId [] "bar"
            (baz, bazVal) = mkForeignTm @Text intId [] "baz"
+           subs =
+             [ ("foo", foo)
+             , ("bar", bar)
+             , ("baz", baz)
+             ]
 
-       let tm'' = substituteAll
-             [ ("foo", foo)
-             , ("bar", bar)
-             , ("baz", baz)
-             ]
-             tm'
-           tm2'' = substituteAll
-             [ ("foo", foo)
-             , ("bar", bar)
-             , ("baz", baz)
-             ]
-             tm2'
+       let tm''  = substituteAll subs tm'
+           tm2'' = substituteAll subs tm2'
 
            store = storeOf $ toIpld <$> [fooVal, barVal, bazVal]
 

@@ -13,16 +13,15 @@ import Control.Lens
 import Control.Unification (freeze, unfreeze)
 import Control.Unification.IntVar
 import Data.ByteString (ByteString)
-import qualified Data.HashMap.Strict as HashMap
 import Data.Text (Text)
 import NeatInterpolation
 import Network.IPLD
 import EasyTest
 
 import Planetary.Core
+import Planetary.Library
 import Planetary.Library.HaskellForeign (intTy, boolTy)
 import Planetary.Library.FrankExamples as Frank
-import Planetary.Support.Ids
 import Planetary.Support.NameResolution
 import Planetary.Support.Parser
 
@@ -212,16 +211,10 @@ unitTests = scope "typechecking" $ tests
         in checkTest "SWITCH" env tm expectedTy
       ]
 
-    , let resolutionState = fromList $
-            -- provides Abort, Send, Receive
-            (Frank.resolvedDecls ^. globalCids) ++
-            [ ("Int", intId)
-            , ("Bool", boolId)
-            ]
-      in scope "check handle" $ tests
+    , scope "check handle" $ tests
 
         -- both branches should give us a bool
-        [ do Right tm <- pure $ resolveTm resolutionState $
+        [ do Right tm <- pure $ resolve $
                 forceTm [text|
                   handle abort! : [e , <Abort>]Int with
                     Abort:
@@ -230,7 +223,6 @@ unitTests = scope "typechecking" $ tests
                 |]
              Just abortId <- pure $ Frank.resolvedDecls
                 ^? globalCids
-                 . to HashMap.fromList
                  . ix "Abort"
              let abortAbility = Ability OpenAbility [(abortId, [])]
                  abortTy = SuspendedTy
@@ -247,7 +239,7 @@ unitTests = scope "typechecking" $ tests
                  expectedTy = unfreeze boolTy
              checkTest "HANDLE (abort)" env tm expectedTy
 
-        , do Right tm <- pure $ resolveTm resolutionState $
+        , do Right tm <- pure $ resolve $
                   forceTm [text|
                     handle val : [e, <Send Bool>, <Receive Bool>]Int with
                       Send Bool:

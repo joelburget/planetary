@@ -181,7 +181,7 @@ writeForeign a = do
   pure cid
 
 -- XXX
-liftBinaryOp :: (Show s, IsIpld s) => (s -> s -> s) -> Handler
+liftBinaryOp :: IsIpld s => (s -> s -> s) -> Handler
 liftBinaryOp op st
   | AppN _ [ForeignValue tyUid tySat uid1, ForeignValue _ _ uid2]
     <- st ^. evalFocus = do

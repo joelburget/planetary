@@ -1,7 +1,16 @@
 {-# language OverloadedLists #-}
 {-# language QuasiQuotes #-}
 {-# language TypeFamilies #-}
-module Planetary.Library.StrNat () where
+module Planetary.Library.StrNat (resolvedDecls) where
+
+import Data.Text (Text)
+import NeatInterpolation
+import Network.IPLD (Cid)
+
+import Planetary.Core
+import Planetary.Support.NameResolution
+import Planetary.Support.Parser
+import Planetary.Util
 
 decls = forceDeclarations [text|
 data ExprF Expr =
@@ -11,23 +20,31 @@ data ExprF Expr =
   | <catExpr Expr Expr>
 
 semantics = letrec
-  eval : forall. {<Expr <Expr>> -> <Syntax <Syntax>>}
-       = \expr -> case expr of
-         | <nat n>       -> <foreignTm n>
-         | <str str>     -> <foreignTm str>
-         | <addExpr l r> -> <cut <apply <vector l r>> <value <foreignTm add>>
-         | <catExpr l r> -> <cut <apply <vector l r>> <value <foreignTm cat>>
+  -- TODO: this is ugly
+  foreignValue
+    : forall. {<Syntax> -> <Syntax>}
+    = \x -> <Tm.2 x>
+
+  eval
+    : forall. {<Expr <Expr>> -> <Syntax <Syntax>>}
+    = \expr -> case expr of
+      | <nat n>       -> foreignValue n
+      | <str str>     -> foreignValue str
+      | <addExpr l r> -> Application (foreignValue add) (vector l r)
+      | <catExpr l r> -> Application (foreignValue cat) (vector l r)
+in eval
 |]
 
 -- TODO:
--- * define foreignTm, cut, apply, etc
 -- * sub in add, cat
 
 predefined :: UIdMap Text Cid
-predefined =
-  [ ("add", _)
-  , ("cat", _)
-  ]
+predefined = mempty -- TODO
+  -- [ ("add", _)
+  -- , ("cat", _)
+  -- , ("vector", _)
+  -- ]
 
-resolved :: ResolvedDecls
-Right resolved = resolveDecls decls predefined
+resolvedDecls :: ResolvedDecls
+resolvedDecls = mempty
+-- Right resolvedDecls = resolveDecls predefined decls

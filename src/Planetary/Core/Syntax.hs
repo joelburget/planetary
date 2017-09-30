@@ -31,7 +31,6 @@ import Data.Data
 import Data.Functor.Fixedpoint
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
-import Data.List (find)
 import Data.Map (Map)
 import Data.Semigroup ((<>))
 import Data.Set (Set)
@@ -326,7 +325,16 @@ data Spine' tm = MixedSpine
   ![tm] -- ^ normalized values
   deriving (Eq, Ord, Show, Typeable, Generic, Functor, Foldable, Traversable)
 
-type Spine = Spine' TmI
+-- a few common type synonyms
+
+type CommandDeclarationI = CommandDeclaration Cid
+type PolytypeI           = Polytype Cid
+type ValTyI              = ValTy Cid
+type TyArgI              = TyArg Cid
+type DataTypeInterfaceI  = DataTypeInterface Cid
+type EffectInterfaceI    = EffectInterface Cid
+type TmI                 = Tm Cid
+type Spine               = Spine' TmI
 
 instance IsIpld tm => IsIpld (Spine' tm)
 
@@ -358,9 +366,19 @@ data TermDecl uid = TermDecl
 data ResolvedDecls = ResolvedDecls
   { _datatypes  :: !(UIdMap Cid DataTypeInterfaceI)
   , _interfaces :: !(UIdMap Cid EffectInterfaceI)
-  , _globalCids :: ![(Text, Cid)]
-  , _terms      :: ![TermDecl Cid]
+  , _terms      :: !(UIdMap Cid TmI)
+  , _globalCids :: !(HashMap Text Cid)
   } deriving Show
+
+instance Monoid ResolvedDecls where
+  mempty = ResolvedDecls mempty mempty mempty mempty
+  ResolvedDecls d1 i1 t1 c1 `mappend` ResolvedDecls d2 i2 t2 c2
+    = ResolvedDecls (d1 <> d2) (i1 <> i2) (t1 <> t2) (c1 <> c2)
+
+makeLenses ''EffectInterface
+makeLenses ''ResolvedDecls
+makeLenses ''ConstructorDecl
+makeLenses ''DataTypeInterface
 
 -- TODO: make traversals
 -- namedData :: Text -> Traversal' ResolvedDecls DataTypeInterfaceI
@@ -368,12 +386,12 @@ data ResolvedDecls = ResolvedDecls
 
 namedData :: Text -> ResolvedDecls -> Maybe (Cid, DataTypeInterfaceI)
 namedData name decls = do
-  (_, cid) <- find ((== name) . fst) (_globalCids decls)
+  cid <- decls ^? globalCids . Lens.ix name
   (cid,) <$> _datatypes decls ^? Lens.ix cid
 
 namedInterface :: Text -> ResolvedDecls -> Maybe (Cid, EffectInterfaceI)
 namedInterface name decls = do
-  (_, cid) <- find ((== name) . fst) (_globalCids decls)
+  cid <- decls ^? globalCids . Lens.ix name
   (cid,) <$> _interfaces decls ^? Lens.ix cid
 
 namedInterfaces :: [Text] -> ResolvedDecls -> Maybe [(Cid, EffectInterfaceI)]
@@ -395,16 +413,6 @@ extendAbility
 extendAbility (Ability initAb uidMap) (Adjustment adj)
   = Ability initAb (uidMap <> adj)
 extendAbility _ _ = error "extendAbility called with non-ability"
-
--- a few common type synonyms
-
-type CommandDeclarationI = CommandDeclaration Cid
-type PolytypeI           = Polytype Cid
-type ValTyI              = ValTy Cid
-type TyArgI              = TyArg Cid
-type DataTypeInterfaceI  = DataTypeInterface Cid
-type EffectInterfaceI    = EffectInterface Cid
-type TmI                 = Tm Cid
 
 -- $ Judgements
 
@@ -603,7 +611,3 @@ instance IsIpld Kind
 instance IsIpld (DataTypeInterface Cid)
 instance IsIpld (EffectInterface Cid)
 
-makeLenses ''EffectInterface
-makeLenses ''ResolvedDecls
-makeLenses ''ConstructorDecl
-makeLenses ''DataTypeInterface
