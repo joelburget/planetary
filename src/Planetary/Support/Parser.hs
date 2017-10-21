@@ -19,13 +19,14 @@ import Control.Lens (unsnoc)
 import Control.Monad.Trans (MonadTrans(lift))
 import Control.Monad.State.Strict
 import Data.ByteString (ByteString)
+import qualified Data.ByteString.Char8 as B8
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import qualified Network.IPLD as IPLD
-import Network.IPLD (Cid, IsIpld(..), valueCid)
+import Network.IPLD (Cid, IsIpld(..), valueCid, compact)
 
 -- TODO: be suspicious of `try`, see where it can be removed
 -- http://blog.ezyang.com/2014/05/parsec-try-a-or-b-considered-harmful/
@@ -312,7 +313,10 @@ parseText = do
   str <- stringLiteral
   let (cid, ipldVal) = mkForeign @Text str
   modify (storeOf [ipldVal] <>)
-  pure (ForeignValue "Text" [] (T.pack (show cid)))
+  pure (ForeignValue "Text" [] (cidText cid))
+
+cidText :: Cid -> Text
+cidText = T.pack . B8.unpack . compact
 
 parseDataConstructor :: MonadicParsing m => m Tm'
 parseDataConstructor = angles (DataConstructor

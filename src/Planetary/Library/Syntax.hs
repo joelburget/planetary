@@ -15,12 +15,6 @@ import Planetary.Support.Ids
 import Planetary.Support.NameResolution
 import Planetary.Support.Parser
 
-import qualified Data.ByteString.Char8 as B8
-import qualified Data.Text as T
-
-cidText :: Cid -> Text
-cidText = T.pack . B8.unpack . compact
-
 vectorIdStr, uidMapIdStr, lfixIdStr :: Text
 vectorIdStr = cidText vectorId
 uidMapIdStr = cidText uidMapId
