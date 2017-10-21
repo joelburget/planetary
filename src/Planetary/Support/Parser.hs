@@ -3,10 +3,12 @@
 {-# language FlexibleContexts #-}
 {-# language FlexibleInstances #-}
 {-# language GeneralizedNewtypeDeriving #-}
+{-# language MultiParamTypeClasses #-}
 {-# language NamedFieldPuns #-}
 {-# language OverloadedStrings #-}
 {-# language PackageImports #-}
 {-# language StandaloneDeriving #-}
+{-# language TypeApplications #-}
 {-# language TypeFamilies #-}
 {-# language TupleSections #-}
 -- A simple Core Frank parser
@@ -14,11 +16,16 @@ module Planetary.Support.Parser where
 
 import Control.Applicative
 import Control.Lens (unsnoc)
+import Control.Monad.Trans (MonadTrans(lift))
+import Control.Monad.State.Strict
 import Data.ByteString (ByteString)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
+import qualified Network.IPLD as IPLD
+import Network.IPLD (Cid, IsIpld(..), valueCid)
 
 -- TODO: be suspicious of `try`, see where it can be removed
 -- http://blog.ezyang.com/2014/05/parsec-try-a-or-b-considered-harmful/
@@ -46,27 +53,32 @@ type ValTy'              = ValTy Text
 type Tm'                 = Tm Text
 
 newtype CoreParser t m a =
-  CoreParser { runCoreParser :: IndentationParserT t m a }
+  CoreParser { runCoreParser :: IndentationParserT t (StateT ValueStore m) a }
   deriving (Functor, Alternative, Applicative, Monad, Parsing
-           , IndentationParsing)
+           , IndentationParsing, MonadPlus)
 
 deriving instance DeltaParsing m => CharParsing (CoreParser Char m)
 deriving instance DeltaParsing m => CharParsing (CoreParser Token m)
 deriving instance DeltaParsing m => TokenParsing (CoreParser Char m)
 
-instance DeltaParsing m => TokenParsing (CoreParser Token m) where
-  someSpace = CoreParser $ buildSomeSpaceParser someSpace haskellCommentStyle
-  nesting = CoreParser . nesting . runCoreParser
-  semi = CoreParser $ runCoreParser semi
-  highlight h = CoreParser . highlight h . runCoreParser
-  token p = (CoreParser $ token (runCoreParser p)) <* whiteSpace
+instance Monad m => MonadState ValueStore (CoreParser t m) where
+  get   = CoreParser $ lift get
+  put s = CoreParser $ lift (put s)
 
-type MonadicParsing m = (TokenParsing m, IndentationParsing m, Monad m)
+instance DeltaParsing m => TokenParsing (CoreParser Token m) where
+  someSpace   = CoreParser $ buildSomeSpaceParser someSpace haskellCommentStyle
+  nesting     = CoreParser . nesting . runCoreParser
+  semi        = CoreParser $ runCoreParser semi
+  highlight h = CoreParser . highlight h . runCoreParser
+  token p     = (CoreParser $ token (runCoreParser p)) <* whiteSpace
+
+type MonadicParsing m
+  = (TokenParsing m, IndentationParsing m, Monad m, MonadState ValueStore m)
 
 planetaryStyle :: MonadicParsing m => IdentifierStyle m
 planetaryStyle = IdentifierStyle {
     _styleName = "Planetary"
-  , _styleStart = satisfy (\c -> isAlphaNum c || c == '_' || c == '$')
+  , _styleStart  = satisfy (\c -> isAlphaNum c || c == '_' || c == '$')
   , _styleLetter = satisfy (\c -> isAlphaNum c || c == '_' || c == '\'')
   , _styleReserved = HashSet.fromList
     -- TODO: data and interface aren't really reserved from the term language
@@ -282,9 +294,25 @@ parseLet =
 parseValue :: MonadicParsing m => m Tm'
 parseValue = choice
   [ parseDataConstructor
+  , parseText
   -- parseCommand
   , parseLambda
   ] <?> "Value"
+
+mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
+mkForeign val = let val' = toIpld val in (valueCid val', val')
+
+mkForeignTm :: IsIpld a => Cid -> Vector ValTyI -> a -> (TmI, IPLD.Value)
+mkForeignTm tyId tySat a =
+  let (cid, val) = mkForeign a
+  in (ForeignValue tyId tySat cid, val)
+
+parseText :: MonadicParsing m => m Tm'
+parseText = do
+  str <- stringLiteral
+  let (cid, ipldVal) = mkForeign @Text str
+  modify (storeOf [ipldVal] <>)
+  pure (ForeignValue "Text" [] (T.pack (show cid)))
 
 parseDataConstructor :: MonadicParsing m => m Tm'
 parseDataConstructor = angles (DataConstructor
@@ -417,12 +445,12 @@ parseLambda = Lambda
   <?> "Lambda"
 
 evalCharIndentationParserT
-  :: Monad m => CoreParser Char m a -> IndentationState -> m a
-evalCharIndentationParserT = evalIndentationParserT . runCoreParser
+  :: Monad m => CoreParser Char m a -> IndentationState -> m (a, ValueStore)
+evalCharIndentationParserT p i = runStateT (evalIndentationParserT (runCoreParser p) i) mempty
 
 evalTokenIndentationParserT
-  :: Monad m => CoreParser Token m a -> IndentationState -> m a
-evalTokenIndentationParserT = evalIndentationParserT . runCoreParser
+  :: Monad m => CoreParser Token m a -> IndentationState -> m (a, ValueStore)
+evalTokenIndentationParserT p i = runStateT (evalIndentationParserT (runCoreParser p) i) mempty
 
 data ParseLocation = ParseLocation !ByteString !Int64 !Int64
 
@@ -444,15 +472,15 @@ lowLevelRunParse ev p (ParseLocation filename row col) input
         Success t -> Right t
 
 runTokenParse
-  :: CoreParser Token Parser b -> ParseLocation -> Text -> Either String b
+  :: CoreParser Token Parser b -> ParseLocation -> Text -> Either String (b, ValueStore)
 runTokenParse = lowLevelRunParse evalTokenIndentationParserT
 
-forceDeclarations :: Text -> [Decl Text]
+forceDeclarations :: Text -> ([Decl Text], ValueStore)
 forceDeclarations str = case runTokenParse parseDecls forceLocation str of
   Left bad -> error bad
   Right result -> result
 
-forceTm :: Text -> Tm'
+forceTm :: Text -> (Tm', ValueStore)
 forceTm str = case runTokenParse parseTm forceLocation str of
   Left bad -> error bad
   Right result -> result

@@ -115,11 +115,6 @@ externals =
 ambientHandlers :: AmbientHandlers
 ambientHandlers = AmbientHandlers externals
 
-store :: ValueStore
-store =
-  [ mkForeign @Text "\b \b"
-  ]
-
 -- runIt :: IO ()
 -- runIt = print . fst =<< run env [] main
 
@@ -128,7 +123,8 @@ store =
 -- * how is this actually run?
 
 decls :: [Decl Text]
-decls = forceDeclarations [text|
+store :: ValueStore
+(decls, store) = forceDeclarations [text|
 data Zero = -- no constructors
 
 data Unit =
@@ -217,7 +213,7 @@ main = letrec
   rollback : forall X. {<LogF [<LookAhead>, <Abort>, <Console>] X> -> [<Console>]X}
            = \x -> case x of
     | <start p> -> parse p
-    | <ouched l> -> snd (textMap Console.1 eraseCharLit) (rollback l)
+    | <ouched l> -> snd (textMap Console.1 "\b \b") (rollback l)
     | <inched l k> -> input l empty (k LookAhead.0!)
 
   parse : forall X. {{[<LookAhead>, <Abort>, <Console>]X} -> [<Console>]X}

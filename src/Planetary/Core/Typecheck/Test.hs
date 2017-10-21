@@ -176,7 +176,7 @@ unitTests = scope "typechecking" $ tests
                  [ ("abcd", abcdUid)
                  , ("defg", defgUid)
                  ]
-           Right tm <- pure $ resolveTm resolutionState $ forceTm [text|
+           Right tm <- pure $ resolveTm resolutionState $ fst $ forceTm [text|
               case val of
                 | <_ x y z> -> x
                 | <_ y z> -> z
@@ -215,7 +215,7 @@ unitTests = scope "typechecking" $ tests
 
         -- both branches should give us a bool
         [ do Right tm <- pure $ resolve $
-                forceTm [text|
+                fst $ forceTm [text|
                   handle abort! : [e , <Abort>]Int with
                     Abort:
                       | <aborting -> k> -> x1
@@ -240,7 +240,7 @@ unitTests = scope "typechecking" $ tests
              checkTest "HANDLE (abort)" env tm expectedTy
 
         , do Right tm <- pure $ resolve $
-                  forceTm [text|
+                  fst $ forceTm [text|
                     handle val : [e, <Send Bool>, <Receive Bool>]Int with
                       Send Bool:
                         | <send y -> s> -> x1

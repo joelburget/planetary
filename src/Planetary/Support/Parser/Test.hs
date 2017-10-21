@@ -1,8 +1,10 @@
+{-# language FlexibleContexts #-}
 {-# language NamedFieldPuns #-}
 {-# language OverloadedLists #-}
 {-# language OverloadedStrings #-}
 {-# language PackageImports #-}
 {-# language PatternSynonyms #-}
+{-# language TypeApplications #-}
 {-# language TypeFamilies #-}
 module Planetary.Support.Parser.Test (unitTests) where
 
@@ -27,7 +29,7 @@ parserTest
   -> Test ()
 parserTest input parser expected = scope input $
   case runTokenParse parser testLocation input of
-    Right actual -> expectEq expected actual
+    Right (actual, _) -> expectEq expected actual
     Left errMsg -> fail errMsg
 
 data NestedList = NamedList Text [NestedList]
@@ -246,6 +248,15 @@ unitTests = scope "parsing" $ tests
 
   , parserTest "<A.1 x <A.0>>" parseTm
     (DataConstructor "A" 1 [V"x", DataConstructor "A" 0 []])
+
+  , let input = "f \"x\""
+        (cid, ipldVal) = mkForeign @Text "x"
+        expected = AppT (V"f") [ForeignValue "Text" [] (T.pack (show cid))]
+    in scope "text" $ case runTokenParse parseTm testLocation input of
+         Right (actual, store) -> do
+           expectEq expected actual
+           expectEq (storeOf [ipldVal]) store
+         Left errMsg -> fail errMsg
 
   -- , let defn = T.unlines
   --         [

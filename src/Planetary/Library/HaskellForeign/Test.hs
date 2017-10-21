@@ -83,7 +83,7 @@ unitTests =
          ]
 
        , scope "lfix" $ do
-         let decls = forceDeclarations [text|
+         let decls = fst $ forceDeclarations [text|
              data ListF a f =
                | <nilf>
                | <consf a f>

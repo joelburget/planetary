@@ -163,13 +163,13 @@ unitTests  =
            (one,  oneVal)  = mkForeignTm @Int intId [] 1
            (two,  twoVal)  = mkForeignTm @Int intId [] 2
 
-       Right abortHandler <- pure $ resolve abortHandlerTm
-       Right sendHandler  <- pure $ resolve sendHandlerTm
-       Right stateHandler <- pure $ resolve stateHandlerTm
+       Right abortHandler <- pure $ resolve $ fst abortHandlerTm
+       Right sendHandler  <- pure $ resolve $ fst sendHandlerTm
+       Right stateHandler <- pure $ resolve $ fst stateHandlerTm
 
-       Just abortCid <- pure $ Frank.resolvedDecls ^?  globalCids . ix "Abort"
-       Just sendCid <- pure  $ Frank.resolvedDecls ^?  globalCids . ix "Send"
-       Just stateCid <- pure $ Frank.resolvedDecls ^?  globalCids . ix "State"
+       Just abortCid <- pure $ Frank.resolvedDecls ^? globalCids . ix "Abort"
+       Just sendCid  <- pure $ Frank.resolvedDecls ^? globalCids . ix "Send"
+       Just stateCid <- pure $ Frank.resolvedDecls ^? globalCids . ix "State"
 
        let abortHandler' = substitute "one" one $
              substitute "two" two
@@ -218,7 +218,7 @@ unitTests  =
                       not (V"y")
 
              -- both versions of tm should be equivalent
-         Right tm2 <- pure $ resolve $ forceTm [text|
+         Right tm2 <- pure $ resolve $ fst $ forceTm [text|
              let not: forall. {<Bool> -> <Bool>}
                     = \x -> case x of
                       | <False> -> <Bool.1>
@@ -236,7 +236,7 @@ unitTests  =
            ]
 
        , scope "letrec" $ do
-       let evenodd = forceTm [text|
+       let evenodd = fst $ forceTm [text|
              letrec
                even : forall. {<Fix NatF> -> <Bool>}
                     = \n -> case n of
@@ -283,7 +283,7 @@ unitTests  =
          ]
 
        , scope "closures" $ do
-       let tm = forceTm [text|
+       let tm = fst $ forceTm [text|
              letrec
                const
                  : forall. {<Text> -> {<Text> -> <Text>}}
@@ -303,7 +303,7 @@ unitTests  =
              in actual1!
            |]
 
-       let tm2 = forceTm [text|
+       let tm2 = fst $ forceTm [text|
              letrec
                captureX
                  : forall. {<Text> -> <Pair {<Text> -> <Text>} <Text>>}

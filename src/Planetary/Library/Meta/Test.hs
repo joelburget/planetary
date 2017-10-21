@@ -15,5 +15,5 @@ testRunner = undefined
 -- check reflect / reify roundtrip
 unitTests :: Test ()
 unitTests = scope "meta" $ testRunner $
-  fromRight (error "expected resolution") $ resolve $ forceTm [text|
+  fromRight (error "expected resolution") $ resolve $ fst $ forceTm [text|
 |]

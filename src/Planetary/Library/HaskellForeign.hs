@@ -124,7 +124,7 @@ Right resolvedDecls = resolveDecls
   [ ("Int", intId)
   , ("Bool", boolId)
   , ("Text", textId)
-  ] $ forceDeclarations [text|
+  ] $ fst $ forceDeclarations [text|
 interface IntOps =
   | add : <Int> -> <Int> -> <Int>
   | sub : <Int> -> <Int> -> <Int>
@@ -220,11 +220,3 @@ unFix st
     traceM $ "unfix returning: " ++ show val
     pure $ st & evalFocus .~ Value val
 unFix x = traceShowM x >> throwError (FailedForeignFun "unFix")
-
-mkForeign :: IsIpld a => a -> (Cid, IPLD.Value)
-mkForeign val = let val' = toIpld val in (valueCid val', val')
-
-mkForeignTm :: IsIpld a => Cid -> Vector ValTyI -> a -> (TmI, IPLD.Value)
-mkForeignTm tyId tySat a =
-  let (cid, val) = mkForeign a
-  in (ForeignValue tyId tySat cid, val)

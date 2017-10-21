@@ -32,7 +32,7 @@ instance Exception NotEqual
 unitTests :: Test ()
 unitTests = do
   Right testingDecls <- pure $ resolveDecls [ ("Unit", unitId) ] $
-        forceDeclarations [text|
+        fst $ forceDeclarations [text|
           interface TestingOps A B =
             | checkEqual : A -> B -> <Unit>
         |]
@@ -71,7 +71,7 @@ unitTests = do
               Just stateCid <- pure $
                 Frank.resolvedDecls ^?  globalCids . ix "State"
               let
-               test = forceTm [text|
+               test = fst $ forceTm [text|
                  letrec
                    -- note: not `forall S X. {S -> <State S>X -> X}`
                    state : forall S X. {S -> {X} -> X}
@@ -165,7 +165,7 @@ unitTests = do
        -- Example from "Continuation Passing Style for Effect Handlers"
        -- - Hillerström, Lindley, Atkey, Sivaramakrishnan
        , do
-       let tm = forceTm [text|
+       let tm = fst $ forceTm [text|
          letrec
            ifthenelse : forall A. {<Bool> -> {A} -> {A} -> A}
                       = \b l r -> case b of

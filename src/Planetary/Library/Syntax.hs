@@ -27,7 +27,7 @@ uidMapIdStr = cidText uidMapId
 lfixIdStr   = cidText lfixId
 
 decls :: [Decl Text]
-decls = forceDeclarations [text|
+(decls, _) = forceDeclarations [text|
 data InitiateAbility =
   | <openAbility>
   | <closedAbility>
